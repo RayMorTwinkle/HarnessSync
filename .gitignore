@@ -5,3 +5,6 @@ dist/
 artifacts/
 .dsh/skills/
 .opencode/skills/
+
+.agents/skills/
+.claude/skills/

@@ -2,11 +2,11 @@
 
 本地优先的 AI Harness 配置管理器。独立实现，参考 [Skills Manager](https://github.com/xingkongliang/skills-manager) 的中央技能库、原生部署与版本管理思路。
 
-当前适配 **DeepSeek Harness** 与 **OpenCode V2**，提供本机 Web GUI 和 CLI，两者共用同一套核心。
+当前适配 **DeepSeek Harness、OpenCode V2、Codex 和 Claude Code**，提供本机 Web GUI 和 CLI，共用同一套核心。
 
 ## 启动
 
-需要 Node.js 22.12+ 和 Git。当前开发与验收环境为 macOS、Node.js 24、DeepSeek Harness 0.2.1-rc.2、OpenCode 2.2.7。
+需要 Node.js 22.12+ 和 Git。当前开发与验收环境为 macOS、Node.js 24、DeepSeek Harness 0.2.1-rc.2、OpenCode 2.2.7、Codex 0.167.0-alpha.3.2、Claude Code 2.1.148。
 
 ```sh
 npm install
@@ -21,7 +21,7 @@ GUI 默认地址：<http://127.0.0.1:47821>。也可以运行 `npm start`。开�
 
 ## 已实现
 
-- 全局、设备、项目作用域，默认部署给两个 Harness，可单独选择。
+- 全局、设备、项目作用域，新条目默认部署给四个 Harness，可单独选择。
 - Skills 扫描、目录导入、新建、编辑、启停、删除，保留完整资源、执行权限及额外 frontmatter。
 - 全局指令片段与变量替换；保留原生指令文件中管理区块以外的内容。
 - 按名称管理的稳定项目 ID，以及本机目录绑定。
@@ -30,6 +30,27 @@ GUI 默认地址：<http://127.0.0.1:47821>。也可以运行 `npm start`。开�
 - 源配置本地 Git 历史和版本恢复。
 - `manage-harness-sync` 管理 Skill，使 AI 通过 CLI 管理配置。
 - 本机 HTTP 服务仅监听 127.0.0.1，校验 Host、Origin 与会话 token。
+
+## 首次部署到一台机器
+
+在 GUI 的「首次初始化」中：
+
+1. **扫描本机配置**：显示真实技能目录、技能名称、完整资源指纹、同名版本、全局主指令、覆盖文件、共享指令和规则片段。异常目录单独报告，断链不阻断其他技能扫描。
+2. **安装中文管理技能**：只部署 `manage-harness-sync`，不顺带发布其他待部署变更，不改写原全局指令。
+3. **复制中文初始化提示词**：粘贴到任意已支持 Harness，让 AI 批量整理共用技能和指令。只对真正的版本差异或语义矛盾集中询问，不要求用户逐个勾选所有文件。
+
+CLI 可一次准备：
+
+```sh
+hsync onboard prepare --json
+hsync onboard show --json
+```
+
+也可以分开运行 `onboard scan` 与 `onboard bootstrap <id>`。扫描快照与提示词保存在本机 `onboarding/<id>/`，不进入源 Git。已知目录扫描不等同于全盘扫描或运行中会话的完整上下文。
+
+AI 整理源指令后，可用 `onboard stage-instructions <id> --keys <key1,key2>` 登记主全局文件的完整替换。此时原件不变；`plan` 展示完整 diff，扫描后文件变化会拒绝覆盖，`apply` 前保存快照。`onboard unstage-instructions` 可取消登记。非主文件、外部规则片段与链接不能借初始化静默删除。
+
+管理技能仅提供中文版；固定标识 `manage-harness-sync` 保留 ASCII，以兼容四种 Harness。GUI 和 Codex 元数据提供中文显示名。
 
 ## CLI 常用操作
 
@@ -42,7 +63,7 @@ hsync doctor --json
 hsync projects add 'My Project' --path /absolute/project
 hsync projects list
 
-# 导入完整 Skill；默认全局、两个 Harness
+# 导入完整 Skill；默认全局、四个 Harness
 hsync skills import /absolute/my-skill
 hsync skills import /absolute/project-skill --scope project --target PROJECT_ID
 hsync skills import /absolute/device-skill --scope device --target DEVICE_ID
@@ -86,6 +107,7 @@ hsync self-skill
   device.json             # 本机身份、变量、项目目录绑定
   state.json              # 本机文件所有权与部署收据
   deployments/            # 本机部署快照
+  onboarding/<id>/        # 初始化快照与中文提示词（不进入 Git）
 ```
 
 原生部署位置：
@@ -94,8 +116,10 @@ hsync self-skill
 | ---------------- | -------------------------------------------------------------------------- | ---------------------------------- | ------------------ |
 | DeepSeek Harness | `$DSH_HOME/AGENTS.md`，默认 `~/.dsh/AGENTS.md`                             | `$DSH_HOME/skills`                 | `.dsh/skills`      |
 | OpenCode V2      | `$XDG_CONFIG_HOME/opencode/AGENTS.md`，默认 `~/.config/opencode/AGENTS.md` | `$XDG_CONFIG_HOME/opencode/skills` | `.opencode/skills` |
+| Codex            | `$CODEX_HOME/AGENTS.md`，有非空 `AGENTS.override.md` 时优先                | `~/.agents/skills`                 | `.agents/skills`   |
+| Claude Code      | `$CLAUDE_CONFIG_DIR/CLAUDE.md`，默认 `~/.claude/CLAUDE.md`                 | `~/.claude/skills`                 | `.claude/skills`   |
 
-两个 Harness 的项目指令都写入项目根 `AGENTS.md`，因此 v0.1 项目指令必须同时适用于两者。部署采用实际文件复制，不使用软链接。
+DeepSeek、OpenCode 和 Codex 共用项目根 `AGENTS.md`，面向其中任一工具的项目指令须同时选择三者。Claude Code 使用独立的项目 `CLAUDE.md`。技能采用实际文件复制；Codex 的共享 `.agents/skills` 和 Claude 的 `.claude/skills` 可能被其他工具兼容扫描，不能将 Harness 选择理解为严格隔离。旧条目保留既有选择，不自动扩大范围。
 
 ## 变量与生效
 
@@ -109,10 +133,10 @@ hsync self-skill
 
 ## 当前边界
 
-- 当前是本机版本：**未实现远端同步、跨设备冲突合并、Claude/Codex 适配或桌面安装包**。本地 Git 历史不等于多端同步。
+- 当前是本机版本：**未实现远端同步、跨设备冲突合并或桌面安装包**。本地 Git 历史不等于多端同步。
 - 每个项目在一台机器上绑定一个目录；多 checkout/worktree 绑定待扩展。
 - 中央库 Skill 名称唯一，暂不支持同名 Skill 按作用域覆盖。
-- 自动扫描目前识别一级 `<name>/SKILL.md`；平铺 Markdown、嵌套分类、插件托管技能暂不自动导入。
+- 扫描支持最多六层分类目录、真实路径与链接入口去重，并识别平铺 Markdown。平铺技能需要先整理成目录包；插件托管和系统内置技能不自动纳管。
 - 由其他工具提供的同名 Skill 和它们的实际优先级需结合 Harness 的原生目录与会话检查；不会声称扫描结果就是全部有效上下文。
 - 拒绝写入符号链接目标，拒绝导入包含链接或特殊文件的技能包。macOS 系统 `/var`、`/tmp`、`/etc` 别名除外。
 - 一次部署中任一冲突会阻止整次部署。语义冲突需要人工或 AI 审查，不自动判定自然语言规则优先级。

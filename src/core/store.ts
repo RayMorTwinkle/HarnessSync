@@ -17,6 +17,7 @@ import {
   skillMarkdown,
   writeBundle,
   bundleHash,
+  type Bundle,
 } from "./files.ts";
 import { adapters, projectTargets } from "./adapters.ts";
 import {
@@ -268,7 +269,12 @@ export class Store {
       revision,
     );
   }
-  async saveSkill(data: unknown, id?: string, revision?: string) {
+  async saveSkill(
+    data: unknown,
+    id?: string,
+    revision?: string,
+    resources?: Bundle,
+  ) {
     const input = skillInput.parse(data);
     return this.mutate(
       `技能：${input.name}`,
@@ -282,11 +288,14 @@ export class Store {
           id: id || crypto.randomUUID(),
           name: input.name,
           description: input.description,
+          displayName:
+            input.displayName || m.skills.find((s) => s.id === id)?.displayName,
           enabled: input.enabled,
           scope: input.scope,
           source: m.skills.find((s) => s.id === id)?.source,
         };
         const bundle = id ? readBundle(this.skillPath(id)) : {};
+        if (resources) Object.assign(bundle, resources);
         const metadata = bundle["SKILL.md"]
           ? parseSkill(
               Buffer.from(bundle["SKILL.md"].content, "base64").toString(

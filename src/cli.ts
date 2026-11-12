@@ -4,16 +4,21 @@ import { Command } from "commander";
 import { Store } from "./core/store.ts";
 import { Engine, publicPlan } from "./core/engine.ts";
 import { startServer } from "./server.ts";
-import { scopeSchema } from "./shared/types.ts";
+import { scopeSchema, harnessIds } from "./shared/types.ts";
+import {
+  createOnboarding,
+  getOnboarding,
+  bootstrapOnboarding,
+  stageInstructions,
+  unstageInstructions,
+} from "./core/onboarding.ts";
 import { AppError, parseSkill } from "./core/files.ts";
 import { installSelfSkill } from "./core/self-skill.ts";
 
 const cli = new Command()
   .name("hsync")
-  .description(
-    "HarnessSync · 统一管理 DeepSeek Harness / OpenCode 的指令与 Skills",
-  )
-  .version("0.1.0")
+  .description("HarnessSync · 统一管理四种 AI Harness 的指令与技能")
+  .version("0.2.0")
   .option("--root <directory>", "配置库目录")
   .option("--json", "机器可读 JSON 输出");
 let store: Store;
@@ -31,7 +36,7 @@ const scopeOptions = (c: Command) =>
   c
     .option("--scope <kind>", "global / device / project", "global")
     .option("--target <id>", "设备或项目 ID")
-    .option("--harness <ids>", "deepseek,opencode", "deepseek,opencode");
+    .option("--harness <ids>", harnessIds.join(","), harnessIds.join(","));
 const scope = (o: any) =>
   scopeSchema.parse({
     kind: o.scope,
@@ -123,6 +128,44 @@ cli
   .command("self-skill")
   .description("将 AI 管理 Skill 安装到源配置库，之后预览部署")
   .action(run(async () => installSelfSkill(await getStore())));
+const onboard = cli
+  .command("onboard")
+  .description("扫描、安装管理技能并生成 AI 初始化提示词");
+onboard
+  .command("scan")
+  .description("保存一份可追溯的本机扫描清单")
+  .action(run(async () => createOnboarding(await getStore())));
+onboard
+  .command("show [id]")
+  .description("读取初始化扫描清单和提示词")
+  .action(run(async (id) => getOnboarding(await getStore(), id)));
+onboard
+  .command("prepare")
+  .description("扫描并仅部署管理技能，准备交给任意 Harness 的提示词")
+  .action(
+    run(async () => {
+      const s = await getStore();
+      const record = await createOnboarding(s);
+      return bootstrapOnboarding(s, record.id);
+    }),
+  );
+onboard
+  .command("bootstrap <id>")
+  .description("给检测到的 Harness 安装或更新中文管理技能")
+  .action(run(async (id) => bootstrapOnboarding(await getStore(), id)));
+onboard
+  .command("stage-instructions <id>")
+  .requiredOption("--keys <keys>", "扫描指令 key，逗号分隔")
+  .description("登记主全局指令完整替换，之后必须预览并部署")
+  .action(
+    run(async (id, o) =>
+      stageInstructions(await getStore(), id, o.keys.split(",")),
+    ),
+  );
+onboard
+  .command("unstage-instructions")
+  .description("取消尚未发布的全局指令替换登记")
+  .action(run(async () => unstageInstructions(await getStore())));
 const rules = cli.command("rules").description("管理全局、设备或项目指令");
 rules
   .command("list")

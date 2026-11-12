@@ -2,46 +2,107 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
-import type { Harness, HarnessId } from "../shared/types.ts";
+import {
+  harnessIds,
+  harnessNames,
+  type Harness,
+  type HarnessId,
+} from "../shared/types.ts";
 
 export function adapters(home = os.homedir()): Harness[] {
-  const actualHome = home === os.homedir();
-  const configHome = actualHome
+  const local = home === os.homedir();
+  const conf = local
     ? process.env.XDG_CONFIG_HOME || path.join(home, ".config")
     : path.join(home, ".config");
-  const ds = actualHome
+  const ds = local
     ? process.env.DSH_HOME || path.join(home, ".dsh")
     : path.join(home, ".dsh");
-  const agents = actualHome
+  const agents = local
     ? process.env.DSH_AGENTS_HOME || path.join(home, ".agents")
     : path.join(home, ".agents");
-  return [
-    {
-      id: "deepseek",
-      name: "DeepSeek Harness",
-      home: ds,
-      instructions: path.join(ds, "AGENTS.md"),
-      skills: path.join(ds, "skills"),
-      sharedSkills: [path.join(agents, "skills")],
-      note: "Skills 由文件监听刷新；指令通过文件操作或恢复会话刷新。新会话可确保加载。",
-    },
-    {
-      id: "opencode",
-      name: "OpenCode",
-      home: path.join(configHome, "opencode"),
-      instructions: path.join(configHome, "opencode", "AGENTS.md"),
-      skills: path.join(configHome, "opencode", "skills"),
-      sharedSkills: [
-        path.join(home, ".agents/skills"),
-        path.join(home, ".claude/skills"),
-      ],
-      note: "已适配 OpenCode V2 原生目录。指令在后续请求前刷新；运行中的会话是否已加载需单独验证。",
-    },
-  ].map((h) => ({
-    ...h,
-    id: h.id as HarnessId,
+  const codex = local
+    ? process.env.CODEX_HOME || path.join(home, ".codex")
+    : path.join(home, ".codex");
+  const claude = local
+    ? process.env.CLAUDE_CONFIG_DIR || path.join(home, ".claude")
+    : path.join(home, ".claude");
+  const override = path.join(codex, "AGENTS.override.md");
+  const hasOverride =
+    fs.existsSync(override) &&
+    fs.statSync(override).isFile() &&
+    fs.statSync(override).size > 0;
+  const roots = {
+    deepseek: ds,
+    opencode: path.join(conf, "opencode"),
+    codex,
+    claude,
+  };
+  const instructions = {
+    deepseek: path.join(ds, "AGENTS.md"),
+    opencode: path.join(conf, "opencode/AGENTS.md"),
+    codex: hasOverride ? override : path.join(codex, "AGENTS.md"),
+    claude: path.join(claude, "CLAUDE.md"),
+  };
+  const sources: Record<HarnessId, Harness["instructionSources"]> = {
+    deepseek: [
+      { path: instructions.deepseek, kind: "main", active: true },
+      { path: path.join(agents, "AGENTS.md"), kind: "shared", active: true },
+    ],
+    opencode: [{ path: instructions.opencode, kind: "main", active: true }],
+    codex: [
+      {
+        path: path.join(codex, "AGENTS.md"),
+        kind: "main",
+        active: !hasOverride,
+      },
+      { path: override, kind: "override", active: hasOverride },
+    ],
+    claude: [{ path: instructions.claude, kind: "main", active: true }],
+  };
+  const rules = path.join(claude, "rules");
+  if (fs.existsSync(rules)) {
+    const walk = (dir: string, depth = 0) => {
+      if (depth > 6) return;
+      try {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+          const p = path.join(dir, e.name);
+          if (e.isDirectory()) walk(p, depth + 1);
+          else if (e.isFile() && e.name.endsWith(".md"))
+            sources.claude.push({ path: p, kind: "rules", active: true });
+        }
+      } catch {
+        /* scanner separately reports inaccessible known roots */
+      }
+    };
+    walk(rules);
+  }
+  return harnessIds.map((id) => ({
+    id,
+    name: harnessNames[id],
+    home: roots[id],
+    instructions: instructions[id],
+    skills:
+      id === "codex"
+        ? path.join(home, ".agents/skills")
+        : path.join(roots[id], "skills"),
+    sharedSkills:
+      id === "deepseek"
+        ? [path.join(agents, "skills")]
+        : id === "opencode"
+          ? [path.join(home, ".agents/skills"), path.join(claude, "skills")]
+          : id === "codex"
+            ? [path.join(codex, "skills")]
+            : [],
+    instructionSources: sources[id],
     version: null,
-    installed: fs.existsSync(h.home),
+    installed: fs.existsSync(roots[id]),
+    note: {
+      deepseek: "Skills 由目录监听刷新；指令在文件操作或恢复会话时刷新。",
+      opencode: "适配 OpenCode V2；原生指令在后续请求前刷新。",
+      codex:
+        "使用共享 .agents/skills；兼容旧 .codex/skills 扫描。全局 override 存在时优先。",
+      claude: "使用原生 CLAUDE.md 和 .claude/skills，兼容本机较早版本。",
+    }[id],
   }));
 }
 let versions: Record<string, string | null> | null = null;
@@ -51,6 +112,8 @@ export function harnessVersions() {
   for (const [id, exe] of [
     ["deepseek", "dsh"],
     ["opencode", "opencode"],
+    ["codex", "codex"],
+    ["claude", "claude"],
   ]) {
     try {
       versions[id] = execFileSync(exe, ["--version"], {
@@ -65,11 +128,22 @@ export function harnessVersions() {
   return versions;
 }
 export function projectTargets(harness: HarnessId, dir: string) {
+  const folders = {
+    deepseek: ".dsh/skills",
+    opencode: ".opencode/skills",
+    codex: ".agents/skills",
+    claude: ".claude/skills",
+  };
   return {
-    instructions: path.join(dir, "AGENTS.md"),
-    skills: path.join(
+    instructions: path.join(
       dir,
-      harness === "deepseek" ? ".dsh/skills" : ".opencode/skills",
+      harness === "claude" ? "CLAUDE.md" : "AGENTS.md",
     ),
+    skills: path.join(dir, folders[harness]),
   };
 }
+export const sharedInstructionPeers: HarnessId[] = [
+  "deepseek",
+  "opencode",
+  "codex",
+];

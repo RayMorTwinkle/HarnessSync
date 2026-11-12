@@ -28,6 +28,22 @@
 
 ## 共用边界
 
-同一项目只有一个原生根 `AGENTS.md`，因此第一版只允许项目指令选择两个 Harness。项目技能各用原生独立目录，可单独选择。
+DeepSeek、OpenCode、Codex 共用项目根 `AGENTS.md`，项目指令面向其中任一工具时需要同时选择三者。Claude Code 使用独立项目 `CLAUDE.md`，兼容本机较早版本。项目技能可以选择独立原生目录，但共享兼容目录会影响其他工具的可见性，计划会给出提示。
 
 本机原有全局技能、共享兼容目录、插件与自定义配置可能提供额外内容。GUI 列出的“目标技能”是管理器计划部署的集合，不能当成模型当前上下文的完整清单。权限和资源依赖也不由文件复制统一。
+
+## Codex · v0.2 新增
+
+- 本机版本：`0.167.0-alpha.3.2`；原生用户技能目录为 `~/.agents/skills`，旧 `~/.codex/skills` 只作为兼容扫描来源。
+- 全局指令默认 `$CODEX_HOME/AGENTS.md`；存在非空 `AGENTS.override.md` 时选用覆盖文件，扫描同时展示两者。
+- 项目技能使用 `.agents/skills`，项目指令使用 `AGENTS.md`。技能元数据可自动发现、正文按需加载；命名重复不应推断为内容合并。
+- 已用真实只读 `codex exec` 会话读取中文安装副本并调用 `doctor --json`，返回退出码 0、健康且零待部署项。
+- 依据：[OpenAI Skills 文档](https://learn.chatgpt.com/docs/build-skills)、[全局指令发现](https://learn.chatgpt.com/docs/agent-configuration/agents-md)。
+
+## Claude Code · v0.2 新增
+
+- 本机版本：`2.1.148`；原生用户技能目录为 `~/.claude/skills`，全局指令为 `~/.claude/CLAUDE.md`。
+- 项目使用 `.claude/skills` 和 `CLAUDE.md`，不依赖较新版本对 `AGENTS.md` 的支持。扫描额外列出用户 `.claude/rules` Markdown 片段。
+- 中文管理包已部署至原生目录；真实 `claude --print` 会话读取中文安装副本并成功调用 CLI。该次结果证明可调用性；没有把模型自行选择的具体加载来源或所有已有会话更新视为已验证。
+- 原有全局 `CLAUDE.md` 内容保持；初始化引导阶段只部署管理技能。
+- 依据：[Claude Skills](https://code.claude.com/docs/en/skills)、[Claude 指令](https://code.claude.com/docs/en/memory)。

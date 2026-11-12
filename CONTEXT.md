@@ -15,7 +15,9 @@
 - `src/core/store.ts`：持久化、输入校验、锁、乐观版本检查、项目、设备、Git。
 - `src/core/engine.ts`：指令合成、变量、原生差异、冲突、事务部署、回滚、只读扫描。
 - `src/core/files.ts`：原子文件写入、完整技能包、权限、链接检查、frontmatter。
-- `src/core/adapters.ts`：DeepSeek Harness 和 OpenCode 原生位置。
+- `src/core/scanner.ts`：真实目录去重、完整包指纹、指令来源与异常清单。
+- `src/core/onboarding.ts`：扫描快照、仅管理技能引导部署、中文交接提示词、主指令替换登记。
+- `src/core/adapters.ts`：四种 Harness 的原生位置。
 - `src/core/self-skill.ts`：从仓库内模板安装管理 Skill，注入本机 CLI 路径。
 - `src/server.ts`：只监听本机的 HTTP API 与前端服务。
 - `src/cli.ts`：CLI。`src/ui/`：React GUI。
@@ -34,4 +36,4 @@ GUI 不直接操作文件；CLI 和 HTTP 调用同一个 core。
 
 ## 当前范围
 
-先完成本机 DeepSeek Harness / OpenCode V2 的 GUI 与 CLI。远端同步、内容三方合并、多个本机路径绑定、Claude/Codex 适配及桌面封装留待后续；未将其伪装成现成功能。
+本机已适配 DeepSeek、OpenCode、Codex、Claude Code，并提供扫描—管理技能安装—中文提示词交接的初始化流程。初始化不自动挑选同名变体或解决自然语言冲突。远端同步、内容三方合并、多个本机路径绑定及桌面封装留待后续。

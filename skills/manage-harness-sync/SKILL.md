@@ -1,39 +1,43 @@
 ---
 name: manage-harness-sync
-description: Manage HarnessSync shared skills, instructions, device variables and named projects. Use when asked to add, edit, deploy, inspect or roll back local AI harness configuration.
+description: 管理 HarnessSync 的共享技能、全局指令、设备变量与命名项目；用于本机首次初始化、扫描整理、配置新增修改、部署检查及回滚。
 ---
 
-# Manage HarnessSync
+# HarnessSync 配置管理
 
-Use the local CLI to manage shared configuration for DeepSeek Harness and OpenCode.
+通过统一 CLI 管理 DeepSeek Harness、OpenCode、Codex 和 Claude Code。技能说明仅提供中文版；`manage-harness-sync` 是跨工具兼容的固定标识。
 
-CLI: `__HSYNC_CLI__`
+本机 CLI：`__HSYNC_CLI__`
 
-The installer replaces the CLI placeholder with this installation's exact path. For a manually installed copy, use `hsync` from PATH.
+安装程序会填入这次安装的准确路径。手动安装时也可使用 PATH 中的 `hsync`。
 
-## Working with configuration
+## 首次初始化
 
-- Start with `status --json` to inspect source, device, project bindings, changes and conflicts. `doctor --json` checks the current deployment without writing to an initialized store.
-- Use `--help` on unfamiliar command groups. Source commands are `rules`, `skills`, `projects`, and `device`.
-- Edit source through the CLI; avoid editing generated native files.
-- After a source change, run `plan --json`. Review affected paths, then `apply --plan <id>` when deployment is within the user's authorized request. A stale plan must be regenerated.
-- Use `history` for source commits and deployments. `restore <commit>` restores source and creates a new commit; `rollback <deployment-id>` restores native files, newest deployment first.
-- Report filesystem deployment separately from session loading. A successful `doctor` alone does not prove that a running session loaded the change.
+收到初始化提示词时，先读取 [初始化流程](references/onboarding.md)，再按提示词中的清单 ID 查询本机扫描快照。无需让用户逐个选择所有技能，只对真正存在歧义的事项集中询问。
 
-## Creating skills and instructions
+## 配置操作
 
-Create a directory bundle with `SKILL.md`, then run `skills import /absolute/skill-directory`. Scripts, executable bits, references, assets and extra frontmatter are preserved. Use `skills edit <id> --file /absolute/SKILL.md` for body edits while retaining resources.
+- 先运行 `status --json` 查看源配置、设备、项目绑定与待部署变更。`doctor --json` 在已初始化的库上执行只读检查。
+- 不熟悉的命令先查看 `--help`。源配置命令分组是 `rules`、`skills`、`projects` 和 `device`。
+- 通过 CLI 修改源配置，避免直接编辑生成的原生文件。
+- 修改后运行 `plan --json`，核对影响的路径；在用户已授权的范围内执行 `apply --plan <id>`。计划过期就重新生成。
+- `history` 查看源版本和部署记录；`restore <commit>` 恢复源配置并产生新提交；`rollback <deployment-id>` 从最近一次有效部署开始恢复原生文件。
+- 区分文件部署与会话加载。`doctor` 成功不能单独证明运行中的会话已经加载新配置。
 
-The default scope is global and both harnesses. Add `--scope project --target <project-id>` for a project, `--scope device --target <device-id>` for this device, or `--harness deepseek` / `--harness opencode` to select a harness. Project instructions share one `AGENTS.md` and must target both harnesses in v0.1; project skills can select either.
+## 技能与指令
 
-For instructions, use `rules add --title <title> --file /absolute/rules.md`. Variables are resolved in instruction fragments: `{{device.name}}`, `{{device.home}}`, `{{device.id}}`, `{{project.name}}`, `{{project.path}}`, `{{vars.KEY}}`. Skill resources remain byte-for-byte copies.
+技能使用包含 `SKILL.md` 的完整目录，通过 `skills import /完整/技能目录` 导入。脚本、执行权限、参考资料、资源文件和额外元数据都会保留。用 `skills edit <id> --file /完整/SKILL.md` 修改正文并保留资源。
 
-`skills import <native-directory> --adopt` explicitly takes ownership of a matching native skill directory. This allows later updates and removal. Ordinary import leaves the original unmanaged. For an already imported skill, adoption requires the native directory and library bundle to be identical.
+默认共享给四个 Harness。项目专属使用 `--scope project --target <项目ID>`，设备专属使用 `--scope device --target <设备ID>`；`--harness codex` 等参数选择工具。DeepSeek、OpenCode、Codex 共用项目 `AGENTS.md`，面向其中任一工具的项目指令需要同时选择三者；Claude Code 使用独立 `CLAUDE.md`。项目技能可以分别选择。
 
-## Limits
+使用 `rules add --title 标题 --file /完整/指令.md` 添加指令。指令变量包括 `{{device.name}}`、`{{device.home}}`、`{{device.id}}`、`{{project.name}}`、`{{project.path}}`、`{{vars.KEY}}`。技能资源不做模板替换。
 
-Do not overwrite foreign files or ignore deployment drift. Keep device paths and variables local; do not place credentials in instructions or skills.
+`skills import <原生目录> --adopt` 表示显式接管该目录，后续允许更新和撤下。普通导入保留原目录的外部管理状态；对已入库技能接管其他原生副本时，完整内容必须一致。
 
-The CLI follows the harness's filesystem permissions. If a mutation is denied by its sandbox, report the required paths and use the harness's available approval mechanism. Do not claim a denied mutation succeeded.
+## 边界
 
-Source saves create local Git commits. Remote multi-device synchronization is not implemented in v0.1.
+不要覆盖外部同名文件，也不要忽略部署偏离。设备路径和变量留在本机；凭证不应进入指令或技能。
+
+CLI 遵守 Harness 的沙箱权限。写入被拒绝时，说明需要哪些目录权限，并使用该 Harness 可用的授权机制，不得声称操作已经成功。
+
+源配置保存后产生本地 Git 提交；远端多设备同步仍未实现。

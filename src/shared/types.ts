@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-export const harnessIds = ["deepseek", "opencode"] as const;
+import { harnessIds } from "./harnesses.ts";
+export { harnessIds, harnessNames } from "./harnesses.ts";
 export type HarnessId = (typeof harnessIds)[number];
 export const scopeSchema = z
   .object({
@@ -29,6 +30,7 @@ export const skillInput = z.object({
     .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/)
     .max(64),
   description: z.string().trim().min(1).max(2000),
+  displayName: z.string().trim().min(1).max(100).optional(),
   body: z.string().max(256_000),
   enabled: z.boolean().default(true),
   scope: scopeSchema.default({ kind: "global", harnesses: [...harnessIds] }),
@@ -65,6 +67,11 @@ export type Harness = {
   instructions: string;
   skills: string;
   sharedSkills: string[];
+  instructionSources: {
+    path: string;
+    kind: "main" | "override" | "shared" | "rules";
+    active: boolean;
+  }[];
   note: string;
 };
 export type Receipt = {
@@ -75,7 +82,10 @@ export type Receipt = {
   sourceId?: string;
   projectId?: string;
 };
-export type DeployState = { receipts: Receipt[] };
+export type DeployState = {
+  receipts: Receipt[];
+  instructionReplacements?: { path: string; hash: string }[];
+};
 export type Change = {
   path: string;
   kind: Receipt["kind"];
@@ -96,6 +106,7 @@ export type Plan = {
   revision: string;
   changes: Change[];
   errors: string[];
+  warnings?: string[];
   createdAt: string;
 };
 export type Snapshot = {
@@ -123,6 +134,11 @@ export type DiscoveredSkill = {
   valid: boolean;
   error?: string;
   managed: boolean;
+  paths: string[];
+  hash?: string;
+  projectIds: string[];
+  linked: boolean;
+  entryFile?: string;
 };
 export type Inspection = {
   skills: DiscoveredSkill[];
@@ -131,5 +147,47 @@ export type Inspection = {
     path: string;
     exists: boolean;
     body: string;
+    key: string;
+    harnesses: HarnessId[];
+    kind: "main" | "override" | "shared" | "rules";
+    active: boolean;
+    hash?: string;
+    error?: string;
+    managed: boolean;
   }[];
+  roots: {
+    path: string;
+    harnesses: HarnessId[];
+    exists: boolean;
+    error?: string;
+  }[];
+  warnings: string[];
+  duplicates: {
+    name: string;
+    keys: string[];
+    variants: number;
+    unverified: number;
+  }[];
+  summary: {
+    physicalSkills: number;
+    names: number;
+    validSkills: number;
+    instructionFiles: number;
+    instructionVariants: number;
+    nameConflicts: number;
+  };
+};
+
+export type Onboarding = {
+  id: string;
+  createdAt: string;
+  inventory: Inspection;
+  inventoryPath: string;
+  prompt: string;
+  promptPath: string;
+  bootstrap?: {
+    deploymentId: string | null;
+    targets: HarnessId[];
+    changes: number;
+  };
 };

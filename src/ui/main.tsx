@@ -49,14 +49,23 @@ import type {
   Change,
 } from "../shared/types.ts";
 import "./style.css";
+import { harnessIds, harnessNames } from "../shared/harnesses.ts";
+import { OnboardingPanel } from "./OnboardingPanel.tsx";
 
 type Page =
-  "overview" | "skills" | "instructions" | "projects" | "history" | "device";
+  | "overview"
+  | "skills"
+  | "instructions"
+  | "projects"
+  | "onboarding"
+  | "history"
+  | "device";
 const navigation: { id: Page; title: string; icon: typeof Box }[] = [
   { id: "overview", title: "工作台", icon: LayoutDashboard },
   { id: "skills", title: "技能库", icon: Box },
   { id: "instructions", title: "全局指令", icon: FileText },
   { id: "projects", title: "项目", icon: Folder },
+  { id: "onboarding", title: "首次初始化", icon: Sparkles },
   { id: "history", title: "版本与部署", icon: History },
   { id: "device", title: "设备与变量", icon: Settings2 },
 ];
@@ -111,7 +120,15 @@ const HarnessIcon = ({
       <span className="whale">D</span>
     ) : (
       <span className="oc-symbol">
-        o<span>c</span>
+        {id === "codex" ? (
+          "C"
+        ) : id === "claude" ? (
+          "✳"
+        ) : (
+          <>
+            o<span>c</span>
+          </>
+        )}
       </span>
     )}
   </span>
@@ -297,7 +314,7 @@ function App() {
           <div className="local-status">
             <span className="status-dot" />
             <span>本地服务运行中</span>
-            <span className="version">v0.1</span>
+            <span className="version">v0.2</span>
           </div>
           <button className="device-mini" onClick={() => setPage("device")}>
             <span className="device-avatar">
@@ -365,6 +382,8 @@ function App() {
                       "用项目身份关联配置，目录只是它在这台设备上的位置。",
                     history: "源配置由 Git 留存，原生文件部署可以独立回滚。",
                     device: "设备变量与本地目录绑定保存在这台计算机。",
+                    onboarding:
+                      "先建立清单与管理入口，再让你常用的 AI 协助整理。",
                   }[page]
                 }
               </p>
@@ -381,8 +400,24 @@ function App() {
               )}
             </button>
           </div>
+          {page === "onboarding" && (
+            <OnboardingPanel request={api} refresh={refresh} />
+          )}
           {page === "overview" && (
             <>
+              <div className="onboarding-entry">
+                <span>
+                  <Sparkles size={16} />
+                  第一次在这台机器使用？让 AI 帮你整理已有配置。
+                </span>
+                <button
+                  className="text-button"
+                  onClick={() => setPage("onboarding")}
+                >
+                  开始本机初始化
+                  <ArrowRight size={14} />
+                </button>
+              </div>
               <section className="stats-grid">
                 {[
                   {
@@ -404,9 +439,9 @@ function App() {
                   {
                     label: "已连接 Harness",
                     value: data.harnesses.filter((h) => h.installed).length,
-                    unit: "/ 2",
+                    unit: `/ ${data.harnesses.length}`,
                     icon: Layers3,
-                    sub: "DeepSeek · OpenCode",
+                    sub: "DeepSeek · OpenCode · Codex · Claude",
                     go: "overview",
                   },
                   {
@@ -441,7 +476,8 @@ function App() {
               <section className="section harness-section">
                 <div className="section-heading">
                   <h2>
-                    你的 Harness <span className="count-badge">2</span>
+                    你的 Harness{" "}
+                    <span className="count-badge">{data.harnesses.length}</span>
                   </h2>
                   <span className="muted tiny">
                     <span className="status-dot" />
@@ -536,7 +572,7 @@ function App() {
                             <Box size={19} />
                           </span>
                           <span className="skill-row-copy">
-                            <strong>{s.name}</strong>
+                            <strong>{s.displayName || s.name}</strong>
                             <span>{s.description}</span>
                           </span>
                           <ScopeLabel scope={s.scope} data={data} />
@@ -731,7 +767,7 @@ function App() {
                         className="skill-card-main"
                         onClick={() => editSkill(s)}
                       >
-                        <h3>{s.name}</h3>
+                        <h3>{s.displayName || s.name}</h3>
                         <p>{s.description}</p>
                       </button>
                       <ScopeLabel scope={s.scope} data={data} />
@@ -741,9 +777,9 @@ function App() {
                             <HarnessIcon id={h} small key={h} />
                           ))}
                           <span>
-                            {s.scope.harnesses.length === 2
-                              ? "两个 Harness"
-                              : s.scope.harnesses[0]}
+                            {s.scope.harnesses.length === harnessIds.length
+                              ? "全部 Harness"
+                              : `${s.scope.harnesses.length} 个 Harness`}
                           </span>
                         </span>
                         <button
@@ -841,9 +877,9 @@ function App() {
                       <span>
                         {scopeText(r.scope)}
                         <span className="dot-separator">·</span>
-                        {r.scope.harnesses.length === 2
-                          ? "DeepSeek + OpenCode"
-                          : r.scope.harnesses[0]}
+                        {r.scope.harnesses
+                          .map((h) => harnessNames[h])
+                          .join(" + ")}
                       </span>
                       <button
                         className="text-button"
@@ -967,9 +1003,8 @@ function App() {
                 </div>
               )}
               <p className="footnote">
-                项目 Skills 分别部署到 .dsh/skills 与
-                .opencode/skills；项目指令共用
-                AGENTS.md，多个项目互不切换全局配置。
+                项目技能使用各 Harness 原生目录。DeepSeek、OpenCode、Codex 共用
+                AGENTS.md，Claude 使用 CLAUDE.md；多个项目不切换全局配置。
               </p>
             </>
           )}
@@ -1249,7 +1284,7 @@ function App() {
                                 path: s.path,
                                 scope: {
                                   kind: "global",
-                                  harnesses: ["deepseek", "opencode"],
+                                  harnesses: [...harnessIds],
                                 },
                                 revision: data.revision,
                               });
@@ -1392,7 +1427,7 @@ function ScopeFields({
                       : undefined,
                 harnesses:
                   projectInstruction && e.target.value === "project"
-                    ? ["deepseek", "opencode"]
+                    ? [...harnessIds]
                     : value.harnesses,
               })
             }
@@ -1422,12 +1457,12 @@ function ScopeFields({
       </div>
       <fieldset className="harness-options">
         <legend>部署到 Harness</legend>
-        {(["deepseek", "opencode"] as const).map((h) => (
+        {harnessIds.map((h) => (
           <label key={h}>
             <input
               type="checkbox"
               checked={value.harnesses.includes(h)}
-              disabled={projectInstruction && value.kind === "project"}
+              disabled={false}
               onChange={(e) =>
                 onChange({
                   ...value,
@@ -1438,13 +1473,14 @@ function ScopeFields({
               }
             />
             <HarnessIcon id={h} small />
-            {h === "deepseek" ? "DeepSeek Harness" : "OpenCode"}
+            {harnessNames[h]}
           </label>
         ))}
       </fieldset>
       {projectInstruction && value.kind === "project" && (
         <small className="muted">
-          两个 Harness 共用项目 AGENTS.md，项目指令需要同时适用于两者。
+          DeepSeek、OpenCode、Codex 共用项目 AGENTS.md；Claude Code 使用独立
+          CLAUDE.md。
         </small>
       )}
     </>
@@ -1475,7 +1511,7 @@ function Editor({
             description: "",
             body: "",
             enabled: true,
-            scope: { kind: "global", harnesses: ["deepseek", "opencode"] },
+            scope: { kind: "global", harnesses: [...harnessIds] },
           }),
   );
   const [formError, setFormError] = useState("");
@@ -1618,7 +1654,7 @@ function ImportForm({
   const [adopt, setAdopt] = useState(false);
   const [scope, setScope] = useState<Scope>({
     kind: "global",
-    harnesses: ["deepseek", "opencode"],
+    harnesses: [...harnessIds],
   });
   const [error, setError] = useState("");
   return (
@@ -1859,6 +1895,16 @@ function PlanDrawer({
             <X size={21} />
           </button>
         </div>
+        {(plan.warnings || []).length > 0 && (
+          <div className="plan-warnings">
+            {plan.warnings!.map((w) => (
+              <p key={w}>
+                <TriangleAlert size={15} />
+                {w}
+              </p>
+            ))}
+          </div>
+        )}
         {plan.errors.length > 0 && (
           <div className="plan-errors">
             {plan.errors.map((e) => (

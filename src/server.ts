@@ -9,6 +9,11 @@ import { Store } from "./core/store.ts";
 import { AppError, parseSkill } from "./core/files.ts";
 import { scopeSchema } from "./shared/types.ts";
 import { installSelfSkill } from "./core/self-skill.ts";
+import {
+  createOnboarding,
+  getOnboarding,
+  bootstrapOnboarding,
+} from "./core/onboarding.ts";
 
 export async function startServer(
   store: Store,
@@ -89,6 +94,12 @@ export async function startServer(
           result = { ...s, plan: publicPlan(s.plan) };
         } else if (req.method === "GET" && resource === "inspect")
           result = engine.inspect();
+        else if (req.method === "GET" && resource === "onboarding")
+          result = getOnboarding(store, id);
+        else if (req.method === "POST" && resource === "onboarding-scan")
+          result = await createOnboarding(store);
+        else if (req.method === "POST" && resource === "onboarding-bootstrap")
+          result = await bootstrapOnboarding(store, z.string().parse(body.id));
         else if (req.method === "GET" && resource === "skills" && id) {
           const skill = store.manifest().skills.find((s) => s.id === id);
           if (!skill) throw new AppError("NOT_FOUND", "Skill 不存在", 404);

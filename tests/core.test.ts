@@ -13,7 +13,7 @@ import type { Scope } from "../src/shared/types.ts";
 
 const globalScope: Scope = {
   kind: "global",
-  harnesses: ["deepseek", "opencode"],
+  harnesses: ["deepseek", "opencode", "codex", "claude"],
 };
 async function fixture(t: TestContext) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "harness-sync-test-"));
@@ -55,10 +55,10 @@ test("global templates deploy to both native files; preserve existing text and i
     scope: globalScope,
   });
   const plan = engine.plan();
-  assert.equal(plan.changes.length, 2);
+  assert.equal(plan.changes.length, 4);
   assert.equal(plan.errors.length, 0);
   const result = await engine.apply(plan.id);
-  assert.equal(result.changes, 2);
+  assert.equal(result.changes, 4);
   for (const h of harnesses) {
     const s = fs.readFileSync(h.instructions, "utf8");
     assert.ok(s.startsWith("# Existing\nKeep me.\n"));

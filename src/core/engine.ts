@@ -2,8 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { createTwoFilesPatch } from "diff";
-import { adapters, projectTargets, harnessVersions } from "./adapters.ts";
+import {
+  adapters,
+  projectTargets,
+  harnessVersions,
+  sharedInstructionPeers,
+} from "./adapters.ts";
 import { Store } from "./store.ts";
+import { scanMachine } from "./scanner.ts";
 import {
   AppError,
   atomicWrite,
@@ -119,12 +125,21 @@ export class Engine {
       );
     return `${START}\n# HarnessSync\n\n${content}\n${END}`;
   }
-  plan(): Plan {
-    const manifest = this.store.manifest();
+  plan(options: { onlySkillId?: string } = {}): Plan {
+    const source = this.store.manifest();
+    const manifest = options.onlySkillId
+      ? {
+          ...source,
+          rules: [],
+          projects: [],
+          skills: source.skills.filter((s) => s.id === options.onlySkillId),
+        }
+      : source;
     const state = this.store.state();
     const device = this.store.device();
     const changes: Change[] = [];
     const errors: string[] = [];
+    const warnings: string[] = [];
     const wanted = new Set<string>();
     if (this.pending().length)
       errors.push("有部署未完成，请先在版本与部署中回滚最新的未完成部署");
@@ -169,10 +184,22 @@ export class Engine {
               "LOCAL_DRIFT",
               "指令管理区块被外部修改；请复制修改到源指令或使用部署回滚恢复",
             );
-          const after = replaceBlock(
-            before,
-            spec.removing ? null : spec.block || null,
-          );
+          const replacement = options.onlySkillId
+            ? undefined
+            : state.instructionReplacements?.find((r) => r.path === spec.path);
+          if (replacement && change.beforeHash !== replacement.hash)
+            throw new AppError(
+              "STALE_INVENTORY",
+              "全局指令已在扫描后变化，请重新扫描再登记替换",
+            );
+          if (replacement && (!spec.block || spec.removing))
+            throw new AppError(
+              "NO_REPLACEMENT",
+              "替换全局指令前，需要先保存适用于该 Harness 的源指令",
+            );
+          const after = replacement
+            ? spec.block + "\n"
+            : replaceBlock(before, spec.removing ? null : spec.block || null);
           change.after = after;
           change.afterHash = hash(after);
           if (!after && spec.removing) change.afterHash = absent;
@@ -307,12 +334,18 @@ export class Engine {
                 r.enabled &&
                 r.scope.kind === "project" &&
                 r.scope.target === project.id &&
-                r.scope.harnesses.length !== 2,
+                sharedInstructionPeers.includes(harness.id) &&
+                sharedInstructionPeers.some((h) =>
+                  r.scope.harnesses.includes(h),
+                ) &&
+                !sharedInstructionPeers.every((h) =>
+                  r.scope.harnesses.includes(h),
+                ),
             )
           )
             throw new AppError(
               "SHARED_PROJECT_INSTRUCTIONS",
-              "两个 Harness 共用项目 AGENTS.md；第一版项目指令需选择全部 Harness，项目 Skills 可以独立选择",
+              "DeepSeek、OpenCode、Codex 共用项目 AGENTS.md；面向其中任一工具的项目指令需同时选择三者。Claude Code 使用独立 CLAUDE.md",
             );
           const block = this.instructions(rules, project.id);
           if (block)
@@ -340,7 +373,33 @@ export class Engine {
       }
     }
     for (const receipt of state.receipts)
-      if (!wanted.has(receipt.path)) add({ ...receipt, removing: true });
+      if (
+        (!options.onlySkillId || receipt.sourceId === options.onlySkillId) &&
+        !wanted.has(receipt.path)
+      )
+        add({ ...receipt, removing: true });
+    if (!options.onlySkillId)
+      for (const replacement of state.instructionReplacements || [])
+        if (!wanted.has(replacement.path))
+          errors.push(`已登记的指令替换没有适用源片段：${replacement.path}`);
+    for (const skill of manifest.skills.filter((s) => s.enabled)) {
+      if (
+        skill.scope.harnesses.includes("codex") &&
+        !["deepseek", "opencode"].every((h) =>
+          skill.scope.harnesses.includes(h as HarnessId),
+        )
+      )
+        warnings.push(
+          `${skill.name}：Codex 的 .agents/skills 也可能被 DeepSeek 和 OpenCode 读取，不能保证仅对 Codex 可见`,
+        );
+      if (
+        skill.scope.harnesses.includes("claude") &&
+        !skill.scope.harnesses.includes("opencode")
+      )
+        warnings.push(
+          `${skill.name}：Claude 的 .claude/skills 也可能被 OpenCode 兼容扫描`,
+        );
+    }
     const revision = this.store.revision();
     const id = hash(
       JSON.stringify({
@@ -352,6 +411,7 @@ export class Engine {
           c.status,
         ]),
         errors,
+        warnings,
       }),
     );
     return {
@@ -359,6 +419,7 @@ export class Engine {
       revision,
       changes,
       errors: [...new Set(errors)],
+      warnings: [...new Set(warnings)],
       createdAt: new Date().toISOString(),
     };
   }
@@ -385,7 +446,7 @@ export class Engine {
   private pending() {
     return this.deployments().filter((d) => d.status === "pending");
   }
-  async apply(expectedPlanId: string) {
+  async apply(expectedPlanId: string, options: { onlySkillId?: string } = {}) {
     return this.store.lock(() => {
       if (this.pending().length)
         throw new AppError(
@@ -393,7 +454,7 @@ export class Engine {
           "上次部署未完成，请先在历史中回滚该部署",
           409,
         );
-      const plan = this.plan();
+      const plan = this.plan(options);
       if (plan.id !== expectedPlanId)
         throw new AppError(
           "STALE_PLAN",
@@ -479,7 +540,13 @@ export class Engine {
                 ? c.afterHash
                 : hash(managedBlock(c.after) || ""),
           });
-        writeJson(path.join(this.store.root, "state.json"), { receipts });
+        writeJson(path.join(this.store.root, "state.json"), {
+          ...state,
+          receipts,
+          instructionReplacements: state.instructionReplacements?.filter(
+            (r) => !changed.some((c) => c.path === r.path),
+          ),
+        });
         record.status = "applied";
         writeJson(recordPath, record);
       } catch (e) {
@@ -545,69 +612,7 @@ export class Engine {
     });
   }
   inspect(): Inspection {
-    const found = new Map<string, Inspection["skills"][number]>();
-    const harnesses = adapters(this.store.home);
-    const manifest = this.store.manifest();
-    const device = this.store.device();
-    for (const h of harnesses) {
-      const roots = [
-        h.skills,
-        ...h.sharedSkills,
-        ...Object.values(device.bindings).map(
-          (dir) => projectTargets(h.id, dir).skills,
-        ),
-      ];
-      for (const root of new Set(roots)) {
-        if (!exists(root)) continue;
-        let entries: fs.Dirent[];
-        try {
-          entries = fs.readdirSync(root, { withFileTypes: true });
-        } catch {
-          continue;
-        }
-        for (const entry of entries) {
-          if (entry.name.startsWith(".")) continue;
-          const file = path.join(root, entry.name, "SKILL.md");
-          if (!exists(file)) continue;
-          const source = path.dirname(file);
-          const key = hash(source).slice(0, 16);
-          const prior = found.get(key);
-          if (prior) {
-            if (!prior.harnesses.includes(h.id)) prior.harnesses.push(h.id);
-            continue;
-          }
-          const item: Inspection["skills"][number] = {
-            key,
-            path: source,
-            name: entry.name,
-            description: "",
-            harnesses: [h.id],
-            valid: false,
-            managed: this.store.state().receipts.some((r) => r.path === source),
-          };
-          try {
-            const parsed = parseSkill(fs.readFileSync(file, "utf8"));
-            item.name = parsed.name;
-            item.description = parsed.description;
-            item.valid = true;
-          } catch (e: any) {
-            item.error = e.message;
-          }
-          found.set(key, item);
-        }
-      }
-    }
-    return {
-      skills: [...found.values()].sort((a, b) => a.name.localeCompare(b.name)),
-      instructions: harnesses.map((h) => ({
-        harness: h.id,
-        path: h.instructions,
-        exists: exists(h.instructions),
-        body: exists(h.instructions)
-          ? fs.readFileSync(h.instructions, "utf8")
-          : "",
-      })),
-    };
+    return scanMachine(this.store);
   }
   snapshot(): Snapshot {
     const versions =
