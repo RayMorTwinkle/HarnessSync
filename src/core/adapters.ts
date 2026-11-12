@@ -9,6 +9,13 @@ import {
   type HarnessId,
 } from "../shared/types.ts";
 
+const skillReading: Record<HarnessId | "codexLegacy", HarnessId[]> = {
+  deepseek: ["deepseek"],
+  opencode: ["opencode"],
+  codex: ["codex", "deepseek", "opencode"],
+  claude: ["claude", "opencode"],
+  codexLegacy: ["codex"],
+};
 export function adapters(home = os.homedir()): Harness[] {
   const local = home === os.homedir();
   const conf = local
@@ -76,6 +83,13 @@ export function adapters(home = os.homedir()): Harness[] {
     };
     walk(rules);
   }
+  const skillDirs = {
+    deepseek: path.join(ds, "skills"),
+    opencode: path.join(roots.opencode, "skills"),
+    codex: path.join(home, ".agents/skills"),
+    claude: path.join(claude, "skills"),
+    codexLegacy: path.join(codex, "skills"),
+  };
   return harnessIds.map((id) => ({
     id,
     name: harnessNames[id],
@@ -85,14 +99,25 @@ export function adapters(home = os.homedir()): Harness[] {
       id === "codex"
         ? path.join(home, ".agents/skills")
         : path.join(roots[id], "skills"),
-    sharedSkills:
-      id === "deepseek"
-        ? [path.join(agents, "skills")]
-        : id === "opencode"
-          ? [path.join(home, ".agents/skills"), path.join(claude, "skills")]
-          : id === "codex"
-            ? [path.join(codex, "skills")]
-            : [],
+    sharedSkills: [
+      ...new Set([
+        ...Object.entries(skillDirs)
+          .filter(
+            ([key, dir]) =>
+              dir !== skillDirs[id] &&
+              (id !== "deepseek" ||
+                key !== "codex" ||
+                agents === path.join(home, ".agents")) &&
+              (id !== "opencode" ||
+                key !== "claude" ||
+                claude === path.join(home, ".claude")) &&
+              skillReading[key as keyof typeof skillReading].includes(id),
+          )
+          .map(([, dir]) => dir),
+        ...(id === "deepseek" ? [path.join(agents, "skills")] : []),
+        ...(id === "opencode" ? [path.join(home, ".claude/skills")] : []),
+      ]),
+    ],
     instructionSources: sources[id],
     version: null,
     installed: fs.existsSync(roots[id]),
@@ -147,3 +172,97 @@ export const sharedInstructionPeers: HarnessId[] = [
   "opencode",
   "codex",
 ];
+
+export type SkillReader = {
+  dir: string;
+  readers: HarnessId[];
+  legacy?: boolean;
+};
+// Default discovery roots; plugins/custom roots are outside placement guarantees.
+export function skillReaders(home: string, projectDir?: string): SkillReader[] {
+  const hs = adapters(home);
+  const root = (id: HarnessId) =>
+    projectDir
+      ? projectTargets(id, projectDir).skills
+      : hs.find((h) => h.id === id)!.skills;
+  const shared = projectDir
+    ? root("codex")
+    : hs.find((h) => h.id === "deepseek")!.sharedSkills.at(-1)!;
+  const entries: SkillReader[] = [
+    { dir: root("deepseek"), readers: skillReading.deepseek },
+    { dir: root("opencode"), readers: skillReading.opencode },
+    {
+      dir: root("codex"),
+      readers: skillReading.codex.filter((h) => h !== "deepseek"),
+    },
+    { dir: shared, readers: ["deepseek"] },
+    {
+      dir: root("claude"),
+      readers:
+        !projectDir && root("claude") !== path.join(home, ".claude/skills")
+          ? ["claude"]
+          : skillReading.claude,
+    },
+    {
+      dir: projectDir ? root("claude") : path.join(home, ".claude/skills"),
+      readers: ["opencode"],
+    },
+  ];
+  entries.push({
+    dir: projectDir
+      ? path.join(projectDir, ".codex/skills")
+      : hs.find((h) => h.id === "codex")!.sharedSkills[0],
+    readers: skillReading.codexLegacy,
+    legacy: true,
+  });
+  const merged = new Map<string, SkillReader>();
+  for (const e of entries) {
+    const old = merged.get(e.dir);
+    merged.set(e.dir, {
+      ...e,
+      legacy: old ? Boolean(old.legacy && e.legacy) : e.legacy,
+      readers: [...new Set([...(old?.readers || []), ...e.readers])],
+    });
+  }
+  return [...merged.values()];
+}
+// DeepSeek keeps the highest-rank copy of a name and OpenCode keys skills by
+// directory name, so same-named copies collapse there (docs/adapters.md, v0.3).
+// Codex lists every copy; Claude is unverified and treated as listing them.
+const collapsesCopies: HarnessId[] = ["deepseek", "opencode"];
+export function placeSkills(
+  selected: HarnessId[],
+  readers: SkillReader[],
+): SkillReader[] {
+  if (!selected.length) return [];
+  let best: SkillReader[] | undefined;
+  let bestScore: number[] = [];
+  for (let mask = 1; mask < 2 ** readers.length; mask++) {
+    const dirs = readers.filter((_, i) => mask & (2 ** i));
+    const counts = harnessIds.map(
+      (h) => dirs.filter((d) => d.readers.includes(h)).length,
+    );
+    if (selected.some((h) => !counts[harnessIds.indexOf(h)])) continue;
+    const score = [
+      counts.reduce(
+        (sum, n, i) =>
+          sum +
+          (collapsesCopies.includes(harnessIds[i]) ? 0 : Math.max(0, n - 1)),
+        0,
+      ),
+      counts.reduce(
+        (sum, n, i) => sum + (!selected.includes(harnessIds[i]) && n ? 1 : 0),
+        0,
+      ),
+      dirs.filter((d) => d.legacy).length,
+      dirs.length,
+    ];
+    const different = score.findIndex((n, i) => n !== bestScore[i]);
+    if (!best || (different >= 0 && score[different] < bestScore[different])) {
+      best = dirs;
+      bestScore = score;
+    }
+  }
+  if (!best) throw new Error("技能读取目录无法覆盖所选 Harness");
+  return best;
+}

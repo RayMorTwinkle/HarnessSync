@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { Store } from "../src/core/store.ts";
 import { Engine } from "../src/core/engine.ts";
-import { adapters } from "../src/core/adapters.ts";
+import { adapters, placeSkills, skillReaders } from "../src/core/adapters.ts";
 import { parseSkill, skillMarkdown } from "../src/core/files.ts";
 import { startServer } from "../src/server.ts";
 import { installSelfSkill } from "../src/core/self-skill.ts";
@@ -98,8 +98,11 @@ test("skills retain resources, unknown frontmatter and executable bits across ed
   );
   await store.saveSkill({ ...skill, body: "Updated workflow" }, skill.id);
   await engine.apply(engine.plan().id);
-  for (const h of harnesses) {
-    const p = path.join(h.skills, "test-skill");
+  for (const entry of placeSkills(
+    globalScope.harnesses,
+    skillReaders(store.home),
+  )) {
+    const p = path.join(entry.dir, "test-skill");
     assert.deepEqual(
       fs.readFileSync(path.join(p, "asset.bin")),
       Buffer.from([0, 255, 18, 45]),
@@ -116,16 +119,26 @@ test("skills retain resources, unknown frontmatter and executable bits across ed
     );
   }
 });
-test("foreign skills are never overwritten, even when they have identical contents", async (t) => {
+test("identical unowned native skills are adopted without writes; different contents conflict", async (t) => {
   const { store, engine, harnesses } = await fixture(t);
   const incoming = makeSkill(path.join(harnesses[0].skills, "test-skill"));
   await store.importSkill(incoming, globalScope);
+  const stat = fs.statSync(incoming);
   assert.equal(
-    engine.plan().changes.find((c) => c.harness === "deepseek")?.status,
+    engine.plan().changes.find((c) => c.path === incoming)?.status,
+    "adopt",
+  );
+  const deployment = await engine.apply(engine.plan().id);
+  assert.equal(fs.statSync(incoming).ino, stat.ino);
+  await engine.rollback(deployment.id!);
+  assert.equal(fs.statSync(incoming).ino, stat.ino);
+  assert.equal(store.state().receipts.length, 0);
+  fs.appendFileSync(path.join(incoming, "asset.bin"), "different");
+  assert.equal(
+    engine.plan().changes.find((c) => c.path === incoming)?.status,
     "conflict",
   );
   await assert.rejects(engine.apply(engine.plan().id));
-  assert.ok(fs.existsSync(path.join(incoming, "asset.bin")));
 });
 test("explicit adoption can manage an existing native skill without replacing its content", async (t) => {
   const { store, engine, harnesses } = await fixture(t);
@@ -177,9 +190,7 @@ test("project skills and variables stay isolated from globals and other concurre
   await engine.apply(engine.plan().id);
   assert.match(fs.readFileSync(path.join(a, "AGENTS.md"), "utf8"), /Alpha at/);
   assert.ok(fs.existsSync(path.join(a, ".dsh/skills/test-skill/SKILL.md")));
-  assert.ok(
-    fs.existsSync(path.join(a, ".opencode/skills/test-skill/SKILL.md")),
-  );
+  assert.ok(fs.existsSync(path.join(a, ".claude/skills/test-skill/SKILL.md")));
   assert.ok(!fs.existsSync(path.join(b, "AGENTS.md")));
   assert.ok(!fs.existsSync(path.join(harnesses[0].skills, "test-skill")));
   assert.ok(!store.git(["show", "HEAD:manifest.json"]).includes(a));
@@ -313,7 +324,7 @@ test("self management skill resolves the real CLI path and updates in place", as
     path.join(store.skillPath(first.id), "SKILL.md"),
     "utf8",
   );
-  assert.match(body, /HarnessSync\/dist\/cli\.js/);
+  assert.ok(body.includes(path.resolve(import.meta.dirname, "../dist/cli.js")));
   assert.ok(!body.includes("/Fork/dist/cli.js"));
 });
 test("opening an initialized store and running doctor work when its directory is read-only", async (t) => {

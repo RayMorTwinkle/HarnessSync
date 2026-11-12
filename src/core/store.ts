@@ -17,6 +17,7 @@ import {
   skillMarkdown,
   writeBundle,
   bundleHash,
+  bundleDiskHash,
   type Bundle,
 } from "./files.ts";
 import { adapters, projectTargets } from "./adapters.ts";
@@ -126,7 +127,7 @@ export class Store {
         m,
         d: this.device(),
         s: this.state(),
-        skills: m.skills.map((s) => readBundle(this.skillPath(s.id))),
+        skills: m.skills.map((s) => bundleDiskHash(this.skillPath(s.id))),
       }),
     );
   }

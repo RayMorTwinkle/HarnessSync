@@ -158,7 +158,7 @@ hsync self-skill
 
 所有命令支持 `--help`。`--json` 可放在子命令后。失败返回非零退出码及 JSON 错误。若目录或配置被其他进程修改，重新获取源版本或部署计划；系统不会自动覆盖。
 
-普通导入只复制到中央库，不接管原目录。如果原生目录与库中同名，预览会显示冲突；确认要由 HarnessSync 管理时显式使用 `--adopt`。已入库的 Skill 可以接管内容完全一致的原生目录。共享兼容目录只允许普通导入。
+普通导入先复制到中央库；部署计划选择的原生目录如果完整内容与源相同，会显示“接管”，应用时仅登记收据，不重写文件。内容不同仍显示冲突。`--adopt` 可在导入时显式接管支持的原生目录；共享兼容目录使用普通导入，再检查部署计划。
 
 ## 文件布局
 
@@ -183,7 +183,7 @@ hsync self-skill
 | Codex            | `$CODEX_HOME/AGENTS.md`，有非空 `AGENTS.override.md` 时优先                | `~/.agents/skills`                 | `.agents/skills`   |
 | Claude Code      | `$CLAUDE_CONFIG_DIR/CLAUDE.md`，默认 `~/.claude/CLAUDE.md`                 | `~/.claude/skills`                 | `.claude/skills`   |
 
-DeepSeek、OpenCode 和 Codex 共用项目根 `AGENTS.md`，面向其中任一工具的项目指令须同时选择三者。Claude Code 使用独立的项目 `CLAUDE.md`。技能采用实际文件复制；Codex 的共享 `.agents/skills` 和 Claude 的 `.claude/skills` 可能被其他工具兼容扫描，不能将 Harness 选择理解为严格隔离。旧条目保留既有选择，不自动扩大范围。
+DeepSeek、OpenCode 和 Codex 共用项目根 `AGENTS.md`，面向其中任一工具的项目指令须同时选择三者。Claude Code 使用独立的项目 `CLAUDE.md`。技能采用实际文件复制；Harness 选择表示确保所选工具可读取。放置器依据读取目录表依次最小化同名重复、未选工具可见性、副本数量，平局优先非旧版目录；旧收据中的多余副本会在计划中撤下。共享目录仍可能被其他工具读取，不能将 Harness 选择理解为严格隔离。旧条目保留既有选择，不自动扩大范围。
 
 ## 变量与生效
 

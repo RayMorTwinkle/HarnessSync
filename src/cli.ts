@@ -98,6 +98,7 @@ cli
       return {
         healthy,
         errors: plan.errors,
+        warnings: plan.warnings,
         conflicts: conflicts.map((c) => ({ path: c.path, reason: c.reason })),
         pendingDeployments: pending,
         pendingChanges: plan.changes.filter(

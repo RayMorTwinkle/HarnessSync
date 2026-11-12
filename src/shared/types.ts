@@ -92,7 +92,7 @@ export type Change = {
   harness: HarnessId;
   sourceId?: string;
   projectId?: string;
-  status: "create" | "update" | "remove" | "unchanged" | "conflict";
+  status: "adopt" | "create" | "update" | "remove" | "unchanged" | "conflict";
   reason: string;
   beforeHash: string;
   afterHash: string;
