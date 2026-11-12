@@ -1,0 +1,3 @@
+interface:
+  display_name: "安装 HarnessSync"
+  short_description: "安装或升级统一配置管理器，并引导本机扫描、管理技能部署与首次初始化"

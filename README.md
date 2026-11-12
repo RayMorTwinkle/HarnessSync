@@ -1,21 +1,70 @@
 # HarnessSync
 
-本地优先的 AI Harness 配置管理器。独立实现，参考 [Skills Manager](https://github.com/xingkongliang/skills-manager) 的中央技能库、原生部署与版本管理思路。
+本地优先的 AI Harness 配置管理器：在一处管理共享技能、全局指令、设备变量和按名称识别的项目，再部署到不同 AI 工具。
 
 当前适配 **DeepSeek Harness、OpenCode V2、Codex 和 Claude Code**，提供本机 Web GUI 和 CLI，共用同一套核心。
 
-## 启动
+当前版本 **v0.2.1**。已提供本机配置管理与 Git 历史；跨设备远端同步、合并仍在后续范围内。
 
-需要 Node.js 22.12+ 和 Git。当前开发与验收环境为 macOS、Node.js 24、DeepSeek Harness 0.2.1-rc.2、OpenCode 2.2.7、Codex 0.167.0-alpha.3.2、Claude Code 2.1.148。
+## 安装
+
+需要 **Node.js 22.12+、npm、Git**。安装器面向 macOS 与 Linux；Windows 请在 WSL 内使用。目前真实 Harness 会话验收环境为 macOS；跨平台测试不能替代各 Harness 的实际会话验收。
 
 ```sh
-npm install
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.2.1/install.sh | bash
+```
+
+默认安装到 `~/.local/share/harness-sync`，命令启动器为 `~/.local/bin/hsync`。不需要 sudo，不修改 shell 配置，不自动改写已有 Harness 配置。若启动器目录不在 PATH 中，按安装器提示添加，或直接使用完整路径：
+
+```sh
+~/.local/bin/hsync --version
+~/.local/bin/hsync onboard prepare
+~/.local/bin/hsync serve
+```
+
+GUI 默认地址：<http://127.0.0.1:47821>。`serve` 需保持终端运行，按 Ctrl+C 停止；端口可用 `--port` 修改。
+
+希望先查看脚本或指定目录时：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.2.1/install.sh -o install-harness-sync.sh
+bash install-harness-sync.sh --help
+bash install-harness-sync.sh --ref v0.2.1 \
+  --install-dir "$HOME/.local/share/harness-sync" \
+  --bin-dir "$HOME/.local/bin"
+```
+
+重复运行安装器即可重装或升级到指定标签/分支。新版本构建成功后才切换 `current`，构建失败保留当前程序；旧程序版本保留，`~/.harness-sync` 配置库独立保存。更新程序不会重启已有服务；停止后重新启动 `serve`。更新管理技能可再运行 `onboard prepare`。
+
+## 让 AI 帮你安装
+
+仓库附带两个中文 Skill：
+
+- [安装 HarnessSync](skills/harness-sync-install/SKILL.md)：检查依赖、安装或升级 CLI/GUI，完成首次扫描和管理技能引导。
+- [HarnessSync 配置管理](skills/manage-harness-sync/SKILL.md)：安装后通过 CLI 管理技能、指令、设备与项目，由初始化流程部署到检测到的 Harness。
+
+可以把下面这段话交给有终端和网络权限的 AI；此方式让 AI 读取安装 Skill，不要求预先安装 HarnessSync：
+
+```text
+请读取 https://github.com/RayMorTwinkle/HarnessSync/blob/v0.2.1/skills/harness-sync-install/SKILL.md，按其中说明在本机安装 HarnessSync，并完成扫描和管理技能部署。保留原有配置，把生成的初始化提示词交给我。
+```
+
+也可把 `skills/harness-sync-install/` 完整目录放入所用 Harness 支持的用户技能目录。它不依赖仓库外的个人技能或本机固定路径。
+
+## 从源码开发
+
+当前开发与验收环境为 macOS、Node.js 24、DeepSeek Harness 0.2.1-rc.2、OpenCode 2.2.7、Codex 0.167.0-alpha.3.2、Claude Code 2.1.148。
+
+```sh
+git clone https://github.com/RayMorTwinkle/HarnessSync.git
+cd HarnessSync
+npm ci
 npm run build
 npm link --ignore-scripts
 hsync serve
 ```
 
-GUI 默认地址：<http://127.0.0.1:47821>。也可以运行 `npm start`。开发模式使用 `npm run dev`。
+也可以运行 `npm start`。开发模式使用 `npm run dev`。`npm link` 是源码开发入口；普通安装无需全局 npm 写入权限。
 
 `hsync --root /absolute/config-directory serve --port 47821` 可指定其他配置库；环境变量 `HARNESS_SYNC_HOME` 也可设置默认位置。
 
@@ -53,6 +102,19 @@ AI 整理源指令后，可用 `onboard stage-instructions <id> --keys <key1,key
 管理技能仅提供中文版；固定标识 `manage-harness-sync` 保留 ASCII，以兼容四种 Harness。GUI 和 Codex 元数据提供中文显示名。
 
 ## CLI 常用操作
+
+完整命令、参数和编辑作用域注意事项见 [CLI 命令文档](docs/cli.md)。当前可用命令组：
+
+| 命令组                          | 能力                                             |
+| ------------------------------- | ------------------------------------------------ |
+| `init / status / scan / doctor` | 初始化、扫描、查询与健康检查                     |
+| `onboard`                       | 保存清单、部署管理技能、生成 AI 初始化提示词     |
+| `skills`                        | 完整技能包导入、查看、修改、启停、删除及显式接管 |
+| `rules`                         | 添加、编辑和删除全局、设备或项目指令片段         |
+| `projects / device`             | 项目身份、目录绑定、本机名称和变量               |
+| `plan / apply`                  | 部署预览、差异检查和按计划发布                   |
+| `history / restore / rollback`  | 本地 Git 源版本和部署快照恢复                    |
+| `self-skill / serve`            | 更新中文管理技能、启动 GUI                       |
 
 ```sh
 hsync status --json
@@ -149,3 +211,7 @@ npm run build
 ```
 
 测试覆盖指令保留与外部修改、完整技能包、接管、项目隔离、变量、过期计划、并发更新、源恢复、部署回滚、只读打开以及本机 API 访问控制。真实 Harness 会话验收见 [本机验收记录](docs/local-acceptance.md)。
+
+## 参考
+
+独立实现，参考 [Skills Manager](https://github.com/xingkongliang/skills-manager) 的中央技能库、原生部署与版本管理思路。
