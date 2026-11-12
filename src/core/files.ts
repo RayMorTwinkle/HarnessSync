@@ -245,13 +245,26 @@ export function parseSkill(markdown: string) {
     !metadata ||
     typeof metadata.name !== "string" ||
     !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(metadata.name) ||
-    metadata.name.length > 64 ||
-    typeof metadata.description !== "string" ||
-    !metadata.description.trim()
-  )
+    metadata.name.length > 64
+  ) {
+    const value = metadata?.name;
+    const suggestion =
+      String(value || "my-skill")
+        .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 64)
+        .replace(/-$/, "") || "my-skill";
     throw new AppError(
       "INVALID_SKILL",
-      "Skill 需要有效的 name（小写短横线，最多 64 字符）和非空 description",
+      `无效 name：${JSON.stringify(value) ?? "缺失"}；请使用小写 kebab-case（最多 64 字符），建议：${suggestion}`,
+    );
+  }
+  if (typeof metadata.description !== "string" || !metadata.description.trim())
+    throw new AppError(
+      "INVALID_SKILL",
+      "description 为空或缺失；请填写非空技能说明",
     );
   return {
     name: metadata.name,
@@ -314,4 +327,20 @@ export function cleanStaging(stage: string) {
     );
   fs.rmSync(stage, { recursive: true, force: true });
   fs.rmSync(`${stage}.json`);
+}
+// Explicit adoption permits replacing only the final link, never writing through it.
+export function adoptedSkillHash(p: string, link: string) {
+  noSymlink(path.dirname(p));
+  if (
+    !exists(p) ||
+    !fs.lstatSync(p).isSymbolicLink() ||
+    fs.readlinkSync(p) !== link
+  )
+    throw new AppError("ADOPTION_DRIFT", `待接管链接已变化：${p}`);
+  return hash(
+    JSON.stringify({
+      link,
+      bundle: bundleHash(readBundle(fs.realpathSync(p))),
+    }),
+  );
 }

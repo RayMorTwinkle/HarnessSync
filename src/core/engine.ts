@@ -11,9 +11,11 @@ import {
   placeSkills,
 } from "./adapters.ts";
 import { Store } from "./store.ts";
+import { isIgnoredNativePath, sourceStatus } from "./skill-sources.ts";
 import { scanMachine } from "./scanner.ts";
 import {
   AppError,
+  adoptedSkillHash,
   atomicWrite,
   bundleHash,
   bundleDiskHash,
@@ -54,6 +56,8 @@ type SavedFile = {
   afterHash: string;
   mode?: number;
   adopted?: boolean;
+  link?: string;
+  beforeHash?: string;
 };
 type Deployment = {
   id: string;
@@ -179,8 +183,26 @@ export class Engine {
         diff: "",
       };
       try {
-        noSymlink(spec.path);
-        change.beforeHash = diskHash(spec.path, spec.kind);
+        if (
+          spec.kind === "skill" &&
+          !receipt &&
+          isIgnoredNativePath(this.store, spec.path)
+        ) {
+          change.reason = "外部保留：此本机入口不由 HarnessSync 管理";
+          changes.push(change);
+          return;
+        }
+        if (receipt?.adoptedLink !== undefined) {
+          if (spec.removing)
+            throw new AppError(
+              "PENDING_ADOPTION",
+              "链接尚未接管，请先完成副本替换后再撤下",
+            );
+          change.beforeHash = adoptedSkillHash(spec.path, receipt.adoptedLink);
+        } else {
+          noSymlink(spec.path);
+          change.beforeHash = diskHash(spec.path, spec.kind);
+        }
         const present = exists(spec.path);
         if (spec.kind === "instructions") {
           const before = present ? fs.readFileSync(spec.path, "utf8") : "";
@@ -274,17 +296,22 @@ export class Engine {
           );
         }
         if (change.status !== "unchanged")
-          change.reason = {
-            adopt: "内容一致，接管现有目录",
-            create: "部署新的配置",
-            update: "源配置有更新",
-            remove:
-              spec.kind === "skill" &&
-              manifest.skills.some((s) => s.id === spec.sourceId && s.enabled)
-                ? "移除重复副本或已变更的部署位置"
-                : "撤下已停用或移除的配置",
-            conflict: "",
-          }[change.status];
+          change.reason =
+            receipt?.adoptedLink !== undefined
+              ? "以副本替换链接"
+              : {
+                  adopt: "内容一致，接管现有目录",
+                  create: "部署新的配置",
+                  update: "源配置有更新",
+                  remove:
+                    spec.kind === "skill" &&
+                    manifest.skills.some(
+                      (s) => s.id === spec.sourceId && s.enabled,
+                    )
+                      ? "移除重复副本或已变更的部署位置"
+                      : "撤下已停用或移除的配置",
+                  conflict: "",
+                }[change.status];
       } catch (e: any) {
         change.status = "conflict";
         change.reason = e.message;
@@ -425,6 +452,13 @@ export class Engine {
     } catch (e: any) {
       errors.push(e.message);
     }
+    if (!options.onlySkillId) {
+      for (const p of device.ignoredNativePaths || [])
+        warnings.push(`外部保留：${p}`);
+      for (const s of sourceStatus(this.store))
+        if (s.changed || s.note.startsWith("源目录无法读取"))
+          warnings.push(`${s.name}：${s.note}`);
+    }
     const revision = this.store.revision();
     const id = hash(
       JSON.stringify({
@@ -539,6 +573,11 @@ export class Engine {
           kind: c.kind,
           existed: exists(c.path),
           afterHash: c.afterHash,
+          beforeHash: c.beforeHash,
+          ...(state.receipts.find((r) => r.path === c.path)?.adoptedLink !==
+          undefined
+            ? { link: fs.readlinkSync(c.path) }
+            : {}),
           ...(c.kind === "skill"
             ? {
                 files:
@@ -561,13 +600,22 @@ export class Engine {
       const done: SavedFile[] = [];
       try {
         for (const change of changed) {
-          if (diskHash(change.path, change.kind) !== change.beforeHash)
+          const adoption = state.receipts.find(
+            (r) => r.path === change.path,
+          )?.adoptedLink;
+          if (
+            (adoption !== undefined
+              ? adoptedSkillHash(change.path, adoption)
+              : diskHash(change.path, change.kind)) !== change.beforeHash
+          )
             throw new AppError(
               "STALE_TARGET",
               `部署过程中目标变化：${change.path}`,
               409,
             );
           if (change.status === "adopt") continue;
+          done.push(record.files.find((f) => f.path === change.path)!);
+          if (adoption !== undefined) fs.unlinkSync(change.path);
           if (change.kind === "skill") {
             if (change.status === "remove")
               fs.rmSync(change.path, { recursive: true, force: true });
@@ -593,7 +641,6 @@ export class Engine {
                   : 0o644,
               );
           }
-          done.push(record.files.find((f) => f.path === change.path)!);
         }
         const receipts = state.receipts.filter(
           (r) => !changed.some((c) => c.path === r.path),
@@ -640,6 +687,17 @@ export class Engine {
   }
   private restoreFile(f: SavedFile) {
     if (f.adopted) return;
+    if (f.link !== undefined) {
+      noSymlink(path.dirname(f.path));
+      if (exists(f.path) && fs.lstatSync(f.path).isSymbolicLink()) {
+        if (fs.readlinkSync(f.path) === f.link) return;
+        throw new AppError("ROLLBACK_DRIFT", `链接已变化：${f.path}`);
+      }
+      noSymlink(f.path);
+      fs.rmSync(f.path, { recursive: true, force: true });
+      fs.symlinkSync(f.link, f.path);
+      return;
+    }
     noSymlink(f.path);
     if (!f.existed)
       fs.rmSync(f.path, { recursive: f.kind === "skill", force: true });
@@ -665,17 +723,25 @@ export class Engine {
           409,
         );
       for (const f of record.files) {
-        const actual = diskHash(f.path, f.kind);
+        const actual =
+          record.status === "pending" &&
+          f.link !== undefined &&
+          exists(f.path) &&
+          fs.lstatSync(f.path).isSymbolicLink()
+            ? adoptedSkillHash(f.path, f.link)
+            : diskHash(f.path, f.kind);
         if (
           !matchesDiskHash(f.path, f.kind, f.afterHash) &&
           !(
             record.status === "pending" &&
-            actual ===
-              (f.existed
-                ? f.kind === "skill"
-                  ? bundleHash(f.files!)
-                  : hash(f.content!)
-                : absent)
+            (actual ===
+              (f.beforeHash ??
+                (f.existed
+                  ? f.kind === "skill"
+                    ? bundleHash(f.files!)
+                    : hash(f.content!)
+                  : absent)) ||
+              (f.link !== undefined && actual === absent))
           )
         )
           throw new AppError(
