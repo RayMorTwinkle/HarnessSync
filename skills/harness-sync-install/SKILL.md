@@ -14,8 +14,8 @@ description: 安装或升级 HarnessSync 的 CLI 与本机管理界面，并引�
 下载并查看同一固定版本的安装脚本，然后运行。默认安装到 `~/.local/share/harness-sync`，启动器为 `~/.local/bin/hsync`；用户指定目录时传入对应选项。
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.2.1/install.sh -o /tmp/harness-sync-install.sh
-bash /tmp/harness-sync-install.sh --ref v0.2.1
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.2.2/install.sh -o /tmp/harness-sync-install.sh
+bash /tmp/harness-sync-install.sh --ref v0.2.2
 ```
 
 实际执行时使用唯一临时文件，避免覆盖其他任务的 `/tmp` 文件。安装器支持 `--install-dir`、`--bin-dir`、`--ref`（标签或分支）和 `--repo`。升级可重复运行同一脚本并指定所需版本。构建失败不会切换当前版本；旧程序版本保留，配置库独立保存。
@@ -37,6 +37,6 @@ bash /tmp/harness-sync-install.sh --ref v0.2.1
 
 ## 管理界面与验收
 
-`hsync serve` 启动本机界面，默认地址 `http://127.0.0.1:47821`。需要持续运行的终端；不是后台守护进程。端口被占用时先检查是否为已有 HarnessSync，或使用 `serve --port <端口>`，不停止无关进程。
+`hsync open` 启动并自动在默认浏览器打开本机界面，别名为 `hsync gui` 和 `hsync webui`，默认地址 `http://127.0.0.1:47821`。已有同一配置库的服务时直接复用；新启动的服务需要保持终端运行，按 Ctrl+C 停止。只启动服务时使用 `hsync serve`。端口属于其他程序或另一个配置库时使用 `open --port <端口>`，不停止无关进程。无桌面环境时显示手动访问地址，不声称浏览器已打开。
 
 运行 `doctor --json` 并如实报告待部署项或冲突。它只验证文件状态，不证明运行中的 Harness 会话已加载新技能。报告安装版本、实际命令路径、GUI 地址与初始化阶段。仅升级程序时，不自动运行扫描和配置迁移。

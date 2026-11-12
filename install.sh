@@ -3,7 +3,7 @@
 set -euo pipefail
 
 repo="${HSYNC_REPO:-https://github.com/RayMorTwinkle/HarnessSync.git}"
-ref="${HSYNC_REF:-v0.2.1}"
+ref="${HSYNC_REF:-v0.2.2}"
 install_dir="${HSYNC_INSTALL_DIR:-${HOME}/.local/share/harness-sync}"
 bin_dir="${HSYNC_BIN_DIR:-${HOME}/.local/bin}"
 stage=""
@@ -16,7 +16,7 @@ usage() {
 HarnessSync 安装器
 
 用法：bash install.sh [选项]
-  --ref <tag或分支>       安装版本，默认 v0.2.1
+  --ref <tag或分支>       安装版本，默认 v0.2.2
   --install-dir <目录>    程序目录，默认 ~/.local/share/harness-sync
   --bin-dir <目录>        hsync 启动器目录，默认 ~/.local/bin
   --repo <Git地址>        源仓库，也可使用本地 Git 仓库进行验证
@@ -110,7 +110,7 @@ node -e 'const fs=require("node:fs"); fs.renameSync(process.argv[1],process.argv
 launcher_tmp=""
 link_tmp=""
 printf '\nHarnessSync 安装完成。\n程序：%s\n命令：%s\n' "$install_dir/current" "$launcher"
-printf '下一步（按需运行）：\n  %q onboard prepare\n  %q serve\n' "$launcher" "$launcher"
+printf '下一步（按需运行）：\n  %q onboard prepare\n  %q open\n' "$launcher" "$launcher"
 case ":$PATH:" in
   *":$bin_dir:"*) ;;
   *) printf '\n当前 PATH 未包含启动器目录。可使用上面的完整路径，或在 shell 中执行：\n  export PATH=%q:"$PATH"\n' "$bin_dir" ;;

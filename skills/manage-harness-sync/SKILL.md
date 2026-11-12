@@ -19,6 +19,7 @@ description: 管理 HarnessSync 的共享技能、全局指令、设备变量与
 
 - 先运行 `status --json` 查看源配置、设备、项目绑定与待部署变更。`doctor --json` 在已初始化的库上执行只读检查。
 - 不熟悉的命令先查看 `--help`。源配置命令分组是 `rules`、`skills`、`projects` 和 `device`。
+- `open`（别名 `gui`、`webui`）自动打开管理界面，复用同库服务或启动前台服务；`serve` 仅启动服务。新服务需保持终端运行，按 Ctrl+C 停止。
 - 通过 CLI 修改源配置，避免直接编辑生成的原生文件。
 - 修改后运行 `plan --json`，核对影响的路径；在用户已授权的范围内执行 `apply --plan <id>`。计划过期就重新生成。
 - `history` 查看源版本和部署记录；`restore <commit>` 恢复源配置并产生新提交；`rollback <deployment-id>` 从最近一次有效部署开始恢复原生文件。

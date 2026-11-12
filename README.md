@@ -4,14 +4,14 @@
 
 当前适配 **DeepSeek Harness、OpenCode V2、Codex 和 Claude Code**，提供本机 Web GUI 和 CLI，共用同一套核心。
 
-当前版本 **v0.2.1**。已提供本机配置管理与 Git 历史；跨设备远端同步、合并仍在后续范围内。
+当前版本 **v0.2.2**。已提供本机配置管理与 Git 历史；跨设备远端同步、合并仍在后续范围内。
 
 ## 安装
 
 需要 **Node.js 22.12+、npm、Git**。安装器面向 macOS 与 Linux；Windows 请在 WSL 内使用。目前真实 Harness 会话验收环境为 macOS；跨平台测试不能替代各 Harness 的实际会话验收。
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.2.1/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.2.2/install.sh | bash
 ```
 
 默认安装到 `~/.local/share/harness-sync`，命令启动器为 `~/.local/bin/hsync`。不需要 sudo，不修改 shell 配置，不自动改写已有 Harness 配置。若启动器目录不在 PATH 中，按安装器提示添加，或直接使用完整路径：
@@ -19,17 +19,19 @@ curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.2.1/in
 ```sh
 ~/.local/bin/hsync --version
 ~/.local/bin/hsync onboard prepare
-~/.local/bin/hsync serve
+~/.local/bin/hsync open
 ```
 
-GUI 默认地址：<http://127.0.0.1:47821>。`serve` 需保持终端运行，按 Ctrl+C 停止；端口可用 `--port` 修改。
+`hsync open` 自动打开默认浏览器，也可以使用 `hsync gui` 或 `hsync webui`。GUI 默认地址：<http://127.0.0.1:47821>；可用 `open --port 47822` 指定端口。已有同一配置库的服务时直接复用；否则启动本机服务，需保持终端运行，按 Ctrl+C 停止。`hsync serve` 仅启动服务，不打开浏览器。
+
+无法自动打开浏览器时会显示访问地址，服务仍可使用。端口属于其他程序或另一个配置库时会报错，不自动打开错误的界面。
 
 希望先查看脚本或指定目录时：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.2.1/install.sh -o install-harness-sync.sh
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.2.2/install.sh -o install-harness-sync.sh
 bash install-harness-sync.sh --help
-bash install-harness-sync.sh --ref v0.2.1 \
+bash install-harness-sync.sh --ref v0.2.2 \
   --install-dir "$HOME/.local/share/harness-sync" \
   --bin-dir "$HOME/.local/bin"
 ```
@@ -46,7 +48,7 @@ bash install-harness-sync.sh --ref v0.2.1 \
 可以把下面这段话交给有终端和网络权限的 AI；此方式让 AI 读取安装 Skill，不要求预先安装 HarnessSync：
 
 ```text
-请读取 https://github.com/RayMorTwinkle/HarnessSync/blob/v0.2.1/skills/harness-sync-install/SKILL.md，按其中说明在本机安装 HarnessSync，并完成扫描和管理技能部署。保留原有配置，把生成的初始化提示词交给我。
+请读取 https://github.com/RayMorTwinkle/HarnessSync/blob/v0.2.2/skills/harness-sync-install/SKILL.md，按其中说明在本机安装 HarnessSync，并完成扫描和管理技能部署。保留原有配置，把生成的初始化提示词交给我。
 ```
 
 也可把 `skills/harness-sync-install/` 完整目录放入所用 Harness 支持的用户技能目录。它不依赖仓库外的个人技能或本机固定路径。
@@ -114,7 +116,7 @@ AI 整理源指令后，可用 `onboard stage-instructions <id> --keys <key1,key
 | `projects / device`             | 项目身份、目录绑定、本机名称和变量               |
 | `plan / apply`                  | 部署预览、差异检查和按计划发布                   |
 | `history / restore / rollback`  | 本地 Git 源版本和部署快照恢复                    |
-| `self-skill / serve`            | 更新中文管理技能、启动 GUI                       |
+| `self-skill / open / serve`     | 更新中文管理技能、打开 GUI 或仅启动本机服务      |
 
 ```sh
 hsync status --json

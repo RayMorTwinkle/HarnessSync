@@ -14,11 +14,12 @@ import {
 } from "./core/onboarding.ts";
 import { AppError, parseSkill } from "./core/files.ts";
 import { installSelfSkill } from "./core/self-skill.ts";
+import { openWebUi, parsePort } from "./web-ui.ts";
 
 const cli = new Command()
   .name("hsync")
   .description("HarnessSync · 统一管理四种 AI Harness 的指令与技能")
-  .version("0.2.1")
+  .version("0.2.2")
   .option("--root <directory>", "配置库目录")
   .option("--json", "机器可读 JSON 输出");
 let store: Store;
@@ -338,25 +339,45 @@ device.command("unset <key>").action(
     return s.saveDevice(d);
   }),
 );
+function keepRunning(server: Awaited<ReturnType<typeof startServer>>) {
+  const stop = async () => {
+    await server.close();
+    process.exit(0);
+  };
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+}
+cli
+  .command("open")
+  .aliases(["gui", "webui"])
+  .description("打开 Web UI，复用已有服务或启动本机服务")
+  .option("--port <number>", "监听端口", "47821")
+  .action(async (o) => {
+    const result = await openWebUi(await getStore(), {
+      port: parsePort(o.port),
+    });
+    const { running, ...info } = result;
+    if (cli.opts().json) output(info);
+    else {
+      console.log(
+        `HarnessSync → ${info.url}\n${info.reused ? "已复用当前配置库的本机服务" : "本机服务已启动，按 Ctrl+C 退出"}`,
+      );
+      if (info.warning) console.error(info.warning);
+    }
+    if (running) keepRunning(running);
+  });
 cli
   .command("serve")
   .description("启动本机 GUI")
   .option("--port <number>", "监听端口", "47821")
   .option("--dev", "启用前端热更新")
   .action(async (o) => {
-    const port = Number(o.port);
-    if (!Number.isInteger(port) || port < 0 || port > 65535)
-      throw new AppError("INVALID_PORT", "端口必须为 0–65535");
+    const port = parsePort(o.port);
     const server = await startServer(await getStore(), { port, dev: o.dev });
     console.log(
       `HarnessSync → ${server.url}\n配置库 → ${store.root}\n按 Ctrl+C 退出`,
     );
-    const stop = async () => {
-      await server.close();
-      process.exit(0);
-    };
-    process.once("SIGINT", stop);
-    process.once("SIGTERM", stop);
+    keepRunning(server);
   });
 try {
   await cli.parseAsync();

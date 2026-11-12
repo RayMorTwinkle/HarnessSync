@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { Engine, publicPlan } from "./core/engine.ts";
 import { Store } from "./core/store.ts";
-import { AppError, parseSkill } from "./core/files.ts";
+import { AppError, hash, parseSkill } from "./core/files.ts";
 import { scopeSchema } from "./shared/types.ts";
 import { installSelfSkill } from "./core/self-skill.ts";
 import {
@@ -25,6 +25,11 @@ export async function startServer(
     fileURLToPath(new URL("..", import.meta.url)),
   );
   const uiRoot = options.uiDirectory || path.join(projectRoot, "dist/ui");
+  if (!options.dev && !fs.existsSync(path.join(uiRoot, "index.html")))
+    throw new AppError(
+      "UI_NOT_BUILT",
+      "未找到 Web UI，请先运行 npm run build 或重新安装 HarnessSync",
+    );
   const vite = options.dev
     ? await (
         await import("vite")
@@ -60,6 +65,12 @@ export async function startServer(
           message: "拒绝跨站请求",
         });
       const url = new URL(req.url || "/", `http://127.0.0.1:${actualPort}`);
+      if (req.method === "GET" && url.pathname === "/.well-known/harness-sync")
+        return send(200, {
+          app: "HarnessSync",
+          protocol: 1,
+          rootHash: hash(store.root),
+        });
       if (url.pathname.startsWith("/api/")) {
         if (req.headers["x-harness-sync-token"] !== token)
           return send(403, {
