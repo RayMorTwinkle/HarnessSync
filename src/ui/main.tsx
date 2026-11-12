@@ -1857,6 +1857,7 @@ function PlanDrawer({
   const [error, setError] = useState("");
   const conflicts = plan.changes.filter((c) => c.status === "conflict");
   const labels = {
+    adopt: "接管",
     create: "新增",
     update: "更新",
     remove: "撤下",

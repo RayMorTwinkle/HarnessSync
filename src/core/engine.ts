@@ -7,6 +7,8 @@ import {
   projectTargets,
   harnessVersions,
   sharedInstructionPeers,
+  skillReaders,
+  placeSkills,
 } from "./adapters.ts";
 import { Store } from "./store.ts";
 import { scanMachine } from "./scanner.ts";
@@ -14,6 +16,10 @@ import {
   AppError,
   atomicWrite,
   bundleHash,
+  bundleDiskHash,
+  matchesDiskHash,
+  stagingLeftovers,
+  cleanStaging,
   diskHash,
   exists,
   hash,
@@ -47,6 +53,7 @@ type SavedFile = {
   files?: Bundle;
   afterHash: string;
   mode?: number;
+  adopted?: boolean;
 };
 type Deployment = {
   id: string;
@@ -77,6 +84,10 @@ function replaceBlock(text: string, block: string | null) {
 }
 export class Engine {
   constructor(readonly store: Store) {}
+  private deploymentCache = new Map<
+    string,
+    { key: string; value: Deployment }
+  >();
   private matches(scope: Scope, harness: HarnessId, projectId?: string) {
     if (!scope.harnesses.includes(harness)) return false;
     if (projectId)
@@ -141,6 +152,7 @@ export class Engine {
     const errors: string[] = [];
     const warnings: string[] = [];
     const wanted = new Set<string>();
+    const stagingFingerprints: string[][] = [];
     if (this.pending().length)
       errors.push("有部署未完成，请先在版本与部署中回滚最新的未完成部署");
     const add = (spec: {
@@ -150,7 +162,7 @@ export class Engine {
       projectId?: string;
       sourceId?: string;
       block?: string | null;
-      files?: Bundle;
+      sourceHash?: string;
       removing?: boolean;
     }) => {
       if (wanted.has(spec.path)) return;
@@ -220,34 +232,38 @@ export class Engine {
             "",
           );
         } else {
-          const before = present ? readBundle(spec.path) : null;
-          change.before = before?.["SKILL.md"]
-            ? Buffer.from(before["SKILL.md"].content, "base64").toString("utf8")
-            : "";
-          if (present && !receipt)
+          change.afterHash = spec.removing ? absent : spec.sourceHash!;
+          if (present && !receipt && change.beforeHash !== change.afterHash)
             throw new AppError(
               "TARGET_CONFLICT",
-              "目标已存在且不属于 HarnessSync；先导入，或使用独立名称",
+              "目标已存在且内容不同，不属于 HarnessSync；请先导入或使用独立名称",
             );
-          if (receipt && change.beforeHash !== receipt.hash)
+          if (receipt && !matchesDiskHash(spec.path, "skill", receipt.hash))
             throw new AppError(
               "LOCAL_DRIFT",
               "已部署 Skill 被外部修改；请先导入修改或回滚部署",
             );
-          change.after = spec.files?.["SKILL.md"]
-            ? Buffer.from(spec.files["SKILL.md"].content, "base64").toString(
-                "utf8",
-              )
-            : "";
-          change.afterHash = spec.removing ? absent : bundleHash(spec.files!);
           change.status =
-            change.beforeHash === change.afterHash
-              ? "unchanged"
-              : spec.removing
-                ? "remove"
-                : present
-                  ? "update"
-                  : "create";
+            present && !receipt
+              ? "adopt"
+              : change.beforeHash === change.afterHash
+                ? "unchanged"
+                : spec.removing
+                  ? "remove"
+                  : present
+                    ? "update"
+                    : "create";
+          if (["create", "update", "remove"].includes(change.status)) {
+            change.before = present
+              ? fs.readFileSync(path.join(spec.path, "SKILL.md"), "utf8")
+              : "";
+            change.after = spec.removing
+              ? ""
+              : fs.readFileSync(
+                  path.join(this.store.skillPath(spec.sourceId!), "SKILL.md"),
+                  "utf8",
+                );
+          }
           change.diff = createTwoFilesPatch(
             spec.path + "/SKILL.md",
             spec.path + "/SKILL.md",
@@ -259,9 +275,14 @@ export class Engine {
         }
         if (change.status !== "unchanged")
           change.reason = {
+            adopt: "内容一致，接管现有目录",
             create: "部署新的配置",
             update: "源配置有更新",
-            remove: "撤下已停用或移除的配置",
+            remove:
+              spec.kind === "skill" &&
+              manifest.skills.some((s) => s.id === spec.sourceId && s.enabled)
+                ? "移除重复副本或已变更的部署位置"
+                : "撤下已停用或移除的配置",
             conflict: "",
           }[change.status];
       } catch (e: any) {
@@ -289,25 +310,6 @@ export class Engine {
           });
       } catch (e: any) {
         errors.push(`${harness.name}: ${e.message}`);
-      }
-      for (const skill of manifest.skills.filter(
-        (s) => s.enabled && this.matches(s.scope, harness.id),
-      )) {
-        try {
-          const files = readBundle(this.store.skillPath(skill.id));
-          parseSkill(
-            Buffer.from(files["SKILL.md"].content, "base64").toString("utf8"),
-          );
-          add({
-            path: path.join(harness.skills, skill.name),
-            harness: harness.id,
-            kind: "skill",
-            sourceId: skill.id,
-            files,
-          });
-        } catch (e: any) {
-          errors.push(`${skill.name}: ${e.message}`);
-        }
       }
       for (const project of manifest.projects) {
         const dir = device.bindings[project.id];
@@ -356,20 +358,46 @@ export class Engine {
               projectId: project.id,
               block,
             });
-          for (const skill of skills) {
-            const files = readBundle(this.store.skillPath(skill.id));
-            add({
-              path: path.join(targets.skills, skill.name),
-              harness: harness.id,
-              kind: "skill",
-              projectId: project.id,
-              sourceId: skill.id,
-              files,
-            });
-          }
         } catch (e: any) {
           errors.push(`${project.name}: ${e.message}`);
         }
+      }
+    }
+    for (const skill of manifest.skills.filter((s) => s.enabled)) {
+      const projectId =
+        skill.scope.kind === "project" ? skill.scope.target : undefined;
+      if (skill.scope.kind === "device" && skill.scope.target !== device.id)
+        continue;
+      const projectDir = projectId ? device.bindings[projectId] : undefined;
+      if (projectId && (!projectDir || !exists(projectDir))) continue;
+      try {
+        const sourcePath = this.store.skillPath(skill.id);
+        const sourceHash = bundleDiskHash(sourcePath);
+        parseSkill(fs.readFileSync(path.join(sourcePath, "SKILL.md"), "utf8"));
+        const placement = placeSkills(
+          skill.scope.harnesses,
+          skillReaders(this.store.home, projectDir),
+        );
+        const exposure = [
+          ...new Set(placement.flatMap((d) => d.readers)),
+        ].filter((h) => !skill.scope.harnesses.includes(h));
+        if (exposure.length)
+          warnings.push(
+            `${skill.name}：共享技能目录也会被 ${exposure.join("、")} 读取，不能保证仅对所选 Harness 可见`,
+          );
+        for (const entry of placement)
+          add({
+            path: path.join(entry.dir, skill.name),
+            kind: "skill",
+            sourceId: skill.id,
+            projectId,
+            harness: entry.readers.find((h) =>
+              skill.scope.harnesses.includes(h),
+            )!,
+            sourceHash,
+          });
+      } catch (e: any) {
+        errors.push(`${skill.name}: ${e.message}`);
       }
     }
     for (const receipt of state.receipts)
@@ -382,28 +410,26 @@ export class Engine {
       for (const replacement of state.instructionReplacements || [])
         if (!wanted.has(replacement.path))
           errors.push(`已登记的指令替换没有适用源片段：${replacement.path}`);
-    for (const skill of manifest.skills.filter((s) => s.enabled)) {
-      if (
-        skill.scope.harnesses.includes("codex") &&
-        !["deepseek", "opencode"].every((h) =>
-          skill.scope.harnesses.includes(h as HarnessId),
-        )
-      )
-        warnings.push(
-          `${skill.name}：Codex 的 .agents/skills 也可能被 DeepSeek 和 OpenCode 读取，不能保证仅对 Codex 可见`,
-        );
-      if (
-        skill.scope.harnesses.includes("claude") &&
-        !skill.scope.harnesses.includes("opencode")
-      )
-        warnings.push(
-          `${skill.name}：Claude 的 .claude/skills 也可能被 OpenCode 兼容扫描`,
-        );
+    try {
+      for (const stage of this.staging()) {
+        stagingFingerprints.push([
+          stage,
+          diskHash(stage, "skill"),
+          hash(fs.readFileSync(`${stage}.json`, "utf8")),
+        ]);
+        if (exists(`${stage}-old`))
+          errors.push(`暂存目录含原件备份，需先恢复未完成部署并检查：${stage}`);
+        else
+          warnings.push(`发现 HarnessSync 暂存残留，应用计划时清理：${stage}`);
+      }
+    } catch (e: any) {
+      errors.push(e.message);
     }
     const revision = this.store.revision();
     const id = hash(
       JSON.stringify({
         revision,
+        staging: stagingFingerprints,
         changes: changes.map((c) => [
           c.path,
           c.beforeHash,
@@ -429,11 +455,21 @@ export class Engine {
       .filter((f) => f.endsWith(".json"))
       .sort()
       .reverse()
-      .slice(0, 40)
       .map((f) => {
-        const x = json<Deployment>(
-          path.join(this.store.root, "deployments", f),
-        );
+        const file = path.join(this.store.root, "deployments", f);
+        const stat = fs.statSync(file);
+        const key = [stat.size, stat.mtimeMs, stat.ctimeMs, stat.ino].join(":");
+        let cached = this.deploymentCache.get(file);
+        if (cached?.key !== key) {
+          // Keep metadata only: full snapshot bodies can be many MB each.
+          const { files, beforeState, ...metadata } = json<Deployment>(file);
+          cached = {
+            key,
+            value: { ...metadata, files: [], beforeState: { receipts: [] } },
+          };
+          this.deploymentCache.set(file, cached);
+        }
+        const x = cached.value;
         return {
           id: x.id,
           date: x.date,
@@ -442,6 +478,23 @@ export class Engine {
           status: x.status,
         };
       });
+  }
+  private staging() {
+    const dirs = new Set(skillReaders(this.store.home).map((r) => r.dir));
+    for (const dir of Object.values(this.store.device().bindings))
+      for (const r of skillReaders(this.store.home, dir)) dirs.add(r.dir);
+    for (const r of this.store.state().receipts)
+      if (r.kind === "skill") dirs.add(path.dirname(r.path));
+    return [...dirs].flatMap((dir) => stagingLeftovers(dir));
+  }
+  private pruneDeployments() {
+    const records = this.deployments();
+    for (const d of records.slice(20)) {
+      if (d.status === "pending" || d.status === "failed") continue;
+      const file = path.join(this.store.root, "deployments", `${d.id}.json`);
+      fs.unlinkSync(file);
+      this.deploymentCache.delete(file);
+    }
   }
   private pending() {
     return this.deployments().filter((d) => d.status === "pending");
@@ -471,6 +524,7 @@ export class Engine {
           409,
         );
       const changed = plan.changes.filter((c) => c.status !== "unchanged");
+      for (const stage of this.staging()) cleanStaging(stage);
       if (!changed.length) return { id: null, changes: 0 };
       const state = this.store.state();
       const record: Deployment = {
@@ -480,12 +534,18 @@ export class Engine {
         status: "pending",
         beforeState: state,
         files: changed.map((c) => ({
+          adopted: c.status === "adopt",
           path: c.path,
           kind: c.kind,
           existed: exists(c.path),
           afterHash: c.afterHash,
           ...(c.kind === "skill"
-            ? { files: exists(c.path) ? readBundle(c.path) : {} }
+            ? {
+                files:
+                  c.status !== "adopt" && exists(c.path)
+                    ? readBundle(c.path)
+                    : {},
+              }
             : {
                 content: exists(c.path) ? fs.readFileSync(c.path, "utf8") : "",
                 mode: exists(c.path) ? fs.statSync(c.path).mode & 0o777 : 0o644,
@@ -507,10 +567,20 @@ export class Engine {
               `部署过程中目标变化：${change.path}`,
               409,
             );
+          if (change.status === "adopt") continue;
           if (change.kind === "skill") {
             if (change.status === "remove")
               fs.rmSync(change.path, { recursive: true, force: true });
-            else writeBundle(change.path, change.files!);
+            else {
+              const files = readBundle(this.store.skillPath(change.sourceId!));
+              if (bundleHash(files) !== change.afterHash)
+                throw new AppError(
+                  "STALE_SOURCE",
+                  "部署过程中源 Skill 变化，请重新预览",
+                  409,
+                );
+              writeBundle(change.path, files);
+            }
           } else {
             if (change.afterHash === absent)
               fs.rmSync(change.path, { force: true });
@@ -556,10 +626,20 @@ export class Engine {
         writeJson(recordPath, record);
         throw e;
       }
+      try {
+        this.pruneDeployments();
+      } catch (e: any) {
+        return {
+          id: record.id,
+          changes: changed.length,
+          warnings: [`部署已完成，但旧快照清理失败：${e.message}`],
+        };
+      }
       return { id: record.id, changes: changed.length };
     });
   }
   private restoreFile(f: SavedFile) {
+    if (f.adopted) return;
     noSymlink(f.path);
     if (!f.existed)
       fs.rmSync(f.path, { recursive: f.kind === "skill", force: true });
@@ -587,7 +667,7 @@ export class Engine {
       for (const f of record.files) {
         const actual = diskHash(f.path, f.kind);
         if (
-          actual !== f.afterHash &&
+          !matchesDiskHash(f.path, f.kind, f.afterHash) &&
           !(
             record.status === "pending" &&
             actual ===
