@@ -2,7 +2,7 @@
 
 ## 核心对象
 
-- **源配置**：`repo/manifest.json` 和完整 Skill 包，由本地 Git 留存。
+- **源配置**：`repo/harness-sync.json`、`repo/entries/<kind>/<id>.json` 和完整 Skill 包（兼容读取 v1 manifest），由本地 Git 留存。
 - **设备**：本机稳定 UUID、显示名、本地变量、项目路径绑定，位于 Git 外。
 - **项目**：稳定 UUID 和可改名显示名称；路径只是当前设备绑定。
 - **作用域**：global / device / project，加 Harness 选择集合。
@@ -36,4 +36,4 @@ GUI 不直接操作文件；CLI 和 HTTP 调用同一个 core。
 
 ## 当前范围
 
-本机已适配 DeepSeek、OpenCode、Codex、Claude Code，并提供扫描—管理技能安装—中文提示词交接的初始化流程。初始化不自动挑选同名变体或解决自然语言冲突。远端同步、内容三方合并、多个本机路径绑定及桌面封装留待后续。
+本机已适配 DeepSeek、OpenCode、Codex、Claude Code，并提供扫描—管理技能安装—中文提示词交接的初始化流程。初始化不自动挑选同名变体或解决自然语言冲突。已提供私有 Git 远端同步与对象三方合并；多个本机路径绑定及桌面封装留待后续。

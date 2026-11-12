@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
+import { Sync } from "./core/sync.ts";
 import { Store } from "./core/store.ts";
 import { Engine, publicPlan } from "./core/engine.ts";
 import { startServer } from "./server.ts";
@@ -167,6 +168,24 @@ onboard
   .command("unstage-instructions")
   .description("取消尚未发布的全局指令替换登记")
   .action(run(async () => unstageInstructions(await getStore())));
+const sync = cli.command("sync").description("通过用户私有 Git 仓库同步源配置");
+sync
+  .command("setup")
+  .option("--url <git-url>")
+  .option("--create [name]")
+  .option("--branch <branch>")
+  .action(run(async (o) => new Sync(await getStore()).setup(o)));
+sync
+  .command("status")
+  .action(run(async () => new Sync(await getStore()).status()));
+sync.command("now").action(run(async () => new Sync(await getStore()).now()));
+sync
+  .command("resolve <entry-id>")
+  .requiredOption("--keep <choice>", "local / remote / both")
+  .action(run(async (id, o) => new Sync(await getStore()).resolve(id, o.keep)));
+sync
+  .command("disconnect")
+  .action(run(async () => new Sync(await getStore()).disconnect()));
 const rules = cli.command("rules").description("管理全局、设备或项目指令");
 rules
   .command("list")

@@ -81,4 +81,23 @@ CLI 暂无独立的 `skills add` 命令；新建包含 `SKILL.md` 的目录后�
 
 DeepSeek、OpenCode、Codex 共用项目 `AGENTS.md`，其项目指令必须同时选择这三者。Claude 使用单独的 `CLAUDE.md`。共享兼容技能目录可能被其他 Harness 发现，选择目标工具不等于严格的运行时隔离。
 
-以上均为当前已实现的本机能力。尚无 `sync/push/pull/merge` 命令，未实现跨设备同步和自动冲突合并。
+## 远端同步
+
+所有命令支持 `--json`，仅修改源库，不自动部署。请使用用户拥有的私有、专用 Git 仓库；非 GitHub URL 的私有性由用户管理。
+
+| 命令 | 功能 |
+| --- | --- |
+| `sync setup --url <git-url> [--branch <分支>]` | 连接远端；新机器恢复、空远端推送、双方已有数据则合并；默认使用远端 HEAD 分支，空远端使用 main |
+| `sync setup --create [name]` | 通过已登录的 gh 创建私有 GitHub 仓库，默认 harness-sync-config |
+| `sync status` | fetch 后显示 ahead/behind、远端、同步时间及待处理冲突 |
+| `sync now` | 保存本地更改、fetch、按对象三方合并并 push |
+| `sync resolve <entry-id> --keep local|remote|both` | 保留本地、采用远端或生成远端副本；之后运行 sync now 推送 |
+| `sync disconnect` | 删除本机同步设置，保留源库与 Git 历史 |
+
+认证使用 Git 凭证助手或 SSH；不会保存令牌。GitHub 可运行 `gh auth login`、`gh auth setup-git`。网络调用禁用交互提示，60 秒超时；失败后修复网络或认证再运行 `sync now`。推送被其他设备抢先更新时重新运行即可。setup 连接失败后设置会保留，重试 now 或 disconnect 后更换地址。
+
+不同条目的单方变更自动合并；同条目双方不同修改、删除对编辑、不同 ID 的同名技能记录冲突并保留本地，其余内容仍推送。冲突的远端版本由所记录的提交 SHA 固定，后续同步不会静默替换该选择。`both` 创建新 ID，技能包 frontmatter 名称同步改为唯一数字后缀；删除冲突不能选择 both。
+
+`history` 中的合并前提交可通过 `restore <SHA>` 恢复源库；原生目录只在显式 plan/apply 后变化。旧版 manifest 在首次源修改或同步时自动迁移，单纯打开、查询不会写入。
+
+GUI 接口：`GET /api/sync/status`（也支持 `/api/sync`），`POST /api/sync/setup`（`{url?,create?,branch?}`）、`POST /api/sync/now`、`POST /api/sync/resolve`（`{entryId,keep}`）、`POST /api/sync/disconnect`；沿用会话 token、Host 和 Origin 校验。

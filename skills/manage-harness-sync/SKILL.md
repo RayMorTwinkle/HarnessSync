@@ -41,4 +41,4 @@ description: 管理 HarnessSync 的共享技能、全局指令、设备变量与
 
 CLI 遵守 Harness 的沙箱权限。写入被拒绝时，说明需要哪些目录权限，并使用该 Harness 可用的授权机制，不得声称操作已经成功。
 
-源配置保存后产生本地 Git 提交；远端多设备同步仍未实现。
+源配置保存后产生本地 Git 提交。跨设备使用 `sync setup --url <git-url>` 或 `sync setup --create` 连接用户私有仓库，`sync now` 同步；冲突使用 `sync resolve <entry-id> --keep local|remote|both`。同步后先审查 `plan`，不会自动部署。
