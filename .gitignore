@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.DS_Store
+.harness-sync/
+artifacts/
+.dsh/skills/
+.opencode/skills/

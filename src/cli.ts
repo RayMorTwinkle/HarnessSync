@@ -1,0 +1,325 @@
+import fs from "node:fs";
+import path from "node:path";
+import { Command } from "commander";
+import { Store } from "./core/store.ts";
+import { Engine, publicPlan } from "./core/engine.ts";
+import { startServer } from "./server.ts";
+import { scopeSchema } from "./shared/types.ts";
+import { AppError, parseSkill } from "./core/files.ts";
+import { installSelfSkill } from "./core/self-skill.ts";
+
+const cli = new Command()
+  .name("hsync")
+  .description(
+    "HarnessSync · 统一管理 DeepSeek Harness / OpenCode 的指令与 Skills",
+  )
+  .version("0.1.0")
+  .option("--root <directory>", "配置库目录")
+  .option("--json", "机器可读 JSON 输出");
+let store: Store;
+const getStore = async () =>
+  (store ||= await new Store(cli.opts().root).init());
+const output = (data: unknown) =>
+  console.log(JSON.stringify(data, null, cli.opts().json ? 0 : 2));
+const run =
+  (fn: (...args: any[]) => Promise<unknown> | unknown) =>
+  async (...args: any[]) => {
+    const value = await fn(...args);
+    if (value !== undefined) output(value);
+  };
+const scopeOptions = (c: Command) =>
+  c
+    .option("--scope <kind>", "global / device / project", "global")
+    .option("--target <id>", "设备或项目 ID")
+    .option("--harness <ids>", "deepseek,opencode", "deepseek,opencode");
+const scope = (o: any) =>
+  scopeSchema.parse({
+    kind: o.scope,
+    target: o.target,
+    harnesses: o.harness.split(","),
+  });
+const findId = (
+  list: { id: string; name?: string; title?: string }[],
+  input: string,
+) => {
+  const matches = list.filter(
+    (x) => x.id === input || x.name === input || x.title === input,
+  );
+  if (matches.length !== 1)
+    throw new AppError("NOT_FOUND", "未找到唯一条目，请使用完整 ID");
+  return matches[0].id;
+};
+cli
+  .command("init")
+  .description("初始化本地配置库")
+  .action(run(async () => ({ root: (await getStore()).root })));
+cli
+  .command("status")
+  .description("查看所有源配置和部署状态")
+  .action(
+    run(async () => {
+      const x = new Engine(await getStore()).snapshot();
+      return { ...x, plan: publicPlan(x.plan) };
+    }),
+  );
+cli
+  .command("scan")
+  .description("扫描已有原生 Skills 和全局指令（只读）")
+  .action(run(async () => new Engine(await getStore()).inspect()));
+cli
+  .command("plan")
+  .description("预览完整部署差异")
+  .action(run(async () => publicPlan(new Engine(await getStore()).plan())));
+cli
+  .command("apply")
+  .description("部署已预览的计划")
+  .requiredOption("--plan <id>", "来自 plan 的计划 ID")
+  .action(run(async (o) => new Engine(await getStore()).apply(o.plan)));
+cli
+  .command("doctor")
+  .description("检查部署偏离、变量和作用域")
+  .action(
+    run(async () => {
+      const engine = new Engine(await getStore());
+      const plan = engine.plan();
+      const conflicts = plan.changes.filter((c) => c.status === "conflict");
+      const pending = engine
+        .deployments()
+        .filter((d) => d.status === "pending");
+      const healthy =
+        !conflicts.length && !plan.errors.length && !pending.length;
+      if (!healthy) process.exitCode = 1;
+      return {
+        healthy,
+        errors: plan.errors,
+        conflicts: conflicts.map((c) => ({ path: c.path, reason: c.reason })),
+        pendingDeployments: pending,
+        pendingChanges: plan.changes.filter(
+          (c) => !["unchanged", "conflict"].includes(c.status),
+        ).length,
+        observed: "filesystem-only",
+        sessionLoaded: "unknown",
+      };
+    }),
+  );
+cli
+  .command("history")
+  .description("查看源配置 Git 历史和部署历史")
+  .action(
+    run(async () => {
+      const s = await getStore();
+      return { source: s.history(), deployments: new Engine(s).deployments() };
+    }),
+  );
+cli
+  .command("restore <commit>")
+  .description("恢复源配置版本（之后需重新部署）")
+  .action(run(async (sha) => (await getStore()).restoreSource(sha)));
+cli
+  .command("rollback <deployment>")
+  .description("回滚最近一次部署（保留源配置）")
+  .action(run(async (id) => new Engine(await getStore()).rollback(id)));
+cli
+  .command("self-skill")
+  .description("将 AI 管理 Skill 安装到源配置库，之后预览部署")
+  .action(run(async () => installSelfSkill(await getStore())));
+const rules = cli.command("rules").description("管理全局、设备或项目指令");
+rules
+  .command("list")
+  .action(run(async () => (await getStore()).manifest().rules));
+scopeOptions(
+  rules
+    .command("add")
+    .requiredOption("--title <title>")
+    .requiredOption("--file <file>"),
+).action(
+  run(async (o) =>
+    (await getStore()).saveRule({
+      title: o.title,
+      body: fs.readFileSync(path.resolve(o.file), "utf8"),
+      scope: scope(o),
+    }),
+  ),
+);
+scopeOptions(
+  rules
+    .command("edit <id>")
+    .requiredOption("--title <title>")
+    .requiredOption("--file <file>"),
+).action(
+  run(async (id, o) => {
+    const s = await getStore();
+    return s.saveRule(
+      {
+        title: o.title,
+        body: fs.readFileSync(path.resolve(o.file), "utf8"),
+        scope: scope(o),
+      },
+      findId(s.manifest().rules, id),
+    );
+  }),
+);
+rules.command("remove <id>").action(
+  run(async (id) => {
+    const s = await getStore();
+    return s.remove("rules", findId(s.manifest().rules, id));
+  }),
+);
+const skills = cli.command("skills").description("管理完整 Skill 包");
+skills
+  .command("list")
+  .action(run(async () => (await getStore()).manifest().skills));
+skills.command("show <id>").action(
+  run(async (id) => {
+    const s = await getStore();
+    const key = findId(s.manifest().skills, id);
+    return {
+      ...s.manifest().skills.find((x) => x.id === key),
+      ...parseSkill(
+        fs.readFileSync(path.join(s.skillPath(key), "SKILL.md"), "utf8"),
+      ),
+    };
+  }),
+);
+scopeOptions(
+  skills
+    .command("import <directory>")
+    .option(
+      "--adopt",
+      "同时接管这个已有原生目录，后续可由 HarnessSync 更新或撤下",
+    ),
+).action(
+  run(async (dir, o) =>
+    (await getStore()).importSkill(dir, scope(o), undefined, o.adopt),
+  ),
+);
+scopeOptions(
+  skills
+    .command("edit <id>")
+    .requiredOption("--file <file>", "包含 YAML frontmatter 的 SKILL.md"),
+).action(
+  run(async (id, o) => {
+    const s = await getStore();
+    const value = parseSkill(fs.readFileSync(path.resolve(o.file), "utf8"));
+    return s.saveSkill(
+      { ...value, scope: scope(o) },
+      findId(s.manifest().skills, id),
+    );
+  }),
+);
+for (const enabled of [true, false])
+  skills.command(`${enabled ? "enable" : "disable"} <id>`).action(
+    run(async (id) => {
+      const s = await getStore();
+      const key = findId(s.manifest().skills, id);
+      const value = s.manifest().skills.find((x) => x.id === key)!;
+      return s.saveSkill(
+        {
+          ...value,
+          enabled,
+          body: parseSkill(
+            fs.readFileSync(path.join(s.skillPath(key), "SKILL.md"), "utf8"),
+          ).body,
+        },
+        key,
+      );
+    }),
+  );
+skills.command("remove <id>").action(
+  run(async (id) => {
+    const s = await getStore();
+    return s.remove("skills", findId(s.manifest().skills, id));
+  }),
+);
+const projects = cli
+  .command("projects")
+  .description("按名称管理项目身份与本机目录");
+projects.command("list").action(
+  run(async () => {
+    const s = await getStore();
+    return s
+      .manifest()
+      .projects.map((p) => ({ ...p, path: s.device().bindings[p.id] }));
+  }),
+);
+projects
+  .command("add <name>")
+  .option("--path <directory>")
+  .action(
+    run(async (name, o) =>
+      (await getStore()).saveProject({ name, path: o.path }),
+    ),
+  );
+projects.command("bind <id> <directory>").action(
+  run(async (id, dir) => {
+    const s = await getStore();
+    const key = findId(s.manifest().projects, id);
+    return s.saveProject(
+      {
+        name: s.manifest().projects.find((x) => x.id === key)!.name,
+        path: dir,
+      },
+      key,
+    );
+  }),
+);
+projects.command("remove <id>").action(
+  run(async (id) => {
+    const s = await getStore();
+    return s.remove("projects", findId(s.manifest().projects, id));
+  }),
+);
+const device = cli.command("device").description("本机身份和本地变量");
+device.command("show").action(run(async () => (await getStore()).device()));
+device.command("name <name>").action(
+  run(async (name) => {
+    const s = await getStore();
+    return s.saveDevice({ ...s.device(), name });
+  }),
+);
+device.command("set <key> <value>").action(
+  run(async (key, value) => {
+    const s = await getStore();
+    const d = s.device();
+    return s.saveDevice({
+      name: d.name,
+      variables: { ...d.variables, [key]: value },
+    });
+  }),
+);
+device.command("unset <key>").action(
+  run(async (key) => {
+    const s = await getStore();
+    const d = s.device();
+    delete d.variables[key];
+    return s.saveDevice(d);
+  }),
+);
+cli
+  .command("serve")
+  .description("启动本机 GUI")
+  .option("--port <number>", "监听端口", "47821")
+  .option("--dev", "启用前端热更新")
+  .action(async (o) => {
+    const port = Number(o.port);
+    if (!Number.isInteger(port) || port < 0 || port > 65535)
+      throw new AppError("INVALID_PORT", "端口必须为 0–65535");
+    const server = await startServer(await getStore(), { port, dev: o.dev });
+    console.log(
+      `HarnessSync → ${server.url}\n配置库 → ${store.root}\n按 Ctrl+C 退出`,
+    );
+    const stop = async () => {
+      await server.close();
+      process.exit(0);
+    };
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+  });
+try {
+  await cli.parseAsync();
+} catch (e: any) {
+  console.error(
+    JSON.stringify({ ok: false, code: e.code || "ERROR", message: e.message }),
+  );
+  process.exitCode = 1;
+}
