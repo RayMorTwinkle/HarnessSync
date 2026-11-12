@@ -191,3 +191,40 @@ export type Onboarding = {
     changes: number;
   };
 };
+
+export type SyncConflict = {
+  entryId: string;
+  kind: "rules" | "skills" | "projects";
+  localCommit: string;
+  remoteCommit: string;
+  reason: "entry" | "name";
+  localId?: string;
+};
+export type SyncConfig = {
+  url: string;
+  branch: string;
+  lastSyncedCommit?: string;
+  lastSyncTime?: string;
+  conflicts: SyncConflict[];
+};
+export type SyncStatus = {
+  connected: boolean;
+  remote?: string;
+  branch?: string;
+  ahead: number;
+  behind: number;
+  lastSyncedCommit?: string;
+  lastSyncTime?: string;
+  conflicts: SyncConflict[];
+  pushBlocked?: boolean;
+  message: string;
+};
+export type SyncSetup = {
+  url?: string;
+  create?: string | boolean;
+  branch?: string;
+};
+export type SyncResolve = {
+  entryId: string;
+  keep: "local" | "remote" | "both";
+};

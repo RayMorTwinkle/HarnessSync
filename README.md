@@ -4,7 +4,7 @@
 
 当前适配 **DeepSeek Harness、OpenCode V2、Codex 和 Claude Code**，提供本机 Web GUI 和 CLI，共用同一套核心。
 
-当前版本 **v0.2.2**。已提供本机配置管理与 Git 历史；跨设备远端同步、合并仍在后续范围内。
+当前发布版本 **v0.2.2**。开发分支已加入跨设备 Git 同步：源配置逐条存储，设备数据保留本机。
 
 ## 安装
 
@@ -160,14 +160,38 @@ hsync self-skill
 
 普通导入只复制到中央库，不接管原目录。如果原生目录与库中同名，预览会显示冲突；确认要由 HarnessSync 管理时显式使用 `--adopt`。已入库的 Skill 可以接管内容完全一致的原生目录。共享兼容目录只允许普通导入。
 
+## 跨设备同步
+
+使用自己拥有的私有 GitHub 仓库或其他专用 Git 仓库：
+
+```sh
+hsync sync setup --create                      # 需要 gh 已安装并登录
+hsync sync setup --url git@github.com:USER/config.git  # 与 create 二选一
+hsync sync status --json
+hsync sync now --json
+hsync sync resolve ENTRY_ID --keep local       # 或 remote / both
+hsync plan                                    # 审查后再 apply
+hsync sync disconnect                         # 保留本地配置
+```
+
+新机器可选择直接开始本地配置，或用 `sync setup --url` 恢复已有远端库。远端为空时推送本地；双方已有内容时按条目三方合并，技能按元数据与完整包一起比较。冲突保留本地并记录待处理项，其余条目仍同步。`both` 为远端副本生成新 ID，技能名称加数字后缀；删除冲突需选择保留本地或远端。
+
+同步与解决冲突前保留 Git 安全点，可从 `history` 找到原提交并用 `restore` 恢复。解决选择先保存在本地，再运行 `sync now` 推送。同步不会部署原生目录；每次拉取后请审查 `plan`。设备作用域源条目会同步，但只在目标设备部署；设备身份、变量、目录绑定、部署与初始化快照均留在 Git 外。Git URL 不应含令牌或密码。
+
+v1 的 `manifest.json` 仍可只读打开；首次修改或同步自动迁移为逐条文件并提交「迁移配置库到 v2」。迁移无需手工导入。
+
 ## 文件布局
 
 ```text
 ~/.harness-sync/
   repo/                   # 可迁移的源配置 Git 仓库
-    manifest.json         # 项目、指令片段、技能元数据
+    harness-sync.json     # schemaVersion: 2
+    entries/rules/<id>.json
+    entries/skills/<id>.json
+    entries/projects/<id>.json
     skills/<stable-id>/   # 完整技能包
     .git/
+  sync.json               # 远端地址、分支、同步时间与待处理冲突（本机）
   device.json             # 本机身份、变量、项目目录绑定
   state.json              # 本机文件所有权与部署收据
   deployments/            # 本机部署快照
@@ -197,7 +221,7 @@ DeepSeek、OpenCode 和 Codex 共用项目根 `AGENTS.md`，面向其中任一�
 
 ## 当前边界
 
-- 当前是本机版本：**未实现远端同步、跨设备冲突合并或桌面安装包**。本地 Git 历史不等于多端同步。
+- 尚未提供桌面安装包；远端 Git 认证由用户的 SSH 或凭证助手管理。
 - 每个项目在一台机器上绑定一个目录；多 checkout/worktree 绑定待扩展。
 - 中央库 Skill 名称唯一，暂不支持同名 Skill 按作用域覆盖。
 - 扫描支持最多六层分类目录、真实路径与链接入口去重，并识别平铺 Markdown。平铺技能需要先整理成目录包；插件托管和系统内置技能不自动纳管。

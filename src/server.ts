@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { Engine, publicPlan } from "./core/engine.ts";
+import { Sync } from "./core/sync.ts";
 import { Store } from "./core/store.ts";
 import { AppError, hash, parseSkill } from "./core/files.ts";
 import { scopeSchema } from "./shared/types.ts";
@@ -105,6 +106,39 @@ export async function startServer(
           result = { ...s, plan: publicPlan(s.plan) };
         } else if (req.method === "GET" && resource === "inspect")
           result = engine.inspect();
+        else if (
+          resource === "sync" &&
+          req.method === "GET" &&
+          (!id || id === "status")
+        )
+          result = await new Sync(store).status();
+        else if (resource === "sync" && req.method === "POST" && id === "setup")
+          result = await new Sync(store).setup(
+            z
+              .object({
+                url: z.string().optional(),
+                create: z.union([z.string(), z.boolean()]).optional(),
+                branch: z.string().optional(),
+              })
+              .parse(body),
+          );
+        else if (resource === "sync" && req.method === "POST" && id === "now")
+          result = await new Sync(store).now();
+        else if (
+          resource === "sync" &&
+          req.method === "POST" &&
+          id === "resolve"
+        )
+          result = await new Sync(store).resolve(
+            z.string().parse(body.entryId),
+            z.enum(["local", "remote", "both"]).parse(body.keep),
+          );
+        else if (
+          resource === "sync" &&
+          req.method === "POST" &&
+          id === "disconnect"
+        )
+          result = await new Sync(store).disconnect();
         else if (req.method === "GET" && resource === "onboarding")
           result = getOnboarding(store, id);
         else if (req.method === "POST" && resource === "onboarding-scan")

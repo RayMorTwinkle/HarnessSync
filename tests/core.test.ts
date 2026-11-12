@@ -91,7 +91,7 @@ test("skills retain resources, unknown frontmatter and executable bits across ed
     makeSkill(path.join(dir, "incoming")),
     globalScope,
   );
-  assert.ok(!store.git(["show", "HEAD:manifest.json"]).includes(dir));
+  assert.ok(!JSON.stringify(store.manifest()).includes(dir));
   assert.equal(
     store.device().origins?.[skill.id],
     fs.realpathSync(path.join(dir, "incoming")),
@@ -182,7 +182,7 @@ test("project skills and variables stay isolated from globals and other concurre
   );
   assert.ok(!fs.existsSync(path.join(b, "AGENTS.md")));
   assert.ok(!fs.existsSync(path.join(harnesses[0].skills, "test-skill")));
-  assert.ok(!store.git(["show", "HEAD:manifest.json"]).includes(a));
+  assert.ok(!JSON.stringify(store.manifest()).includes(a));
   await store.remove("projects", pb.id);
   assert.ok(!store.device().bindings[pb.id]);
 });
@@ -313,7 +313,7 @@ test("self management skill resolves the real CLI path and updates in place", as
     path.join(store.skillPath(first.id), "SKILL.md"),
     "utf8",
   );
-  assert.match(body, /HarnessSync\/dist\/cli\.js/);
+  assert.ok(body.includes(path.resolve("dist/cli.js")));
   assert.ok(!body.includes("/Fork/dist/cli.js"));
 });
 test("opening an initialized store and running doctor work when its directory is read-only", async (t) => {
