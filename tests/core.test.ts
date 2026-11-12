@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { Store } from "../src/core/store.ts";
 import { Engine } from "../src/core/engine.ts";
 import { adapters, placeSkills, skillReaders } from "../src/core/adapters.ts";
@@ -379,4 +380,38 @@ test("local HTTP API requires session token and rejects cross-site writes; GUI a
   });
   assert.equal(response.status, 200);
   assert.equal(store.manifest().rules[0].title, "From API");
+});
+
+test("CLI edits keep stored scope unless scope options are given", async (t) => {
+  const { dir, home, store } = await fixture(t);
+  const project = await store.saveProject({ name: "Scoped" });
+  const rule = await store.saveRule({
+    title: "Project rule",
+    body: "Original",
+    scope: { kind: "project", target: project.id, harnesses: ["claude"] },
+  });
+  const body = path.join(dir, "body.md");
+  fs.writeFileSync(body, "Edited");
+  const cli = (...args: string[]) =>
+    JSON.parse(
+      execFileSync(
+        process.execPath,
+        ["--import", "tsx", "src/cli.ts", ...args, "--json"],
+        {
+          cwd: path.resolve(import.meta.dirname, ".."),
+          env: { ...process.env, HOME: home, HARNESS_SYNC_HOME: store.root },
+          encoding: "utf8",
+          timeout: 30_000,
+        },
+      ),
+    );
+  const edited = cli("rules", "edit", rule.id, "--file", body);
+  assert.equal(edited.body, "Edited");
+  assert.equal(edited.title, "Project rule");
+  assert.deepEqual(edited.scope, rule.scope);
+  const widened = cli("rules", "edit", rule.id, "--harness", "claude,codex,deepseek,opencode", "--scope", "global");
+  assert.deepEqual(widened.scope, {
+    kind: "global",
+    harnesses: ["claude", "codex", "deepseek", "opencode"],
+  });
 });

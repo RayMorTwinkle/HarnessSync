@@ -76,7 +76,21 @@ export class Sync {
               : /auth|permission denied|could not read Username/i.test(detail)
                 ? "认证失败，请配置 Git 凭证助手或 SSH，或运行 gh auth login 和 gh auth setup-git"
                 : "Git 操作失败，请检查网络、远端地址和访问权限后重试 hsync sync now";
-      throw new AppError("SYNC_GIT", hint, 409);
+      const lines = detail
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
+      const first =
+        lines.find((l) =>
+          /error|fatal|invalid|denied|not found|could not|failed|unauthori/i.test(
+            l,
+          ),
+        ) || lines[0];
+      throw new AppError(
+        "SYNC_GIT",
+        first ? `${hint}（${first.slice(0, 200)}）` : hint,
+        409,
+      );
     }
   }
   private git(args: string[]) {
@@ -262,7 +276,6 @@ export class Sync {
             : "harness-sync-config";
         if (!/^[a-zA-Z0-9_.-]+$/.test(name))
           throw new AppError("SYNC_OPTIONS", "GitHub 仓库名称无效");
-        this.command("gh", ["auth", "status"]);
         this.command("gh", ["repo", "create", name, "--private"]);
         let protocol = "https";
         try {

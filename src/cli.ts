@@ -11,7 +11,7 @@ import {
 import { Store } from "./core/store.ts";
 import { Engine, publicPlan } from "./core/engine.ts";
 import { startServer } from "./server.ts";
-import { scopeSchema, harnessIds } from "./shared/types.ts";
+import { scopeSchema, harnessIds, type Scope } from "./shared/types.ts";
 import {
   createOnboarding,
   getOnboarding,
@@ -51,6 +51,20 @@ const scope = (o: any) =>
     target: o.target,
     harnesses: o.harness.split(","),
   });
+// Edits keep the stored scope; only options given on the command line override it.
+const editScope = (o: any, cmd: Command, current: Scope) => {
+  const given = (name: string) => cmd.getOptionValueSource(name) === "cli";
+  const kind = given("scope") ? o.scope : current.kind;
+  return scopeSchema.parse({
+    kind,
+    target: given("target")
+      ? o.target
+      : kind === current.kind
+        ? current.target
+        : undefined,
+    harnesses: given("harness") ? o.harness.split(",") : current.harnesses,
+  });
+};
 const findId = (
   list: { id: string; name?: string; title?: string }[],
   input: string,
@@ -232,18 +246,23 @@ scopeOptions(
 scopeOptions(
   rules
     .command("edit <id>")
-    .requiredOption("--title <title>")
-    .requiredOption("--file <file>"),
+    .option("--title <title>")
+    .option("--file <file>"),
 ).action(
-  run(async (id, o) => {
+  run(async (id, o, cmd) => {
     const s = await getStore();
+    const key = findId(s.manifest().rules, id);
+    const current = s.manifest().rules.find((r) => r.id === key)!;
     return s.saveRule(
       {
-        title: o.title,
-        body: fs.readFileSync(path.resolve(o.file), "utf8"),
-        scope: scope(o),
+        ...current,
+        title: o.title ?? current.title,
+        body: o.file
+          ? fs.readFileSync(path.resolve(o.file), "utf8")
+          : current.body,
+        scope: editScope(o, cmd, current.scope),
       },
-      findId(s.manifest().rules, id),
+      key,
     );
   }),
 );
@@ -306,12 +325,19 @@ scopeOptions(
     .command("edit <id>")
     .requiredOption("--file <file>", "包含 YAML frontmatter 的 SKILL.md"),
 ).action(
-  run(async (id, o) => {
+  run(async (id, o, cmd) => {
     const s = await getStore();
     const value = parseSkill(fs.readFileSync(path.resolve(o.file), "utf8"));
+    const key = findId(s.manifest().skills, id);
+    const current = s.manifest().skills.find((x) => x.id === key)!;
     return s.saveSkill(
-      { ...value, scope: scope(o) },
-      findId(s.manifest().skills, id),
+      {
+        ...value,
+        enabled: current.enabled,
+        displayName: current.displayName,
+        scope: editScope(o, cmd, current.scope),
+      },
+      key,
     );
   }),
 );

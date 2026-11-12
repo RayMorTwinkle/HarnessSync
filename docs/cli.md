@@ -77,7 +77,7 @@ CLI 暂无独立的 `skills add` 命令；新建包含 `SKILL.md` 的目录后�
 --harness deepseek,opencode,codex,claude
 ```
 
-默认是全局、四个 Harness。设备和项目作用域必须提供 `--target`。编辑命令同样使用这些默认值，因此编辑非全局条目或仅面向部分 Harness 的条目时，应明确传入原作用域及目标，避免扩大范围。
+默认是全局、四个 Harness。设备和项目作用域必须提供 `--target`。编辑命令只覆盖显式传入的作用域参数，未传入的保持原值；`rules edit` 的 `--title`、`--file` 也都可省略。
 
 DeepSeek、OpenCode、Codex 共用项目 `AGENTS.md`，其项目指令必须同时选择这三者。Claude 使用单独的 `CLAUDE.md`。共享兼容技能目录可能被其他 Harness 发现，选择目标工具不等于严格的运行时隔离。
 
