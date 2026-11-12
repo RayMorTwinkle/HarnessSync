@@ -125,7 +125,9 @@ export function OnboardingPanel({
           <div className="inventory-stats">
             {[
               ["真实技能目录", inventory.summary.physicalSkills],
-              ["技能名称", inventory.summary.names],
+              ["默认可导入", inventory.summary.importableSkills ?? 0],
+              ["托管技能（默认排除）", inventory.summary.excludedSkills ?? 0],
+              ["外部保留", inventory.summary.ignoredSkills ?? 0],
               ["全局指令文件", inventory.summary.instructionFiles],
               ["同名不同内容", inventory.summary.nameConflicts],
             ].map(([label, count]) => (
@@ -285,6 +287,10 @@ export function OnboardingPanel({
                     <span>
                       {s.harnesses.map((h) => harnessNames[h]).join(" / ")}
                       {s.managed ? " · 已由 HarnessSync 管理" : ""}
+                      {s.ignored ? " · 外部保留" : ""}
+                      {s.origin && s.origin !== "user"
+                        ? ` · ${s.origin}（默认不导入）`
+                        : ""}
                       {!s.valid ? " · 需要整理格式" : ""}
                     </span>
                     <code>{s.path}</code>
@@ -293,6 +299,7 @@ export function OnboardingPanel({
                       .map((p) => (
                         <code key={p}>链接入口：{p}</code>
                       ))}
+                    {s.originReason && <small>{s.originReason}</small>}
                     {s.error && <small className="invalid">{s.error}</small>}
                   </div>
                   <span className="tiny-tag">

@@ -57,6 +57,8 @@ export type Device = {
   variables: Record<string, string>;
   bindings: Record<string, string>;
   origins?: Record<string, string>;
+  originRealPaths?: Record<string, string>;
+  ignoredNativePaths?: string[];
 };
 export type Harness = {
   id: HarnessId;
@@ -75,6 +77,7 @@ export type Harness = {
   note: string;
 };
 export type Receipt = {
+  adoptedLink?: string;
   kind: "instructions" | "skill";
   harness: HarnessId;
   path: string;
@@ -139,6 +142,10 @@ export type DiscoveredSkill = {
   projectIds: string[];
   linked: boolean;
   entryFile?: string;
+  origin: "user" | "platform" | "tool-managed" | "system";
+  originReason: string;
+  sourceUrl?: string;
+  ignored: boolean;
 };
 export type Inspection = {
   skills: DiscoveredSkill[];
@@ -169,6 +176,9 @@ export type Inspection = {
     unverified: number;
   }[];
   summary: {
+    importableSkills: number;
+    excludedSkills: number;
+    ignoredSkills: number;
     physicalSkills: number;
     names: number;
     validSkills: number;

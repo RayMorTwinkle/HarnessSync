@@ -3,6 +3,8 @@ import path from "node:path";
 import type { Store } from "./store.ts";
 import { adapters, projectTargets } from "./adapters.ts";
 import { bundleHash, exists, hash, parseSkill, readBundle } from "./files.ts";
+import { originDetector } from "./skill-origins.ts";
+import { isIgnoredNativePath } from "./skill-sources.ts";
 import type { HarnessId, Inspection } from "../shared/types.ts";
 
 export function scanMachine(store: Store): Inspection {
@@ -29,7 +31,9 @@ export function scanMachine(store: Store): Inspection {
         exists: exists(p),
       });
   };
-  for (const h of adapters(store.home)) {
+  const harnesses = adapters(store.home);
+  const detectOrigin = originDetector(harnesses, warnings);
+  for (const h of harnesses) {
     for (const p of [h.skills, ...h.sharedSkills]) addRoot(p, h.id);
     for (const project of store.manifest().projects)
       if (device.bindings[project.id])
@@ -82,7 +86,11 @@ export function scanMachine(store: Store): Inspection {
       let canonical: string;
       try {
         canonical = fs.realpathSync(dir);
-        if (visited.has(canonical)) return;
+        if (visited.has(canonical)) {
+          if (exists(path.join(dir, "SKILL.md")))
+            addSkill(dir, path.join(dir, "SKILL.md"), root);
+          return;
+        }
         visited.add(canonical);
         walked++;
       } catch (e: any) {
@@ -95,9 +103,10 @@ export function scanMachine(store: Store): Inspection {
         return;
       }
       try {
+        let children = 0;
         for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
           if (
-            e.name.startsWith(".") ||
+            (e.name.startsWith(".") && e.name !== ".system") ||
             ["node_modules", "assets", "references", "scripts"].includes(e.name)
           )
             continue;
@@ -106,14 +115,16 @@ export function scanMachine(store: Store): Inspection {
             if (
               e.isDirectory() ||
               (e.isSymbolicLink() && fs.statSync(p).isDirectory())
-            )
+            ) {
+              children++;
               walk(p, depth + 1);
-            else if (depth === 0 && e.isFile() && e.name.endsWith(".md"))
+            } else if (depth === 0 && e.isFile() && e.name.endsWith(".md"))
               addSkill(p, p, root);
           } catch (e: any) {
             root.error = `部分条目无法读取：${p}（${e.message}）`;
           }
         }
+        if (depth === 1 && children === 0) addSkill(dir, file, root);
       } catch (e: any) {
         root.error = e.message;
       }
@@ -136,6 +147,10 @@ export function scanMachine(store: Store): Inspection {
         old.paths = [...new Set([...old.paths, p])];
         old.projectIds = [...new Set([...old.projectIds, ...root.projectIds])];
         old.linked ||= canonical !== path.resolve(p);
+        old.ignored = old.paths.every((p) => isIgnoredNativePath(store, p));
+        const origin = detectOrigin(p, root.path, old.name);
+        if (old.origin === "user" && origin.origin !== "user")
+          Object.assign(old, origin);
         old.managed ||= state.receipts.some(
           (r) => r.kind === "skill" && r.path === p,
         );
@@ -152,9 +167,15 @@ export function scanMachine(store: Store): Inspection {
         valid: false,
         managed: state.receipts.some((r) => r.kind === "skill" && r.path === p),
         linked: canonical !== path.resolve(p),
-        entryFile: fs.realpathSync(file),
+        entryFile: exists(file) ? fs.realpathSync(file) : file,
+        ...detectOrigin(p, root.path, path.basename(p)),
+        ignored: isIgnoredNativePath(store, p),
       };
       try {
+        if (!exists(file))
+          throw new Error(
+            "目录中缺少 SKILL.md；请添加带 name 和 description 的技能说明",
+          );
         const text = fs.readFileSync(file, "utf8");
         let fingerprintError: Error | undefined;
         try {
@@ -166,6 +187,7 @@ export function scanMachine(store: Store): Inspection {
         const parsed = parseSkill(text);
         entry.name = parsed.name;
         entry.description = parsed.description;
+        Object.assign(entry, detectOrigin(p, root.path, parsed.name));
         if (!fs.statSync(canonical).isDirectory())
           throw new Error(
             "平铺技能文件：先由 AI 整理为包含 SKILL.md 的目录包，再导入",
@@ -202,6 +224,11 @@ export function scanMachine(store: Store): Inspection {
     warnings,
     duplicates,
     summary: {
+      importableSkills: skills.filter(
+        (s) => s.valid && s.origin === "user" && !s.ignored && !s.managed,
+      ).length,
+      excludedSkills: skills.filter((s) => s.origin !== "user").length,
+      ignoredSkills: skills.filter((s) => s.ignored).length,
       physicalSkills: skills.length,
       names: groups.size,
       validSkills: skills.filter((s) => s.valid).length,

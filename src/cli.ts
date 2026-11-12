@@ -1,6 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
+import {
+  ignoreNativePaths,
+  refreshSkills,
+  skillSource,
+  sourceStatus,
+} from "./core/skill-sources.ts";
 import { Store } from "./core/store.ts";
 import { Engine, publicPlan } from "./core/engine.ts";
 import { startServer } from "./server.ts";
@@ -65,7 +71,11 @@ cli
   .action(
     run(async () => {
       const x = new Engine(await getStore()).snapshot();
-      return { ...x, plan: publicPlan(x.plan) };
+      return {
+        ...x,
+        sourceUpdates: sourceStatus(await getStore()),
+        plan: publicPlan(x.plan),
+      };
     }),
   );
 cli
@@ -97,6 +107,7 @@ cli
       if (!healthy) process.exitCode = 1;
       return {
         healthy,
+        sourceUpdates: sourceStatus(await getStore()),
         errors: plan.errors,
         conflicts: conflicts.map((c) => ({ path: c.path, reason: c.reason })),
         pendingDeployments: pending,
@@ -167,6 +178,15 @@ onboard
   .command("unstage-instructions")
   .description("取消尚未发布的全局指令替换登记")
   .action(run(async () => unstageInstructions(await getStore())));
+onboard
+  .command("ignore <paths...>")
+  .description("将链接入口标记为本机外部保留，后续不再推荐导入")
+  .option("--remove", "取消外部保留")
+  .action(
+    run(async (paths, o) =>
+      ignoreNativePaths(await getStore(), paths, !o.remove),
+    ),
+  );
 const rules = cli.command("rules").description("管理全局、设备或项目指令");
 rules
   .command("list")
@@ -213,6 +233,26 @@ const skills = cli.command("skills").description("管理完整 Skill 包");
 skills
   .command("list")
   .action(run(async () => (await getStore()).manifest().skills));
+skills
+  .command("refresh [id]")
+  .description("从本机源目录刷新完整技能包，保留范围、启停和显示名")
+  .option("--all", "刷新所有有本机源目录的技能")
+  .action(
+    run(async (id, o) => {
+      const s = await getStore();
+      if (Boolean(id) === Boolean(o.all))
+        throw new AppError("INVALID_ARGUMENT", "请选择技能 ID 或 --all");
+      return refreshSkills(
+        s,
+        o.all
+          ? s
+              .manifest()
+              .skills.filter((x) => skillSource(s, x.id))
+              .map((x) => x.id)
+          : [findId(s.manifest().skills, id)],
+      );
+    }),
+  );
 skills.command("show <id>").action(
   run(async (id) => {
     const s = await getStore();

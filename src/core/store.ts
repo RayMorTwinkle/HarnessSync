@@ -19,6 +19,7 @@ import {
   bundleHash,
   type Bundle,
 } from "./files.ts";
+import { isIgnoredNativePath } from "./skill-sources.ts";
 import { adapters, projectTargets } from "./adapters.ts";
 import {
   ruleInput,
@@ -233,6 +234,19 @@ export class Store {
       let result: T;
       try {
         result = fn(m);
+        const local = this.device();
+        let migrated = false;
+        for (const skill of m.skills) {
+          if (skill.source && path.isAbsolute(skill.source)) {
+            local.origins = {
+              ...local.origins,
+              [skill.id]: local.origins?.[skill.id] || skill.source,
+            };
+            skill.source = "local-import";
+            migrated = true;
+          }
+        }
+        if (migrated) writeJson(path.join(this.root, "device.json"), local);
         manifestSchema.parse(m);
         writeJson(path.join(this.repo, "manifest.json"), m);
         this.commit(message);
@@ -322,7 +336,8 @@ export class Store {
     revision?: string,
     adopt = false,
   ) {
-    const absolute = fs.realpathSync(path.resolve(source));
+    const original = path.resolve(source);
+    const absolute = fs.realpathSync(original);
     const bundle = readBundle(absolute);
     if (!bundle["SKILL.md"])
       throw new AppError("INVALID_SKILL", "目录中没有 SKILL.md");
@@ -379,7 +394,7 @@ export class Store {
             "只能接管适配器的原生部署目录，目录名需与 Skill name 一致；共享兼容目录可普通导入",
           );
         if (adopt) {
-          noSymlink(absolute);
+          noSymlink(path.dirname(original));
           const state = this.state();
           for (const target of native) {
             if (state.receipts.some((r) => r.path === target.p))
@@ -398,13 +413,31 @@ export class Store {
                 "SCOPE_MISMATCH",
                 "Skill 的适用范围与待接管目录不符",
               );
+            noSymlink(path.dirname(target.p));
+            if (isIgnoredNativePath(this, target.p))
+              throw new AppError(
+                "IGNORED_NATIVE_PATH",
+                "该目录已标记外部保留，请先取消保留",
+              );
+            const adoptedLink = fs.lstatSync(target.p).isSymbolicLink()
+              ? fs.readlinkSync(target.p)
+              : undefined;
             state.receipts.push({
+              adoptedLink,
               kind: "skill",
               harness: target.h,
               path: target.p,
               sourceId: entry.id,
               projectId: target.projectId,
-              hash: bundleHash(bundle),
+              hash:
+                adoptedLink === undefined
+                  ? bundleHash(bundle)
+                  : hash(
+                      JSON.stringify({
+                        link: adoptedLink,
+                        bundle: bundleHash(bundle),
+                      }),
+                    ),
             });
           }
           writeJson(path.join(this.root, "state.json"), state);
@@ -412,7 +445,9 @@ export class Store {
         if (!existing) {
           writeBundle(this.skillPath(entry.id), bundle);
           m.skills.push(entry);
-          d.origins = { ...d.origins, [entry.id]: absolute };
+          d.origins = { ...d.origins, [entry.id]: original };
+          if (original !== absolute)
+            d.originRealPaths = { ...d.originRealPaths, [entry.id]: absolute };
           writeJson(path.join(this.root, "device.json"), d);
         }
         return entry;
@@ -446,6 +481,7 @@ export class Store {
           const d = this.device();
           if (d.origins) {
             delete d.origins[id];
+            if (d.originRealPaths) delete d.originRealPaths[id];
             writeJson(path.join(this.root, "device.json"), d);
           }
         }
