@@ -127,6 +127,12 @@ export type Snapshot = {
     status: "pending" | "applied" | "failed" | "rolled-back";
   }[];
   root: string;
+  sync?: {
+    connected: boolean;
+    remote?: string;
+    lastSyncTime?: string;
+    conflicts: number;
+  };
 };
 export type DiscoveredSkill = {
   key: string;

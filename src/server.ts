@@ -103,7 +103,11 @@ export async function startServer(
         let result: unknown;
         if (req.method === "GET" && resource === "snapshot") {
           const s = engine.snapshot();
-          result = { ...s, plan: publicPlan(s.plan) };
+          result = {
+            ...s,
+            plan: publicPlan(s.plan),
+            sync: new Sync(store).local(),
+          };
         } else if (req.method === "GET" && resource === "inspect")
           result = engine.inspect();
         else if (

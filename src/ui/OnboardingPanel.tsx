@@ -5,6 +5,7 @@ import {
   Copy,
   FileText,
   FolderSearch,
+  GitBranch,
   Loader2,
   RefreshCw,
   ShieldCheck,
@@ -23,9 +24,13 @@ type Request = <T>(
 export function OnboardingPanel({
   request,
   refresh,
+  sync,
+  openSync,
 }: {
   request: Request;
   refresh: () => Promise<unknown>;
+  sync?: { connected: boolean; remote?: string };
+  openSync: () => void;
 }) {
   const [record, setRecord] = useState<Onboarding | null>(null);
   const [busy, setBusy] = useState("");
@@ -76,6 +81,12 @@ export function OnboardingPanel({
             title: "交给任意 AI 整理",
             text: "复制提示词，集中处理关键分歧",
             done: false,
+          },
+          {
+            n: "04",
+            title: "跨设备同步",
+            text: "可选：连接你的私有 Git 仓库",
+            done: Boolean(sync?.connected),
           },
         ].map((step) => (
           <div key={step.n} className={step.done ? "done" : ""}>
@@ -218,6 +229,24 @@ export function OnboardingPanel({
               </small>
             </section>
           </div>
+          <section className="panel onboarding-block onboarding-sync">
+            <div className="onboarding-block-heading">
+              <span className="step-label">04</span>
+              <div>
+                <h2>跨设备同步（可选）</h2>
+                <p>
+                  {sync?.connected
+                    ? `已连接 ${sync.remote}。其他设备连接同一仓库即可恢复这套配置。`
+                    : "整理完成后，把配置备份到你自己的 GitHub 私有仓库；新设备连接后直接恢复，不用再整理一遍。"}
+                </p>
+              </div>
+            </div>
+            <button className="button" onClick={openSync}>
+              <GitBranch size={14} />
+              {sync?.connected ? "查看同步状态" : "设置跨设备同步"}
+              <ArrowRight size={14} />
+            </button>
+          </section>
           <details className="panel inventory-details">
             <summary>
               <FileText size={16} />

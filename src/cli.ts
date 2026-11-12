@@ -26,7 +26,7 @@ import { openWebUi, parsePort } from "./web-ui.ts";
 const cli = new Command()
   .name("hsync")
   .description("HarnessSync · 统一管理四种 AI Harness 的指令与技能")
-  .version("0.2.2")
+  .version("0.3.0")
   .option("--root <directory>", "配置库目录")
   .option("--json", "机器可读 JSON 输出");
 let store: Store;

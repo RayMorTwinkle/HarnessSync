@@ -253,6 +253,16 @@ export class Sync {
         : message,
     };
   }
+  // Local view for snapshots; never touches the network.
+  local() {
+    const c = this.config(false);
+    return {
+      connected: !!c,
+      remote: c?.url,
+      lastSyncTime: c?.lastSyncTime,
+      conflicts: c?.conflicts.length || 0,
+    };
+  }
   async status() {
     return this.store.lock(() => {
       const c = this.config(false);
