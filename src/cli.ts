@@ -74,7 +74,9 @@ cli
       const x = new Engine(await getStore()).snapshot();
       return {
         ...x,
-        sourceUpdates: sourceStatus(await getStore()),
+        sourceUpdates: sourceStatus(await getStore()).filter(
+          (s) => s.changed || s.note.startsWith("源目录无法读取"),
+        ),
         plan: publicPlan(x.plan),
       };
     }),
@@ -108,7 +110,9 @@ cli
       if (!healthy) process.exitCode = 1;
       return {
         healthy,
-        sourceUpdates: sourceStatus(await getStore()),
+        sourceUpdates: sourceStatus(await getStore()).filter(
+          (s) => s.changed || s.note.startsWith("源目录无法读取"),
+        ),
         errors: plan.errors,
         warnings: plan.warnings,
         conflicts: conflicts.map((c) => ({ path: c.path, reason: c.reason })),

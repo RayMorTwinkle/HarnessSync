@@ -1,10 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Store } from "./store.ts";
+import { adapters, projectTargets } from "./adapters.ts";
 import {
   AppError,
   bundleDiskHash,
   bundleHash,
+  exists,
   parseSkill,
   readBundle,
   writeBundle,
@@ -55,10 +57,33 @@ export function resolvedSkillSource(store: Store, id: string) {
   return store.device().originRealPaths?.[id] || skillSource(store, id);
 }
 
+// A source inside a harness skills root is a deployment target, not an upstream.
+function insideSkillRoots(store: Store, p: string) {
+  let real: string;
+  try {
+    real = fs.realpathSync(p);
+  } catch {
+    return false;
+  }
+  const device = store.device();
+  const roots = adapters(store.home).flatMap((h) => [
+    h.skills,
+    ...h.sharedSkills,
+    ...Object.values(device.bindings).map(
+      (dir) => projectTargets(h.id, dir).skills,
+    ),
+  ]);
+  return roots.some((root) => {
+    const r = exists(root) ? fs.realpathSync(root) : path.resolve(root);
+    return real === r || real.startsWith(r + path.sep);
+  });
+}
+
 export function sourceStatus(store: Store) {
   return store.manifest().skills.flatMap((skill) => {
     const source = skillSource(store, skill.id);
-    if (!source) return [];
+    if (!source || insideSkillRoots(store, resolvedSkillSource(store, skill.id)!))
+      return [];
     try {
       const changed =
         bundleDiskHash(fs.realpathSync(resolvedSkillSource(store, skill.id)!)) !==
@@ -93,7 +118,7 @@ export async function refreshSkills(store: Store, ids: string[]) {
       const entry = manifest.skills.find((s) => s.id === id);
       if (!entry) throw new AppError("NOT_FOUND", "Skill 不存在", 404);
       const source = skillSource(store, id);
-      if (!source)
+      if (!source || insideSkillRoots(store, resolvedSkillSource(store, id)!))
         throw new AppError(
           "NO_SKILL_SOURCE",
           `技能没有本机源目录：${entry.name}`,

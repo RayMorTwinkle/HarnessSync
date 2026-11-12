@@ -533,7 +533,8 @@ test("CLI refresh --all and doctor expose source updates using a temp HOME", asy
   fs.appendFileSync(path.join(source, "scripts/check.sh"), "echo changed\n");
   assert.equal(cli("doctor").sourceUpdates[0].note, "源目录有更新");
   assert.equal(cli("skills", "refresh", "--all")[0].changed, true);
-  assert.equal(cli("doctor").sourceUpdates[0].changed, false);
+  // doctor lists only sources that changed or cannot be read.
+  assert.deepEqual(cli("doctor").sourceUpdates, []);
 });
 
 test("link replacement failure restores the link and deployment rollback rejects subsequent copy edits", async (t) => {
