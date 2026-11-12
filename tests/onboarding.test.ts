@@ -5,7 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { Store } from "../src/core/store.ts";
 import { Engine } from "../src/core/engine.ts";
-import { adapters } from "../src/core/adapters.ts";
+import { writeManifest } from "../src/core/layout.ts";
+import { adapters, placeSkills, skillReaders } from "../src/core/adapters.ts";
 import { scanMachine } from "../src/core/scanner.ts";
 import {
   createOnboarding,
@@ -134,10 +135,15 @@ test("bootstrap installs Chinese management bundle to all four and leaves native
   const record = await createOnboarding(store);
   const ready = await bootstrapOnboarding(store, record.id);
   assert.equal(ready.bootstrap?.targets.length, 4);
-  assert.equal(ready.bootstrap?.changes, 4);
+  assert.equal(ready.bootstrap?.changes, 2);
   for (const h of harnesses) {
     assert.equal(fs.readFileSync(h.instructions, "utf8"), `原件-${h.id}`);
-    const base = path.join(h.skills, "manage-harness-sync");
+  }
+  for (const placement of placeSkills(
+    ["deepseek", "opencode", "codex", "claude"],
+    skillReaders(store.home),
+  )) {
+    const base = path.join(placement.dir, "manage-harness-sync");
     assert.ok(
       fs
         .readFileSync(path.join(base, "SKILL.md"), "utf8")
@@ -147,7 +153,7 @@ test("bootstrap installs Chinese management bundle to all four and leaves native
     assert.ok(fs.existsSync(path.join(base, "agents/openai.yaml")));
   }
   assert.ok(engine.plan().errors.some((e) => e.includes("UNSET")));
-  assert.equal(getOnboarding(store, record.id)?.bootstrap?.changes, 4);
+  assert.equal(getOnboarding(store, record.id)?.bootstrap?.changes, 2);
   assert.ok(!store.git(["ls-files"]).includes("inventory.json"));
 });
 test("Chinese handoff references the immutable inventory, prevents silent conflict choices and does not execute scanned content", async (t) => {
@@ -229,6 +235,10 @@ test("Claude project instructions can be separate while shared AGENTS requires a
 });
 
 // v0.3: all native fixtures stay under the test home.
+const linkedScope = {
+  kind: "global" as const,
+  harnesses: ["deepseek" as const, "opencode" as const, "codex" as const],
+};
 const codexScope = { kind: "global" as const, harnesses: ["codex" as const] };
 
 test("origins exclude synced, system markers and lock-managed skills from default import", async (t) => {
@@ -275,7 +285,13 @@ test("origins exclude synced, system markers and lock-managed skills from defaul
   assert.equal(scan.summary.importableSkills, 1);
   assert.equal(scan.summary.excludedSkills, 5);
   // Plugin skills are namespaced by Claude Code and never scanned as user skills.
-  skill(path.join(home, ".claude/plugins/cache/vendor/plugin/1/skills/plugin-skill"), "plugin-skill");
+  skill(
+    path.join(
+      home,
+      ".claude/plugins/cache/vendor/plugin/1/skills/plugin-skill",
+    ),
+    "plugin-skill",
+  );
   assert.ok(!scanMachine(store).skills.some((s) => s.name === "plugin-skill"));
   const record = await createOnboarding(store);
   assert.match(record.prompt, /origin=platform\/tool-managed\/system 默认排除/);
@@ -339,7 +355,12 @@ test("adopted link is replaced only on apply and rollback restores its literal r
   assert.equal(scanned.linked, true);
   assert.equal(scanned.path, source);
   assert.deepEqual(scanned.paths, [native]);
-  const imported = await store.importSkill(native, codexScope, undefined, true);
+  const imported = await store.importSkill(
+    native,
+    linkedScope,
+    undefined,
+    true,
+  );
   assert.equal(store.device().origins?.[imported.id], native);
   assert.equal(store.device().originRealPaths?.[imported.id], source);
   assert.equal(imported.source, "local-import");
@@ -380,9 +401,9 @@ test("plain link import never authorizes replacement; adoption refuses changed l
   fs.mkdirSync(root, { recursive: true });
   const native = path.join(root, "linked-check");
   fs.symlinkSync(source, native);
-  await store.importSkill(native, codexScope);
+  await store.importSkill(native, linkedScope);
   assert.equal(engine.plan().changes[0].status, "conflict");
-  await store.importSkill(native, codexScope, undefined, true);
+  await store.importSkill(native, linkedScope, undefined, true);
   const plan = engine.plan();
   fs.appendFileSync(path.join(source, "scripts/check.sh"), "echo changed\n");
   await assert.rejects(engine.apply(plan.id), /重新预览/);
@@ -410,7 +431,7 @@ test("external reservation survives reopening and is info only even for a matchi
   fs.mkdirSync(path.dirname(native), { recursive: true });
   fs.symlinkSync(source, native);
   await ignoreNativePaths(store, [native]);
-  await store.importSkill(source, codexScope);
+  await store.importSkill(source, linkedScope);
   const reopened = await new Store(store.root, home).init();
   assert.equal(isIgnoredNativePath(reopened, native), true);
   assert.equal(scanMachine(reopened).summary.ignoredSkills, 1);
@@ -422,7 +443,7 @@ test("external reservation survives reopening and is info only even for a matchi
   assert.equal((await engine.apply(plan.id)).changes, 0);
   assert.equal(fs.readlinkSync(native), source);
   await assert.rejects(
-    store.importSkill(native, codexScope, undefined, true),
+    store.importSkill(native, linkedScope, undefined, true),
     /外部保留/,
   );
   await ignoreNativePaths(store, [native], false);
@@ -465,7 +486,7 @@ test("refresh replaces the full bundle, preserves metadata and migrates legacy a
   // Fixture for the former manifest source field.
   const manifest = store.manifest();
   manifest.skills[0].source = source;
-  writeJson(path.join(store.repo, "manifest.json"), manifest);
+  writeManifest(store.repo, manifest);
   const device = store.device();
   delete device.origins;
   writeJson(path.join(store.root, "device.json"), device);
@@ -473,7 +494,11 @@ test("refresh replaces the full bundle, preserves metadata and migrates legacy a
   await refreshSkills(store, [entry.id]);
   assert.equal(store.manifest().skills[0].source, "local-import");
   assert.equal(store.device().origins?.[entry.id], source);
-  assert.ok(!store.git(["show", "HEAD:manifest.json"]).includes(source));
+  assert.ok(
+    !store
+      .git(["show", `HEAD:entries/skills/${entry.id}.json`])
+      .includes(source),
+  );
   fs.writeFileSync(
     path.join(source, "SKILL.md"),
     skillMarkdown("renamed", "说明", "changed"),
@@ -518,7 +543,7 @@ test("link replacement failure restores the link and deployment rollback rejects
   const native = path.join(home, ".agents/skills/failure-check");
   fs.mkdirSync(path.dirname(native), { recursive: true });
   fs.symlinkSync(source, native);
-  await store.importSkill(native, codexScope, undefined, true);
+  await store.importSkill(native, linkedScope, undefined, true);
   const originalRename = fs.renameSync;
   let fail = true;
   const mock = t.mock.method(
@@ -561,7 +586,7 @@ test("adoption checks literal link changes and linked ancestors introduced after
   fs.mkdirSync(root, { recursive: true });
   const native = path.join(root, "drift-check");
   fs.symlinkSync(source, native);
-  await store.importSkill(native, codexScope, undefined, true);
+  await store.importSkill(native, linkedScope, undefined, true);
   const plan = engine.plan();
   fs.unlinkSync(native);
   fs.symlinkSync(path.relative(root, source), native);
@@ -613,7 +638,7 @@ test("pending snapshot recovers an interrupted link replacement after unlink", a
   const native = path.join(home, ".agents/skills/pending-check");
   fs.mkdirSync(path.dirname(native), { recursive: true });
   fs.symlinkSync(source, native);
-  await store.importSkill(native, codexScope, undefined, true);
+  await store.importSkill(native, linkedScope, undefined, true);
   const result = await engine.apply(engine.plan().id);
   const file = path.join(store.root, "deployments", `${result.id}.json`);
   const record = json<any>(file);
@@ -623,4 +648,101 @@ test("pending snapshot recovers an interrupted link replacement after unlink", a
   await engine.rollback(result.id!);
   assert.equal(fs.readlinkSync(native), source);
   assert.ok(store.state().receipts[0].adoptedLink);
+});
+
+test("adoption refuses links outside placement without changing the link, source or library", async (t) => {
+  const { store, home, dir } = await fixture(t);
+  for (const relative of [".config/opencode/skills", ".agents/skills"]) {
+    const source = path.join(dir, "dev/non-target");
+    skill(source, "non-target");
+    const native = path.join(home, relative, "non-target");
+    fs.mkdirSync(path.dirname(native), { recursive: true });
+    fs.symlinkSync(source, native);
+    const before = bundleHash(readBundle(source));
+    await assert.rejects(
+      store.importSkill(
+        native,
+        relative === ".agents/skills"
+          ? codexScope
+          : {
+              kind: "global",
+              harnesses: ["deepseek", "opencode", "codex", "claude"],
+            },
+        undefined,
+        true,
+      ),
+      /链接不在当前技能放置目标中/,
+    );
+    assert.equal(fs.readlinkSync(native), source);
+    assert.equal(bundleHash(readBundle(source)), before);
+    assert.equal(store.manifest().skills.length, 0);
+    assert.equal(store.state().receipts.length, 0);
+    fs.unlinkSync(native);
+  }
+});
+
+test("plan reports unreadable sources and refresh writes v2 entries without leaking local paths", async (t) => {
+  const { store, engine, dir } = await fixture(t);
+  const source = path.join(dir, "dev/local-source");
+  skill(source, "local-source");
+  const entry = await store.importSkill(source, linkedScope);
+  fs.rmSync(source, { recursive: true });
+  assert.match(engine.plan().warnings!.join("\n"), /源目录无法读取/);
+  assert.equal(engine.plan().errors.length, 0);
+  skill(source, "local-source");
+  await engine.apply(engine.plan().id);
+  assert.ok(store.state().receipts.every((r) => r.hash.startsWith("v2:")));
+  assert.equal(scanMachine(store).skills.filter((s) => s.managed).length, 1);
+  const manifest = store.manifest();
+  manifest.skills[0].source = source;
+  // Exercise genuine v1 migration as well as v2 source migration above.
+  fs.rmSync(path.join(store.repo, "harness-sync.json"));
+  fs.rmSync(path.join(store.repo, "entries"), { recursive: true });
+  writeJson(path.join(store.repo, "manifest.json"), manifest);
+  const device = store.device();
+  delete device.origins;
+  writeJson(path.join(store.root, "device.json"), device);
+  await refreshSkills(store, [entry.id]);
+  assert.equal(store.device().origins?.[entry.id], source);
+  assert.equal(store.manifest().skills[0].source, "local-import");
+  assert.ok(!fs.existsSync(path.join(store.repo, "manifest.json")));
+  assert.ok(
+    !store
+      .git(["show", `HEAD:entries/skills/${entry.id}.json`])
+      .includes(source),
+  );
+});
+
+test("pending link adoption rollback accepts the original link without touching its source", async (t) => {
+  const { store, engine, home, dir } = await fixture(t);
+  const source = path.join(dir, "dev/untouched-link");
+  skill(source, "untouched-link");
+  const native = path.join(home, ".agents/skills/untouched-link");
+  fs.mkdirSync(path.dirname(native), { recursive: true });
+  fs.symlinkSync(source, native);
+  const entry = await store.importSkill(native, linkedScope, undefined, true);
+  const result = await engine.apply(engine.plan().id);
+  const file = path.join(store.root, "deployments", `${result.id}.json`);
+  const record = json<any>(file);
+  record.status = "pending";
+  writeJson(file, record);
+  fs.rmSync(native, { recursive: true });
+  fs.symlinkSync(source, native);
+  const before = bundleHash(readBundle(source));
+  await engine.rollback(result.id!);
+  assert.equal(fs.readlinkSync(native), source);
+  assert.equal(bundleHash(readBundle(source)), before);
+  // A later placement change cannot authorize deleting an unconverted link.
+  await store.saveSkill(
+    { ...entry, body: "library", scope: codexScope },
+    entry.id,
+  );
+  const plan = engine.plan();
+  assert.match(
+    plan.changes.find((c) => c.path === native)!.reason,
+    /链接尚未接管/,
+  );
+  await assert.rejects(engine.apply(plan.id), /冲突/);
+  assert.equal(fs.readlinkSync(native), source);
+  assert.equal(bundleHash(readBundle(source)), before);
 });

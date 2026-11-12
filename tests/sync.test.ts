@@ -504,3 +504,51 @@ test("concurrent edits to different existing entries merge without conflict", as
     "B edit",
   );
 });
+
+test("sync ignores hidden staging leftovers and never publishes them", async (t) => {
+  const { a, b, sa, sb, remote } = await fixture(t);
+  const entry = await a.saveSkill(skill("staged"));
+  const root = path.join(a.repo, "skills");
+  const stage = path.join(
+    root,
+    ".hsync-staging-11111111-1111-1111-1111-111111111111",
+  );
+  fs.mkdirSync(stage);
+  fs.writeFileSync(path.join(stage, "partial"), "unfinished");
+  fs.writeFileSync(
+    `${stage}.json`,
+    JSON.stringify({ format: "harness-sync-staging-v1", target: entry.id }),
+  );
+  fs.mkdirSync(`${stage}-old`);
+  fs.writeFileSync(path.join(`${stage}-old`, "original"), "backup");
+  await sa.setup({ url: remote });
+  await sb.setup({ url: remote });
+  await b.saveSkill(
+    { ...b.manifest().skills[0], body: "remote update" },
+    entry.id,
+  );
+  await sb.now();
+  await sa.now();
+  assert.match(
+    fs.readFileSync(path.join(a.skillPath(entry.id), "SKILL.md"), "utf8"),
+    /remote update/,
+  );
+  assert.equal(
+    fs.readFileSync(path.join(stage, "partial"), "utf8"),
+    "unfinished",
+  );
+  assert.equal(
+    fs.readFileSync(path.join(`${stage}-old`, "original"), "utf8"),
+    "backup",
+  );
+  assert.ok(fs.existsSync(`${stage}.json`));
+  assert.ok(!a.git(["ls-tree", "-r", "HEAD"]).includes(".hsync-staging-"));
+  // A failed source mutation must preserve recovery artifacts too.
+  await assert.rejects(
+    a.mutate("failed", () => {
+      throw new Error("injected");
+    }),
+    /injected/,
+  );
+  assert.ok(fs.existsSync(`${stage}-old`));
+});

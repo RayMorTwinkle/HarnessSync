@@ -21,7 +21,12 @@ import {
   type Bundle,
 } from "./files.ts";
 import { isIgnoredNativePath } from "./skill-sources.ts";
-import { adapters, projectTargets } from "./adapters.ts";
+import {
+  adapters,
+  projectTargets,
+  placeSkills,
+  skillReaders,
+} from "./adapters.ts";
 import {
   ruleInput,
   skillInput,
@@ -152,8 +157,8 @@ export class Store {
     }).trim();
   }
   commit(message: string) {
-    this.git(["add", "--all"]);
-    if (this.git(["status", "--porcelain"]))
+    this.git(["add", "--all", "--", ".", ":(exclude)skills/.hsync-staging-*"]);
+    if (this.git(["diff", "--cached", "--name-only"]))
       this.git(["-c", "commit.gpgsign=false", "commit", "-m", message]);
   }
   history() {
@@ -257,7 +262,10 @@ export class Store {
         this.commit(message);
       } catch (e) {
         for (const dir of fs.readdirSync(path.join(this.repo, "skills")))
-          if (!beforeBundles.some((b) => b.id === dir))
+          if (
+            !dir.startsWith(".hsync-staging-") &&
+            !beforeBundles.some((b) => b.id === dir)
+          )
             fs.rmSync(path.join(this.repo, "skills", dir), {
               recursive: true,
               force: true,
@@ -427,6 +435,23 @@ export class Store {
             const adoptedLink = fs.lstatSync(target.p).isSymbolicLink()
               ? fs.readlinkSync(target.p)
               : undefined;
+            if (
+              adoptedLink !== undefined &&
+              !placeSkills(
+                entry.scope.harnesses,
+                skillReaders(
+                  this.home,
+                  target.projectId ? d.bindings[target.projectId] : undefined,
+                ),
+              ).some(
+                (placement) =>
+                  path.join(placement.dir, entry.name) === target.p,
+              )
+            )
+              throw new AppError(
+                "NOT_PLACEMENT_TARGET",
+                "链接不在当前技能放置目标中；请普通导入并保留原链接，或调整 Harness 选择后再接管",
+              );
             state.receipts.push({
               adoptedLink,
               kind: "skill",

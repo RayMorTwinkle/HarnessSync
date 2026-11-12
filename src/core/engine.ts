@@ -260,7 +260,12 @@ export class Engine {
               "TARGET_CONFLICT",
               "目标已存在且内容不同，不属于 HarnessSync；请先导入或使用独立名称",
             );
-          if (receipt && !matchesDiskHash(spec.path, "skill", receipt.hash))
+          if (
+            receipt &&
+            !(receipt.adoptedLink !== undefined
+              ? change.beforeHash === receipt.hash
+              : matchesDiskHash(spec.path, "skill", receipt.hash))
+          )
             throw new AppError(
               "LOCAL_DRIFT",
               "已部署 Skill 被外部修改；请先导入修改或回滚部署",
@@ -723,15 +728,18 @@ export class Engine {
           409,
         );
       for (const f of record.files) {
-        const actual =
+        const pendingLink =
           record.status === "pending" &&
           f.link !== undefined &&
           exists(f.path) &&
-          fs.lstatSync(f.path).isSymbolicLink()
-            ? adoptedSkillHash(f.path, f.link)
-            : diskHash(f.path, f.kind);
+          fs.lstatSync(f.path).isSymbolicLink();
+        const actual = pendingLink
+          ? adoptedSkillHash(f.path, f.link!)
+          : diskHash(f.path, f.kind);
         if (
-          !matchesDiskHash(f.path, f.kind, f.afterHash) &&
+          !(pendingLink
+            ? actual === f.afterHash
+            : matchesDiskHash(f.path, f.kind, f.afterHash)) &&
           !(
             record.status === "pending" &&
             (actual ===

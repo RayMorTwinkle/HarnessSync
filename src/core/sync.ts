@@ -180,10 +180,13 @@ export class Sync {
     // Validate all write targets before changing anything.
     noSymlink(this.store.repo);
     noSymlink(path.join(this.store.repo, "skills"));
-    for (const dir of fs.readdirSync(path.join(this.store.repo, "skills")))
+    const dirs = fs
+      .readdirSync(path.join(this.store.repo, "skills"))
+      .filter((name) => !name.startsWith(".hsync-staging-"));
+    for (const dir of dirs)
       noSymlink(path.join(this.store.repo, "skills", dir));
     writeManifest(this.store.repo, library.manifest);
-    for (const dir of fs.readdirSync(path.join(this.store.repo, "skills")))
+    for (const dir of dirs)
       if (!library.manifest.skills.some((s) => s.id === dir))
         fs.rmSync(this.store.skillPath(dir), { recursive: true, force: true });
     for (const s of library.manifest.skills)
@@ -388,7 +391,13 @@ export class Sync {
         this.safety();
         try {
           this.write(merged);
-          this.git(["add", "--all"]);
+          this.git([
+            "add",
+            "--all",
+            "--",
+            ".",
+            ":(exclude)skills/.hsync-staging-*",
+          ]);
           const tree = this.git(["write-tree"]);
           const sha =
             base === local &&

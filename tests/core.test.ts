@@ -92,10 +92,7 @@ test("skills retain resources, unknown frontmatter and executable bits across ed
     globalScope,
   );
   assert.ok(!JSON.stringify(store.manifest()).includes(dir));
-  assert.equal(
-    store.device().origins?.[skill.id],
-    fs.realpathSync(path.join(dir, "incoming")),
-  );
+  assert.equal(store.device().origins?.[skill.id], path.join(dir, "incoming"));
   await store.saveSkill({ ...skill, body: "Updated workflow" }, skill.id);
   await engine.apply(engine.plan().id);
   for (const entry of placeSkills(
@@ -121,7 +118,7 @@ test("skills retain resources, unknown frontmatter and executable bits across ed
 });
 test("identical unowned native skills are adopted without writes; different contents conflict", async (t) => {
   const { store, engine, harnesses } = await fixture(t);
-  const incoming = makeSkill(path.join(harnesses[0].skills, "test-skill"));
+  const incoming = makeSkill(path.join(harnesses[2].skills, "test-skill"));
   await store.importSkill(incoming, globalScope);
   const stat = fs.statSync(incoming);
   assert.equal(
@@ -142,10 +139,10 @@ test("identical unowned native skills are adopted without writes; different cont
 });
 test("explicit adoption can manage an existing native skill without replacing its content", async (t) => {
   const { store, engine, harnesses } = await fixture(t);
-  const incoming = makeSkill(path.join(harnesses[0].skills, "test-skill"));
+  const incoming = makeSkill(path.join(harnesses[2].skills, "test-skill"));
   const skill = await store.importSkill(incoming, globalScope, undefined, true);
   assert.equal(
-    engine.plan().changes.find((c) => c.harness === "deepseek")?.status,
+    engine.plan().changes.find((c) => c.path === incoming)?.status,
     "unchanged",
   );
   await store.saveSkill({ ...skill, body: "Adopted update" }, skill.id);
@@ -189,7 +186,7 @@ test("project skills and variables stay isolated from globals and other concurre
   });
   await engine.apply(engine.plan().id);
   assert.match(fs.readFileSync(path.join(a, "AGENTS.md"), "utf8"), /Alpha at/);
-  assert.ok(fs.existsSync(path.join(a, ".dsh/skills/test-skill/SKILL.md")));
+  assert.ok(fs.existsSync(path.join(a, ".agents/skills/test-skill/SKILL.md")));
   assert.ok(fs.existsSync(path.join(a, ".claude/skills/test-skill/SKILL.md")));
   assert.ok(!fs.existsSync(path.join(b, "AGENTS.md")));
   assert.ok(!fs.existsSync(path.join(harnesses[0].skills, "test-skill")));
@@ -263,10 +260,10 @@ test("disable removes managed skills and deployment rollback restores the exact 
   await engine.apply(engine.plan().id);
   await store.saveSkill({ ...skill, body: "Unused", enabled: false }, skill.id);
   const deployment = await engine.apply(engine.plan().id);
-  assert.ok(!fs.existsSync(path.join(harnesses[0].skills, skill.name)));
+  assert.ok(!fs.existsSync(path.join(harnesses[2].skills, skill.name)));
   await engine.rollback(deployment.id!);
   assert.ok(
-    fs.existsSync(path.join(harnesses[0].skills, skill.name, "asset.bin")),
+    fs.existsSync(path.join(harnesses[2].skills, skill.name, "asset.bin")),
   );
 });
 test("rollback refuses later native edits and restores exact original unmanaged instructions", async (t) => {
