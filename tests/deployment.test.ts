@@ -200,7 +200,7 @@ test("plan reports staging; apply cleans only owned leftovers, retaining rename 
   assert.ok(fs.existsSync(foreign));
 });
 
-test("successful apply retains latest 20 snapshots plus older pending/failed records; latest rollback works", async (t) => {
+test("successful apply bounds snapshots to 20 including failed records; latest rollback works", async (t) => {
   const { store, engine } = await fixture(t);
   const dir = path.join(store.root, "deployments");
   for (let i = 0; i < 24; i++)
@@ -214,8 +214,8 @@ test("successful apply retains latest 20 snapshots plus older pending/failed rec
     });
   await store.saveRule({ title: "Retention", body: "hello" });
   const deployment = await engine.apply(engine.plan().id);
-  assert.equal(fs.readdirSync(dir).length, 21);
-  assert.ok(fs.existsSync(path.join(dir, "1000-abcdefab.json")));
+  assert.equal(fs.readdirSync(dir).length, 20);
+  assert.equal(fs.existsSync(path.join(dir, "1000-abcdefab.json")), false);
   await engine.rollback(deployment.id!);
   assert.equal(store.state().receipts.length, 0);
   // A pending record beyond the former 40-record display cap still blocks apply.

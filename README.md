@@ -4,14 +4,14 @@
 
 当前适配 **DeepSeek Harness、OpenCode V2、Codex 和 Claude Code**，提供本机 Web GUI 和 CLI，共用同一套核心。
 
-当前发布版本 **v0.3.0**：支持通过私有 GitHub 仓库跨设备同步，源配置逐条存储，设备数据保留本机。
+当前发布版本 **v0.4.0**：自动跨设备同步、从 Git 仓库安装并追踪技能更新、同名目录冲突可在预览中逐项处理，GUI 支持深色模式和字号调整。
 
 ## 安装
 
 需要 **Node.js 22.12+、npm、Git**。安装器面向 macOS 与 Linux；Windows 请在 WSL 内使用。目前真实 Harness 会话验收环境为 macOS；跨平台测试不能替代各 Harness 的实际会话验收。
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.3.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.4.0/install.sh | bash
 ```
 
 默认安装到 `~/.local/share/harness-sync`，命令启动器为 `~/.local/bin/hsync`。不需要 sudo，不修改 shell 配置，不自动改写已有 Harness 配置。若启动器目录不在 PATH 中，按安装器提示添加，或直接使用完整路径：
@@ -29,9 +29,9 @@ curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.3.0/in
 希望先查看脚本或指定目录时：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.3.0/install.sh -o install-harness-sync.sh
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.4.0/install.sh -o install-harness-sync.sh
 bash install-harness-sync.sh --help
-bash install-harness-sync.sh --ref v0.3.0 \
+bash install-harness-sync.sh --ref v0.4.0 \
   --install-dir "$HOME/.local/share/harness-sync" \
   --bin-dir "$HOME/.local/bin"
 ```
@@ -48,7 +48,7 @@ bash install-harness-sync.sh --ref v0.3.0 \
 可以把下面这段话交给有终端和网络权限的 AI；此方式让 AI 读取安装 Skill，不要求预先安装 HarnessSync：
 
 ```text
-请读取 https://github.com/RayMorTwinkle/HarnessSync/blob/v0.3.0/skills/harness-sync-install/SKILL.md，按其中说明在本机安装 HarnessSync，并完成扫描和管理技能部署。保留原有配置，把生成的初始化提示词交给我。
+请读取 https://github.com/RayMorTwinkle/HarnessSync/blob/v0.4.0/skills/harness-sync-install/SKILL.md，按其中说明在本机安装 HarnessSync，并完成扫描和管理技能部署。保留原有配置，把生成的初始化提示词交给我。
 ```
 
 也可把 `skills/harness-sync-install/` 完整目录放入所用 Harness 支持的用户技能目录。它不依赖仓库外的个人技能或本机固定路径。
@@ -81,6 +81,10 @@ hsync serve
 - 源配置本地 Git 历史和版本恢复。
 - `manage-harness-sync` 管理 Skill，使 AI 通过 CLI 管理配置。
 - 本机 HTTP 服务仅监听 127.0.0.1，校验 Host、Origin 与会话 token。
+- 私有 Git 仓库跨设备同步：停止编辑后自动推送、定期拉取，冲突逐条处理并可撤销。
+- 从 GitHub 或任意 Git 仓库安装技能，按技能目录检查上游更新、查看差异、更新或脱离上游。
+- 同名目录内容不同时可逐项选择：用库版本覆盖（可回滚）、把本机版本收进技能库或本次跳过。
+- GUI 深色模式与三档字号。
 
 ## 首次部署到一台机器
 
@@ -170,6 +174,11 @@ hsync sync setup --url git@github.com:USER/config.git  # 与 create 二选一
 hsync sync status --json
 hsync sync now --json
 hsync sync resolve ENTRY_ID --keep local       # 或 remote / both
+hsync sync auto on                            # setup 后默认开启
+hsync sync auto set --debounce 120 --interval 10
+hsync sync watch                              # 不开 GUI 时在前台自动同步
+hsync sync history
+hsync sync undo                               # 撤销最近一次 resolve/restore
 hsync plan                                    # 审查后再 apply
 hsync sync disconnect                         # 保留本地配置
 ```
@@ -177,6 +186,21 @@ hsync sync disconnect                         # 保留本地配置
 新机器可选择直接开始本地配置，或用 `sync setup --url` 恢复已有远端库。远端为空时推送本地；双方已有内容时按条目三方合并，技能按元数据与完整包一起比较。冲突保留本地并记录待处理项，其余条目仍同步。`both` 为远端副本生成新 ID，技能名称加数字后缀；删除冲突需选择保留本地或远端。
 
 同步与解决冲突前保留 Git 安全点，可从 `history` 找到原提交并用 `restore` 恢复。解决选择先保存在本地，再运行 `sync now` 推送。同步不会部署原生目录；每次拉取后请审查 `plan`。设备作用域源条目会同步，但只在目标设备部署；设备身份、变量、目录绑定、部署与初始化快照均留在 Git 外。Git URL 不应含令牌或密码。
+
+自动同步只在 GUI 服务（`hsync open`/`serve`）或 `sync watch` 运行时进行；离线时逐步延长重试间隔，拉到其他设备的改动只标记待部署，不会自动写入 Harness。
+
+## 从 Git 安装技能
+
+```sh
+hsync skills install owner/repo                # 仓库内多个技能时列出候选
+hsync skills install owner/repo --skill a,b
+hsync skills updates                           # 只在技能自己的目录变化时提示
+hsync skills diff NAME
+hsync skills update NAME                       # 本地改过时拒绝，--force 覆盖
+hsync skills detach NAME
+```
+
+来源记录随源库同步到其他设备。安装和更新只修改技能库，之后仍需 `plan` → `apply`。
 
 v1 的 `manifest.json` 仍可只读打开；首次修改或同步自动迁移为逐条文件并提交「迁移配置库到 v2」。迁移无需手工导入。
 
@@ -227,7 +251,7 @@ DeepSeek、OpenCode 和 Codex 共用项目根 `AGENTS.md`，面向其中任一�
 - 扫描支持最多六层分类目录、真实路径与链接入口去重，并识别平铺 Markdown。平铺技能需要先整理成目录包；插件托管和系统内置技能不自动纳管。
 - 由其他工具提供的同名 Skill 和它们的实际优先级需结合 Harness 的原生目录与会话检查；不会声称扫描结果就是全部有效上下文。
 - 拒绝写入符号链接目标，拒绝导入包含链接或特殊文件的技能包。macOS 系统 `/var`、`/tmp`、`/etc` 别名除外。
-- 一次部署中任一冲突会阻止整次部署。语义冲突需要人工或 AI 审查，不自动判定自然语言规则优先级。
+- 未处理的冲突会阻止整次部署；同名技能目录可用 `hsync conflicts choose` 或 GUI 预览逐项处理。语义冲突需要人工或 AI 审查，不自动判定自然语言规则优先级。
 
 ## 验证
 

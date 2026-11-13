@@ -1,6 +1,15 @@
+import {
+  installGitSkills,
+  checkGitSkillUpdates,
+  updateGitSkills,
+  diffGitSkill,
+  detachGitSkill,
+  listedSkills,
+} from "./core/git-skills.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
+import { startSyncScheduler } from "./core/sync-scheduler.ts";
 import { Sync } from "./core/sync.ts";
 import {
   ignoreNativePaths,
@@ -26,7 +35,7 @@ import { openWebUi, parsePort } from "./web-ui.ts";
 const cli = new Command()
   .name("hsync")
   .description("HarnessSync · 统一管理四种 AI Harness 的指令与技能")
-  .version("0.3.0")
+  .version("0.4.0")
   .option("--root <directory>", "配置库目录")
   .option("--json", "机器可读 JSON 输出");
 let store: Store;
@@ -103,6 +112,23 @@ cli
   .command("plan")
   .description("预览完整部署差异")
   .action(run(async () => publicPlan(new Engine(await getStore()).plan())));
+const conflicts = cli.command("conflicts").description("处理本机同名技能冲突");
+conflicts
+  .command("list")
+  .action(run(async () => new Engine(await getStore()).conflicts()));
+conflicts
+  .command("choose <target>")
+  .requiredOption("--use <choice>", "library / native / skip")
+  .action(
+    run(async (target, o) =>
+      new Engine(await getStore()).chooseConflict(target, o.use),
+    ),
+  );
+conflicts
+  .command("clear [path]")
+  .action(
+    run(async (target) => new Engine(await getStore()).clearConflicts(target)),
+  );
 cli
   .command("apply")
   .description("部署已预览的计划")
@@ -130,9 +156,12 @@ cli
         errors: plan.errors,
         warnings: plan.warnings,
         conflicts: conflicts.map((c) => ({ path: c.path, reason: c.reason })),
+        skipped: plan.changes
+          .filter((c) => c.status === "skipped")
+          .map((c) => ({ path: c.path, reason: c.reason })),
         pendingDeployments: pending,
         pendingChanges: plan.changes.filter(
-          (c) => !["unchanged", "conflict"].includes(c.status),
+          (c) => !["unchanged", "conflict", "skipped"].includes(c.status),
         ).length,
         observed: "filesystem-only",
         sessionLoaded: "unknown",
@@ -209,6 +238,50 @@ sync
   .command("status")
   .action(run(async () => new Sync(await getStore()).status()));
 sync.command("now").action(run(async () => new Sync(await getStore()).now()));
+const auto = sync.command("auto").description("设置本机自动同步");
+for (const mode of ["on", "off"])
+  auto
+    .command(mode)
+    .action(
+      run(async () =>
+        new Sync(await getStore()).setAuto({ enabled: mode === "on" }),
+      ),
+    );
+auto
+  .command("set")
+  .option("--debounce <秒>", "编辑停止后的等待秒数")
+  .option("--interval <分钟>", "定期同步间隔")
+  .action(
+    run(async (o) =>
+      new Sync(await getStore()).setAuto({
+        ...(o.debounce !== undefined
+          ? { debounceSeconds: Number(o.debounce) }
+          : {}),
+        ...(o.interval !== undefined
+          ? { pullIntervalMinutes: Number(o.interval) }
+          : {}),
+      }),
+    ),
+  );
+sync
+  .command("history")
+  .action(run(async () => new Sync(await getStore()).history()));
+sync.command("undo").action(run(async () => new Sync(await getStore()).undo()));
+sync
+  .command("watch")
+  .description("前台自动同步，按 Ctrl+C 退出")
+  .action(async () => {
+    const stop = startSyncScheduler(new Sync(await getStore()));
+    output({
+      message: "自动同步调度器已启动，按 Ctrl+C 退出；设置关闭时等待开启",
+    });
+    const close = async () => {
+      await stop();
+      process.exit(0);
+    };
+    process.once("SIGINT", close);
+    process.once("SIGTERM", close);
+  });
 sync
   .command("resolve <entry-id>")
   .requiredOption("--keep <choice>", "local / remote / both")
@@ -244,10 +317,7 @@ scopeOptions(
   ),
 );
 scopeOptions(
-  rules
-    .command("edit <id>")
-    .option("--title <title>")
-    .option("--file <file>"),
+  rules.command("edit <id>").option("--title <title>").option("--file <file>"),
 ).action(
   run(async (id, o, cmd) => {
     const s = await getStore();
@@ -273,9 +343,52 @@ rules.command("remove <id>").action(
   }),
 );
 const skills = cli.command("skills").description("管理完整 Skill 包");
+skills.command("list").action(run(async () => listedSkills(await getStore())));
+scopeOptions(
+  skills
+    .command("install <source>")
+    .description("从 Git 仓库安装技能，安装后需预览部署")
+    .option("--skill <names>", "逗号分隔的名称或仓库子路径")
+    .option("--all", "安装所有候选技能")
+    .option("--ref <ref>", "分支、标签或提交"),
+).action(
+  run(async (source, o) => {
+    const result = await installGitSkills(await getStore(), source, {
+      skills: o.skill?.split(","),
+      all: o.all,
+      ref: o.ref,
+      scope: scope(o),
+    });
+    if (result.selectionRequired) process.exitCode = 1;
+    return result;
+  }),
+);
 skills
-  .command("list")
-  .action(run(async () => (await getStore()).manifest().skills));
+  .command("updates [ids...]")
+  .description("检查 Git 上游更新，不下载内容")
+  .action(
+    run(async (ids) => {
+      const results = await checkGitSkillUpdates(await getStore(), ids);
+      if (results.some((result) => result.error)) process.exitCode = 1;
+      return results;
+    }),
+  );
+skills
+  .command("update <ids...>")
+  .option("--force", "覆盖源库中的本地修改")
+  .action(
+    run(async (ids, o) =>
+      updateGitSkills(await getStore(), ids, Boolean(o.force)),
+    ),
+  );
+skills
+  .command("diff <id>")
+  .description("比较库版本与最新 Git 上游")
+  .action(run(async (id) => diffGitSkill(await getStore(), id)));
+skills
+  .command("detach <id>")
+  .description("删除 Git 来源，保留技能内容")
+  .action(run(async (id) => detachGitSkill(await getStore(), id)));
 skills
   .command("refresh [id]")
   .description("从本机源目录刷新完整技能包，保留范围、启停和显示名")
@@ -301,7 +414,7 @@ skills.command("show <id>").action(
     const s = await getStore();
     const key = findId(s.manifest().skills, id);
     return {
-      ...s.manifest().skills.find((x) => x.id === key),
+      ...listedSkills(s).find((x) => x.id === key),
       ...parseSkill(
         fs.readFileSync(path.join(s.skillPath(key), "SKILL.md"), "utf8"),
       ),

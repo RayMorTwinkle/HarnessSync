@@ -8,12 +8,32 @@ import {
   Github,
   Link2,
   Loader2,
+  History,
   RefreshCw,
   ShieldCheck,
   TriangleAlert,
+  Undo2,
   Zap,
 } from "lucide-react";
-import type { Snapshot, SyncConflict, SyncStatus } from "../shared/types.ts";
+import type {
+  AutoSyncSettings,
+  Snapshot,
+  SyncConflict,
+  SyncStatus,
+} from "../shared/types.ts";
+
+type HistoryItem = {
+  hash: string;
+  date: string;
+  message: string;
+  device: string;
+  changes: {
+    kind: "rules" | "skills" | "projects";
+    id: string;
+    name?: string;
+    action: string;
+  }[];
+};
 
 type Act = (fn: () => Promise<unknown>, message?: string) => Promise<unknown>;
 type Api = <T>(route: string, body?: unknown, method?: string) => Promise<T>;
@@ -28,6 +48,18 @@ const time = (date?: string) =>
         minute: "2-digit",
       })
     : "从未同步";
+const relative = (date?: string) => {
+  if (!date) return "";
+  const diff = Date.parse(date) - Date.now(),
+    minutes = Math.round(Math.abs(diff) / 60_000);
+  const text =
+    minutes < 1
+      ? "不到 1 分钟"
+      : minutes < 60
+        ? `${minutes} 分钟`
+        : `${Math.round(minutes / 60)} 小时`;
+  return diff > 0 ? `${text}后` : `${text}前`;
+};
 
 export function SyncPanel({
   data,
@@ -192,8 +224,22 @@ export function SyncPanel({
     );
 
   const conflicts = status.conflicts;
+  const pendingDeploy = status.scheduler.pendingDeployment;
   return (
     <div className="sync-layout">
+      {pendingDeploy > 0 && (
+        <div className="sync-pending">
+          <ArrowDownToLine size={16} />
+          <span>
+            其他设备带来了 <strong>{pendingDeploy}</strong>{" "}
+            项变更，已合并到技能库，还没有写入各 Harness。
+          </span>
+          <button className="button small primary" onClick={openPlan}>
+            <Zap size={13} />
+            预览并部署
+          </button>
+        </div>
+      )}
       <section className="panel settings-card">
         <div className="settings-card-title">
           <GitBranch size={19} />
@@ -268,6 +314,23 @@ export function SyncPanel({
           </button>
         </div>
       </section>
+      <AutoSyncCard
+        status={status}
+        busy={busy}
+        save={(patch) =>
+          run(
+            () =>
+              api<AutoSyncSettings>("sync/auto", patch, "PUT").then(() =>
+                api<SyncStatus>("sync/status"),
+              ),
+            patch.enabled === false
+              ? "已关闭自动同步"
+              : patch.enabled
+                ? "已开启自动同步"
+                : "已保存自动同步设置",
+          )
+        }
+      />
       {conflicts.length > 0 ? (
         <section className="panel sync-conflicts">
           <div className="settings-card-title">
@@ -298,10 +361,251 @@ export function SyncPanel({
             />
           ))}
         </section>
-      ) : (
-        <SyncFacts />
-      )}
+      ) : null}
+      <SyncHistory
+        api={api}
+        busy={busy}
+        revision={status.lastSyncedCommit}
+        undoable={!!status.undo?.available}
+        undo={() =>
+          run(
+            () => api<SyncStatus>("sync/undo", {}),
+            "已撤销，以新提交恢复到操作前",
+          )
+        }
+      />
     </div>
+  );
+}
+
+function AutoSyncCard({
+  status,
+  busy,
+  save,
+}: {
+  status: SyncStatus;
+  busy: boolean;
+  save: (patch: Partial<AutoSyncSettings>) => void;
+}) {
+  const { auto, scheduler } = status;
+  const failing = scheduler.failures > 0 && scheduler.lastError;
+  return (
+    <section className="panel settings-card auto-sync">
+      <div className="settings-card-title">
+        <RefreshCw size={19} />
+        <div>
+          <h2>自动同步</h2>
+          <p>
+            停止编辑一会儿后自动推送，并定期拉取其他设备的改动。只在 GUI 服务或{" "}
+            <code>hsync sync watch</code> 运行时进行。
+          </p>
+        </div>
+        <button
+          role="switch"
+          aria-checked={auto.enabled}
+          aria-label="自动同步"
+          className={`toggle ${auto.enabled ? "on" : ""}`}
+          disabled={busy}
+          onClick={() => save({ enabled: !auto.enabled })}
+        >
+          <span />
+        </button>
+      </div>
+      {auto.enabled && (
+        <>
+          <div className={`auto-sync-state ${failing ? "warn" : ""}`}>
+            {failing ? (
+              <>
+                <TriangleAlert size={14} />
+                <span>
+                  连续 {scheduler.failures} 次失败：{scheduler.lastError}
+                  {scheduler.nextRunAt &&
+                    `。将在 ${relative(scheduler.nextRunAt)}重试`}
+                </span>
+              </>
+            ) : (
+              <>
+                <Check size={14} />
+                <span>
+                  {scheduler.lastSuccessAt
+                    ? `上次成功 ${relative(scheduler.lastSuccessAt)}`
+                    : "尚未自动同步过"}
+                  {status.pushBlocked
+                    ? "。有冲突待处理，暂停推送"
+                    : scheduler.pendingPush
+                      ? "。有本机改动等待推送"
+                      : ""}
+                  {scheduler.nextRunAt &&
+                    `，下次 ${relative(scheduler.nextRunAt)}`}
+                </span>
+              </>
+            )}
+          </div>
+          <div className="auto-sync-fields">
+            <label>
+              编辑后等待
+              <select
+                value={auto.debounceSeconds}
+                disabled={busy}
+                onChange={(e) =>
+                  save({ debounceSeconds: Number(e.target.value) })
+                }
+              >
+                {[30, 60, 120, 300, 600]
+                  .concat(
+                    [30, 60, 120, 300, 600].includes(auto.debounceSeconds)
+                      ? []
+                      : [auto.debounceSeconds],
+                  )
+                  .map((v) => (
+                    <option key={v} value={v}>
+                      {v < 60 ? `${v} 秒` : `${v / 60} 分钟`}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label>
+              拉取间隔
+              <select
+                value={auto.pullIntervalMinutes}
+                disabled={busy}
+                onChange={(e) =>
+                  save({ pullIntervalMinutes: Number(e.target.value) })
+                }
+              >
+                {[5, 10, 30, 60]
+                  .concat(
+                    [5, 10, 30, 60].includes(auto.pullIntervalMinutes)
+                      ? []
+                      : [auto.pullIntervalMinutes],
+                  )
+                  .map((v) => (
+                    <option key={v} value={v}>
+                      {v < 60 ? `${v} 分钟` : `${v / 60} 小时`}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function SyncHistory({
+  api,
+  busy,
+  revision,
+  undoable,
+  undo,
+}: {
+  api: Api;
+  busy: boolean;
+  revision?: string;
+  undoable: boolean;
+  undo: () => void;
+}) {
+  const [items, setItems] = useState<HistoryItem[] | null>(null);
+  const [error, setError] = useState("");
+  const [confirm, setConfirm] = useState(false);
+  useEffect(() => {
+    let live = true;
+    setError("");
+    api<HistoryItem[]>("sync/history")
+      .then((x) => live && setItems(x))
+      .catch((e) => live && setError(e.message));
+    return () => {
+      live = false;
+    };
+  }, [revision]);
+  const verb = { 新增: "added", 修改: "modified", 删除: "removed" } as Record<
+    string,
+    string
+  >;
+  return (
+    <section className="panel sync-history">
+      <div className="sync-history-head">
+        <h3>
+          <History size={15} />
+          同步历史
+        </h3>
+        {confirm ? (
+          <span className="sync-undo-confirm">
+            撤销最近一次冲突处理或恢复？
+            <button
+              className="button small"
+              disabled={busy}
+              onClick={() => setConfirm(false)}
+            >
+              取消
+            </button>
+            <button
+              className="button small primary"
+              disabled={busy}
+              onClick={() => {
+                setConfirm(false);
+                undo();
+              }}
+            >
+              撤销
+            </button>
+          </span>
+        ) : (
+          undoable && (
+            <button
+              className="sync-undo"
+              disabled={busy}
+              onClick={() => setConfirm(true)}
+            >
+              <Undo2 size={13} />
+              撤销上一次处理
+            </button>
+          )
+        )}
+      </div>
+      {error ? (
+        <p className="sync-history-empty">{error}</p>
+      ) : !items ? (
+        <p className="sync-history-empty">
+          <Loader2 size={14} className="spin" /> 正在读取…
+        </p>
+      ) : !items.length ? (
+        <p className="sync-history-empty">还没有记录。</p>
+      ) : (
+        <ol>
+          {items.map((item) => (
+            <li key={item.hash}>
+              <div className="sync-history-meta">
+                <strong>{item.message}</strong>
+                <span>
+                  {item.device} · {time(item.date)} ·{" "}
+                  <code>{item.hash.slice(0, 7)}</code>
+                </span>
+              </div>
+              {item.changes.length > 0 && (
+                <div className="sync-history-changes">
+                  {item.changes.slice(0, 6).map((c) => (
+                    <span
+                      key={`${c.kind}-${c.id}`}
+                      className={`history-chip ${verb[c.action] || ""}`}
+                    >
+                      {c.action}
+                      {kindLabel[c.kind]} {c.name || c.id.slice(0, 8)}
+                    </span>
+                  ))}
+                  {item.changes.length > 6 && (
+                    <span className="history-chip">
+                      等 {item.changes.length} 项
+                    </span>
+                  )}
+                </div>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
   );
 }
 

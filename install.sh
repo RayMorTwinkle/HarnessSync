@@ -3,7 +3,7 @@
 set -euo pipefail
 
 repo="${HSYNC_REPO:-https://github.com/RayMorTwinkle/HarnessSync.git}"
-ref="${HSYNC_REF:-v0.3.0}"
+ref="${HSYNC_REF:-v0.4.0}"
 install_dir="${HSYNC_INSTALL_DIR:-${HOME}/.local/share/harness-sync}"
 bin_dir="${HSYNC_BIN_DIR:-${HOME}/.local/bin}"
 stage=""
@@ -16,7 +16,7 @@ usage() {
 HarnessSync 安装器
 
 用法：bash install.sh [选项]
-  --ref <tag或分支>       安装版本，默认 v0.3.0
+  --ref <tag或分支>       安装版本，默认 v0.4.0
   --install-dir <目录>    程序目录，默认 ~/.local/share/harness-sync
   --bin-dir <目录>        hsync 启动器目录，默认 ~/.local/bin
   --repo <Git地址>        源仓库，也可使用本地 Git 仓库进行验证

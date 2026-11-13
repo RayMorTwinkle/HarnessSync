@@ -35,9 +35,22 @@ export const skillInput = z.object({
   enabled: z.boolean().default(true),
   scope: scopeSchema.default({ kind: "global", harnesses: [...harnessIds] }),
 });
+export const gitSkillSourceSchema = z.object({
+  type: z.literal("git"),
+  url: z.string().min(1),
+  ref: z.string().min(1),
+  subpath: z.string(),
+  commit: z.string().regex(/^[0-9a-f]{40,64}$/),
+  installedHash: z.string().min(1),
+  tree: z
+    .string()
+    .regex(/^[0-9a-f]{40,64}$/)
+    .optional(),
+});
+export type GitSkillSource = z.infer<typeof gitSkillSourceSchema>;
 export type Skill = Omit<z.infer<typeof skillInput>, "body"> & {
   id: string;
-  source?: string;
+  source?: string | GitSkillSource;
 };
 export const projectInput = z.object({
   name: z.string().trim().min(1).max(100),
@@ -77,6 +90,7 @@ export type Harness = {
   note: string;
 };
 export type Receipt = {
+  adoptedSourceHash?: string;
   adoptedLink?: string;
   kind: "instructions" | "skill";
   harness: HarnessId;
@@ -87,6 +101,15 @@ export type Receipt = {
 };
 export type DeployState = {
   receipts: Receipt[];
+  conflictChoices?: Record<
+    string,
+    {
+      use: "library" | "native" | "skip";
+      fingerprint: string;
+      sourceId: string;
+      sourceHash?: string;
+    }
+  >;
   instructionReplacements?: { path: string; hash: string }[];
 };
 export type Change = {
@@ -95,13 +118,34 @@ export type Change = {
   harness: HarnessId;
   sourceId?: string;
   projectId?: string;
-  status: "adopt" | "create" | "update" | "remove" | "unchanged" | "conflict";
+  status:
+    | "replace"
+    | "skipped"
+    | "adopt"
+    | "create"
+    | "update"
+    | "remove"
+    | "unchanged"
+    | "conflict";
   reason: string;
   beforeHash: string;
   afterHash: string;
   before: string;
   after: string;
   diff: string;
+  conflictFingerprint?: string;
+  conflictOptions?: string[];
+  fileChanges?: {
+    path: string;
+    status: "added" | "removed" | "modified";
+    binary: boolean;
+    beforeLink?: string;
+    beforeSize: number;
+    afterSize: number;
+    beforeHash: string;
+    afterHash: string;
+    diff?: string;
+  }[];
   files?: Record<string, { content: string; mode: number }>;
 };
 export type Plan = {
@@ -219,21 +263,48 @@ export type SyncConflict = {
 export type SyncConfig = {
   url: string;
   branch: string;
+  lastFetchedCommit?: string;
   lastSyncedCommit?: string;
   lastSyncTime?: string;
   conflicts: SyncConflict[];
 };
+export type AutoSyncSettings = {
+  enabled: boolean;
+  debounceSeconds: number;
+  pullIntervalMinutes: number;
+};
+export type SyncRuntime = {
+  lastAttemptAt?: string;
+  lastSuccessAt?: string;
+  lastError?: string;
+  nextRunAt?: string;
+  pullDueAt?: string;
+  failures: number;
+  pendingDeployment: number;
+  pendingPush?: boolean;
+  observedSource?: string;
+  changedAt?: string;
+};
 export type SyncStatus = {
+  auto: AutoSyncSettings;
+  scheduler: SyncRuntime;
+  remoteRepositoryRetained: true;
   connected: boolean;
   remote?: string;
   branch?: string;
   ahead: number;
   behind: number;
+  lastFetchedCommit?: string;
   lastSyncedCommit?: string;
   lastSyncTime?: string;
   conflicts: SyncConflict[];
   pushBlocked?: boolean;
   message: string;
+  undo?: {
+    available: boolean;
+    kind?: "resolve" | "restore" | "recovery";
+    at?: string;
+  };
 };
 export type SyncSetup = {
   url?: string;

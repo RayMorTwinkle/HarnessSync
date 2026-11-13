@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { AppearanceMenu } from "./Appearance";
 import {
   Activity,
   ArrowDownToLine,
@@ -55,6 +56,14 @@ declare const __APP_VERSION__: string;
 import { harnessIds, harnessNames } from "../shared/harnesses.ts";
 import { OnboardingPanel } from "./OnboardingPanel.tsx";
 import { SyncPanel } from "./SyncPanel.tsx";
+import { ConflictChoice, type ConflictUse } from "./ConflictChoice.tsx";
+import {
+  GitInstallDialog,
+  SourceChip,
+  SourceDialog,
+  gitSource,
+  type UpdateCheck,
+} from "./SkillSources.tsx";
 
 type Page =
   | "overview"
@@ -150,6 +159,8 @@ function App() {
   const [scan, setScan] = useState<Inspection | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
+  const [updates, setUpdates] = useState<Record<string, UpdateCheck>>({});
+  const [updatesChecked, setUpdatesChecked] = useState(false);
   const refresh = async () => {
     const x = await api<Snapshot>("snapshot");
     setData(x);
@@ -173,6 +184,18 @@ function App() {
     setQuery("");
     setFilter("all");
   }, [page]);
+  const gitSkillCount =
+    data?.manifest.skills.filter((s) => gitSource(s)).length || 0;
+  useEffect(() => {
+    // Checking runs git ls-remote per repository; once per session is enough.
+    if (page !== "skills" || !gitSkillCount || updatesChecked) return;
+    setUpdatesChecked(true);
+    api<UpdateCheck[]>("skills/updates", {})
+      .then((list) =>
+        setUpdates(Object.fromEntries(list.map((u) => [u.id, u]))),
+      )
+      .catch(() => {});
+  }, [page, gitSkillCount, updatesChecked]);
   useEffect(() => {
     const listener = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -211,7 +234,7 @@ function App() {
     );
   const { manifest, device } = data;
   const pending = data.plan.changes.filter(
-    (c) => !["unchanged", "conflict"].includes(c.status),
+    (c) => !["unchanged", "conflict", "skipped"].includes(c.status),
   );
   const conflicts = data.plan.changes.filter((c) => c.status === "conflict");
   const activeSkills = manifest.skills.filter((s) => s.enabled);
@@ -351,6 +374,7 @@ function App() {
             >
               <RefreshCw size={16} className={busy ? "spin" : ""} />
             </button>
+            <AppearanceMenu />
             <span className="top-avatar">R</span>
           </div>
         </header>
@@ -738,6 +762,12 @@ function App() {
                     导入
                   </button>
                   <button
+                    className="button"
+                    onClick={() => setModal({ type: "git" })}
+                  >
+                    <GitBranch size={14} />从 Git 安装
+                  </button>
+                  <button
                     className="button dark"
                     onClick={() => setModal({ type: "skill" })}
                   >
@@ -782,7 +812,18 @@ function App() {
                         <h3>{s.displayName || s.name}</h3>
                         <p>{s.description}</p>
                       </button>
-                      <ScopeLabel scope={s.scope} data={data} />
+                      <div className="skill-card-tags">
+                        <ScopeLabel scope={s.scope} data={data} />
+                        {gitSource(s) && (
+                          <SourceChip
+                            source={gitSource(s)!}
+                            update={updates[s.id]}
+                            onClick={() =>
+                              setModal({ type: "source", item: s })
+                            }
+                          />
+                        )}
+                      </div>
                       <div className="skill-card-bottom">
                         <span className="mini-harnesses">
                           {s.scope.harnesses.map((h) => (
@@ -1196,6 +1237,8 @@ function App() {
                       rule: modal.item ? "编辑指令片段" : "添加指令片段",
                       project: modal.item ? "项目设置" : "添加项目",
                       scan: "导入已有 Skills",
+                      git: "从 Git 安装技能",
+                      source: `${modal.item?.name} · 上游来源`,
                       confirm: modal.item?.title,
                       variables: "可用变量",
                     }[modal.type]
@@ -1332,6 +1375,30 @@ function App() {
                 </div>
               </div>
             )}
+            {modal.type === "git" && (
+              <GitInstallDialog
+                api={api}
+                act={act}
+                busy={busy}
+                done={() => {
+                  setModal(null);
+                  setUpdatesChecked(false);
+                }}
+              />
+            )}
+            {modal.type === "source" && (
+              <SourceDialog
+                skill={modal.item}
+                update={updates[modal.item.id]}
+                api={api}
+                act={act}
+                busy={busy}
+                done={() => {
+                  setModal(null);
+                  setUpdatesChecked(false);
+                }}
+              />
+            )}
             {modal.type === "confirm" && (
               <div className="confirm-body">
                 <p>{modal.item.text}</p>
@@ -1391,6 +1458,23 @@ function App() {
               "部署完成，原生文件已更新",
             );
             setPlanOpen(false);
+          }}
+          choose={async (change, use) => {
+            await act(
+              () =>
+                use
+                  ? api("conflicts/choose", {
+                      path: change.path,
+                      use,
+                      fingerprint: change.conflictFingerprint,
+                    })
+                  : api("conflicts/clear", { path: change.path }),
+              use === "native"
+                ? "已把本机版本收进技能库"
+                : use
+                  ? "已更新处理方式，计划已重新生成"
+                  : "已撤销选择",
+            );
           }}
         />
       )}
@@ -1867,17 +1951,31 @@ function PlanDrawer({
   busy,
   close,
   apply,
+  choose,
 }: {
   plan: Plan;
   home: string;
   busy: boolean;
   close: () => void;
   apply: () => Promise<void>;
+  choose: (change: Change, use: ConflictUse | null) => Promise<void>;
 }) {
-  const changed = plan.changes.filter((c) => c.status !== "unchanged");
-  const [selected, setSelected] = useState<Change | null>(
-    changed[0] || plan.changes[0] || null,
+  const changed = plan.changes.filter(
+    (c) => !["unchanged", "conflict", "skipped"].includes(c.status),
   );
+  const [selectedPath, setSelectedPath] = useState(
+    () =>
+      (
+        plan.changes.find((c) => c.status === "conflict") ||
+        changed[0] ||
+        plan.changes[0]
+      )?.path,
+  );
+  // The plan is replaced after every choice; keep the selection by path.
+  const selected =
+    plan.changes.find((c) => c.path === selectedPath) ||
+    plan.changes[0] ||
+    null;
   const [error, setError] = useState("");
   const [status, setStatus] = useState<Change["status"] | "all">("all");
   const conflicts = plan.changes.filter((c) => c.status === "conflict");
@@ -1885,10 +1983,12 @@ function PlanDrawer({
     p === home || p.startsWith(home + "/") ? "~" + p.slice(home.length) : p;
   const order: Change["status"][] = [
     "conflict",
+    "replace",
     "create",
     "update",
     "adopt",
     "remove",
+    "skipped",
     "unchanged",
   ];
   const counts = Object.fromEntries(
@@ -1898,7 +1998,9 @@ function PlanDrawer({
     .filter((c) => status === "all" || c.status === status)
     .sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
   const linkReplace = (c: Change) => c.reason === "以副本替换链接";
-  const labels = {
+  const labels: Record<Change["status"], string> = {
+    replace: "覆盖",
+    skipped: "跳过",
     adopt: "接管",
     create: "新增",
     update: "更新",
@@ -1985,7 +2087,7 @@ function PlanDrawer({
                 <button
                   key={c.path}
                   className={selected?.path === c.path ? "selected" : ""}
-                  onClick={() => setSelected(c)}
+                  onClick={() => setSelectedPath(c.path)}
                 >
                   <span
                     className={`change-tag ${c.status} ${linkReplace(c) ? "link" : ""}`}
@@ -2026,7 +2128,9 @@ function PlanDrawer({
                   ) : (
                     <ShieldCheck size={15} />
                   )}
-                  {selected.reason}
+                  {selected.conflictOptions && selected.status === "conflict"
+                    ? "已有同名目录，内容与技能库不同"
+                    : selected.reason}
                 </div>
                 {selected.status === "adopt" ? (
                   <div className="conflict-detail calm">
@@ -2043,6 +2147,20 @@ function PlanDrawer({
                       部署时只移除这个链接本身，换成技能库中的完整副本；链接指向的源目录不会被修改。回滚会恢复原来的链接。源目录之后有更新时，用「刷新」把改动带回技能库。
                     </p>
                   </div>
+                ) : selected.conflictOptions &&
+                  ["conflict", "replace", "skipped"].includes(
+                    selected.status,
+                  ) ? (
+                  <ConflictChoice
+                    change={selected}
+                    busy={busy}
+                    choose={(use) => {
+                      setError("");
+                      void choose(selected, use).catch((e) =>
+                        setError(e.message),
+                      );
+                    }}
+                  />
                 ) : selected.status === "conflict" ? (
                   <div className="conflict-detail">
                     <h3>保留文件，先解决来源差异</h3>

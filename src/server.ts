@@ -1,3 +1,11 @@
+import {
+  installGitSkills,
+  checkGitSkillUpdates,
+  updateGitSkills,
+  diffGitSkill,
+  detachGitSkill,
+  listedSkills,
+} from "./core/git-skills.ts";
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
@@ -5,6 +13,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { Engine, publicPlan } from "./core/engine.ts";
+import { startSyncScheduler } from "./core/sync-scheduler.ts";
 import { Sync } from "./core/sync.ts";
 import { Store } from "./core/store.ts";
 import { AppError, hash, parseSkill } from "./core/files.ts";
@@ -126,6 +135,18 @@ export async function startServer(
               })
               .parse(body),
           );
+        else if (resource === "sync" && req.method === "GET" && id === "auto")
+          result = new Sync(store).autoSettings();
+        else if (resource === "sync" && req.method === "PUT" && id === "auto")
+          result = await new Sync(store).setAuto(body);
+        else if (
+          resource === "sync" &&
+          req.method === "GET" &&
+          id === "history"
+        )
+          result = await new Sync(store).history();
+        else if (resource === "sync" && req.method === "POST" && id === "undo")
+          result = await new Sync(store).undo();
         else if (resource === "sync" && req.method === "POST" && id === "now")
           result = await new Sync(store).now();
         else if (
@@ -149,13 +170,71 @@ export async function startServer(
           result = await createOnboarding(store);
         else if (req.method === "POST" && resource === "onboarding-bootstrap")
           result = await bootstrapOnboarding(store, z.string().parse(body.id));
+        else if (
+          resource === "skills" &&
+          req.method === "POST" &&
+          id === "install"
+        )
+          result = await installGitSkills(
+            store,
+            z.string().min(1).parse(body.source),
+            z
+              .object({
+                skills: z.array(z.string().min(1)).optional(),
+                all: z.boolean().optional(),
+                ref: z.string().min(1).optional(),
+                commit: z.string().optional(),
+                scope: scopeSchema.optional(),
+              })
+              .parse(body),
+          );
+        else if (
+          resource === "skills" &&
+          req.method === "POST" &&
+          id === "updates"
+        )
+          result = await checkGitSkillUpdates(
+            store,
+            z.array(z.string()).default([]).parse(body.ids),
+          );
+        else if (
+          resource === "skills" &&
+          req.method === "POST" &&
+          id === "update"
+        )
+          result = await updateGitSkills(
+            store,
+            z.array(z.string()).min(1).parse(body.ids),
+            z.boolean().default(false).parse(body.force),
+          );
+        else if (
+          resource === "skills" &&
+          req.method === "GET" &&
+          id &&
+          parts[3] === "diff"
+        )
+          result = await diffGitSkill(store, id);
+        else if (
+          resource === "skills" &&
+          req.method === "POST" &&
+          id &&
+          parts[3] === "detach"
+        )
+          result = await detachGitSkill(store, id);
+        else if (resource === "skills" && req.method === "GET" && !id)
+          result = listedSkills(store);
         else if (req.method === "GET" && resource === "skills" && id) {
           const skill = store.manifest().skills.find((s) => s.id === id);
           if (!skill) throw new AppError("NOT_FOUND", "Skill 不存在", 404);
           const { body: markdown } = parseSkill(
             fs.readFileSync(path.join(store.skillPath(id), "SKILL.md"), "utf8"),
           );
-          result = { ...skill, body: markdown };
+          result = {
+            ...skill,
+            localSource: listedSkills(store).find((s) => s.id === id)
+              ?.localSource,
+            body: markdown,
+          };
         } else if (req.method === "POST" && resource === "rules")
           result = await store.saveRule(body.value, id, body.revision);
         else if (req.method === "POST" && resource === "skills")
@@ -170,6 +249,28 @@ export async function startServer(
             scopeSchema.parse(body.scope || {}),
             body.revision,
             z.boolean().default(false).parse(body.adopt),
+          );
+        else if (req.method === "GET" && resource === "plan")
+          result = publicPlan(engine.plan());
+        else if (req.method === "GET" && resource === "conflicts" && !id)
+          result = engine.conflicts();
+        else if (
+          req.method === "POST" &&
+          resource === "conflicts" &&
+          id === "choose"
+        )
+          result = await engine.chooseConflict(
+            z.string().min(1).parse(body.path),
+            z.enum(["library", "native", "skip"]).parse(body.use),
+            z.string().optional().parse(body.fingerprint),
+          );
+        else if (
+          req.method === "POST" &&
+          resource === "conflicts" &&
+          id === "clear"
+        )
+          result = await engine.clearConflicts(
+            z.string().min(1).optional().parse(body.path),
           );
         else if (req.method === "POST" && resource === "apply")
           result = await engine.apply(z.string().parse(body.planId));
@@ -269,11 +370,13 @@ export async function startServer(
       resolve();
     });
   });
+  const stopSync = startSyncScheduler(new Sync(store));
   return {
     server,
     port: actualPort,
     url: `http://127.0.0.1:${actualPort}`,
     close: async () => {
+      await stopSync();
       await vite?.close();
       await new Promise<void>((resolve, reject) =>
         server.close((e) => (e ? reject(e) : resolve())),
