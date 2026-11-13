@@ -35,8 +35,13 @@ hsync serve --background
 - `unchanged`；或仍匹配原生指纹的显式 `skip` 选择。
 - `create` 且目标不存在。目标位置由正常 Engine 作用域和路径校验产生，成功后登记所有权。
 - 有匹配类型收据的 `update/remove`，并通过 Engine 的外部修改校验。
+- 曾手动授权插入的已有指令路径，可在授权仍有效时自动重新插入管理区块。
 
-任意计划 error 或 `notices[].blocking=true`、`conflict/adopt/replace`、未托管的已有指令更新、链接接管、初始化指令完整替换登记、未完成部署、未恢复的源操作或未解决同步冲突，都会停止整次自动部署。插件清单错误、未知 Harness、停用/缺失工具的路径保留、共享目录可见性和显式外部保留均是信息提示，不阻断其余干净路径。暂存残留、本机源目录有更新或无法读取仍要求人工审查。Harness notes 只在元数据展示，不构成部署障碍。不会自动解决冲突或自动确认接管/覆盖。外部同名目录即使内容相同，也需要手动预览并应用接管计划。
+首次手动应用向已有未托管指令文件插入管理区块的计划后，本机 `state.json.instructionConsents` 保存该绝对路径及区块外全文指纹；这不是源配置，不随 Git 或设备迁移。撤下区块后仍保留授权，同一路径再次启用规则可自动写入，原有区块外内容保留。引擎插入的分隔换行会随部署更新指纹。每次部署持锁检查：文件缺失、不可读、符号链接、管理标记损坏或区块外内容变化均清除授权，之后即使恢复旧文本也需重新手动应用。新路径不继承授权；初始化完整替换不会授予授权。授权随部署快照回滚。
+
+HarnessSync 新建的指令文件会在收据中记录来源；撤下管理区块后若只剩空白，则通过正常部署快照删除文件，之后重新启用为干净创建。已有文件、旧收据来源不明的文件，以及仍有区块外内容的文件保留；删除可正常回滚。
+
+任意计划 error 或 `notices[].blocking=true`、`conflict/adopt/replace`、未授权且未托管的已有指令更新、链接接管、初始化指令完整替换登记、未完成部署、未恢复的源操作或未解决同步冲突，都会停止整次自动部署。插件清单错误、未知 Harness、停用/缺失工具的路径保留、共享目录可见性和显式外部保留均是信息提示，不阻断其余干净路径。暂存残留、本机源目录有更新或无法读取仍要求人工审查。Harness notes 只在元数据展示，不构成部署障碍。不会自动解决冲突或自动确认接管/覆盖。外部同名目录即使内容相同，也需要手动预览并应用接管计划。
 
 计划新增 `notices: {code,message,blocking,path?}[]`，每个通知生成点必须显式选择 code 和 blocking；原有 `warnings: string[]` 从通知消息派生，保留显示兼容。自动部署只检查 blocking，不匹配 code 或中文文案；阻断项携带可选 code 与对应路径。通知分类和内容参与计划 ID，策略变化也使旧计划失效。逐类依据见 [通知分类报告](v0.5-notices-report.md)。
 
@@ -73,14 +78,14 @@ changes 是计划中的新增/更新/删除数量；needs-review 不表示这些
 
 调度器每 5 秒读取本机设置，按 updates.intervalHours 检查 Git 技能上游；检查只提示更新，不自动安装更新。完整手动检查也会推迟下次后台检查。失败从 30 秒开始指数退避，最多 6 小时，保存于 `update-check-state.json`；后台不重复打印网络错误。改变设置在下次轮询生效。检查和同步异步工作都由 close 等待，关闭时取消所有周期及 debounce 计时器。
 
-`serve`、`open` 新服务、`sync watch` 共享同一调度器。`scheduler-owner.json` 用 PID 与随机 token 做配置库级独占；活进程占有时其他调度器返回 `SCHEDULER_RUNNING`，已退出 PID 可恢复。`open` 优先复用默认端口上已验证身份的同库服务，后台实例也适用；指定另一个端口不会绕过同库独占。
+`serve`、`open` 新服务、`sync watch` 共享同一调度器。`scheduler-owner.json` 用 PID、进程启动时间与随机 token 做配置库级独占；通过 execFile 调用 ps 读取启动时间，Linux 在 ps 不可用时回退到 /proc 的启动时钟和启动 ID。系统限制无法查询时，使用仅监听 127.0.0.1 的随机端口与 token 探活，防止把复用 PID 的无关进程认作调度器。身份匹配时其他调度器返回 `SCHEDULER_RUNNING`；已退出、PID 被复用或缺少进程身份的旧记录可接管，关闭时只清理自己 token 的记录并关闭探活端口。`open` 优先复用默认端口上已验证身份的同库服务，后台实例也适用；指定另一个端口不会绕过同库独占。
 
 ## 登录启动
 
 macOS 使用 `$HOME/Library/LaunchAgents/io.github.raymortwinkle.harness-sync.plist`，RunAtLoad，只有异常退出才 KeepAlive。Linux 使用 `$HOME/.config/systemd/user/harness-sync.service`、`Restart=on-failure`。其他系统明确报告不支持。
 
-启动参数为绝对 Node 路径、绝对 `dist/cli.js` 路径、`serve --background`，默认端口 47821，不打开浏览器且隐藏启动日志。开发态 `tsx src/cli.ts` 拒绝安装；先构建安装，再运行安装后的 CLI。服务环境显式携带当前 HARNESS_SYNC_HOME 和 PATH。移动安装目录或 Node 后需重新安装服务。
+启动参数为绝对 Node 路径、绝对 `dist/cli.js` 路径、`serve --background`，默认端口 47821，不打开浏览器且隐藏启动日志。开发态 `tsx src/cli.ts` 拒绝安装；先构建安装，再运行安装后的 CLI。服务环境显式携带当前配置根 HARNESS_SYNC_HOME、PATH，以及当前已设置的 CLAUDE_CONFIG_DIR、CODEX_HOME、DSH_HOME、DSH_AGENTS_HOME、XDG_CONFIG_HOME；同时从 Harness 注册表收集所有已加载清单的 root.env 及原生路径中 {env:NAME|fallback} 引用的变量。未设置的变量不写入，空字符串保留，不复制整个 shell 环境。plist 使用 XML 转义，systemd 使用其 Environment= 引号、转义与百分号规则。`hsync service status --json` 的 environment 返回固化值，overrideDifferences 返回与当前 shell 不同的变量名，warnings 提醒重新安装（包含新增或取消设置）。移动安装目录或 Node 后需重新安装服务。
 
-日志位于配置根目录的 `logs/service.log`。启动及后台轮询检查大小，达到 5 MiB 时复制到单个 `.1` 备份并截断原文件，保留服务持有的日志文件描述符。卸载只删除经 Label/内容标记核验属于本项目的服务文件；拒绝外部文件和符号链接。日志和源配置保留。
+日志位于配置根目录的 `logs/service.log`。启动及后台轮询检查大小，达到 5 MiB 时复制到单个 `.1` 备份并截断原文件，保留服务持有的日志文件描述符。安装、卸载在每次文件修改前重新核验 Label/内容标记、原内容、文件身份及符号链接祖先；异步状态查询或停止期间被替换的文件不会覆盖或删除。失败恢复仅在文件仍是本次写入版本时还原或删除；卸载恢复还检查路径仍空缺且父目录未替换。拒绝外部文件和符号链接。日志和源配置保留。
 
 在正在运行的登录服务中关闭 startup.login 会卸载并停止该服务，当前 HTTP 连接可能断开；服务文件会在停止进程前移除。可使用 `hsync open` 再启动前台界面。操作系统命令全部通过可注入 runner，测试只操作临时 HOME 和配置根目录。

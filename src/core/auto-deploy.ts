@@ -23,6 +23,7 @@ export function lastAutoDeploy(store: Store): AutoDeployResult | null {
 // Status names alone do not capture initialization replacements or adopted links.
 export function autoDeployBlockers(engine: Engine, plan: Plan) {
   const state = engine.store.state();
+  const consents = engine.instructionConsents();
   const blockers: NonNullable<AutoDeployResult["blockers"]> = [];
   const sync = new Sync(engine.store);
   if (sync.recoveryPending())
@@ -66,7 +67,10 @@ export function autoDeployBlockers(engine: Engine, plan: Plan) {
     const owned =
       c.status === "create"
         ? c.beforeHash === hash("ABSENT")
-        : !!receipt && receipt.kind === c.kind;
+        : (!!receipt && receipt.kind === c.kind) ||
+          (c.kind === "instructions" &&
+            c.status === "update" &&
+            consents.some((consent) => consent.path === c.path));
     if (
       !["create", "update", "remove"].includes(c.status) ||
       !owned ||
@@ -102,6 +106,7 @@ export async function autoDeploy(
       result.outcome = "disabled";
     else {
       const plan = await store.lock(() => {
+        engine.pruneInstructionConsents();
         const p = engine.plan();
         result.blockers = autoDeployBlockers(engine, p);
         return p;

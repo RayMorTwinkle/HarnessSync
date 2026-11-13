@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
 import {
   autoDeploy,
   lastAutoDeploy,
@@ -14,12 +15,299 @@ import { Engine, publicPlan } from "../src/core/engine.ts";
 import { ignoreNativePaths } from "../src/core/skill-sources.ts";
 import { Store } from "../src/core/store.ts";
 import { Sync } from "../src/core/sync.ts";
-import { startBackgroundScheduler } from "../src/core/sync-scheduler.ts";
+import {
+  startBackgroundScheduler,
+  processStartTime,
+} from "../src/core/sync-scheduler.ts";
 import { UpdateChecker } from "../src/core/update-checks.ts";
 import { writeJson, hash, skillMarkdown } from "../src/core/files.ts";
 import { startServer } from "../src/server.ts";
 import { openWebUi } from "../src/web-ui.ts";
 import { fixture, pause, until, ui } from "./settings-helpers.ts";
+
+test("existing CLAUDE.md consent survives disable/re-enable while empty self-created AGENTS.md files are deleted and rollback restores them", async (t) => {
+  const { engine, store, home } = await fixture(t);
+  const claude = path.join(home, ".claude/CLAUDE.md");
+  fs.mkdirSync(path.dirname(claude), { recursive: true });
+  fs.writeFileSync(claude, "用户已有指令\n");
+  const rule = await store.saveRule({ title: "全局规则", body: "保留内容" });
+  const paused = await autoDeploy(engine, "first-write");
+  assert.equal(paused.outcome, "needs-review");
+  assert.deepEqual(
+    paused.blockers?.map((b) => b.path),
+    [claude],
+  );
+  assert.equal(store.state().receipts.length, 0);
+  await engine.apply(engine.plan().id);
+  assert.equal(store.state().instructionConsents?.length, 1);
+  assert.equal(store.state().instructionConsents?.[0].path, claude);
+  const agents = store
+    .state()
+    .receipts.filter((r) => r.path !== claude)
+    .map((r) => r.path);
+  assert.equal(agents.length, 3);
+  assert.ok(
+    store
+      .state()
+      .receipts.every((r) => r.instructionCreated === (r.path !== claude)),
+  );
+  await store.saveRule({ ...rule, enabled: false }, rule.id);
+  const removal = await autoDeploy(engine, "disable");
+  assert.equal(removal.outcome, "applied");
+  assert.ok(agents.every((p) => !fs.existsSync(p)));
+  assert.match(fs.readFileSync(claude, "utf8"), /^用户已有指令\n\s*$/);
+  await engine.rollback(removal.deploymentId!);
+  assert.ok(
+    agents.every((p) =>
+      fs.readFileSync(p, "utf8").includes("harness-sync:begin"),
+    ),
+  );
+  assert.equal(store.state().instructionConsents?.length, 1);
+  assert.equal((await autoDeploy(engine, "disable-again")).outcome, "applied");
+  await store.saveRule({ ...rule, enabled: true }, rule.id);
+  const enabled = await autoDeploy(engine, "enable");
+  assert.equal(enabled.outcome, "applied");
+  assert.equal(enabled.changes.create, 3);
+  assert.equal(enabled.changes.update, 1);
+  assert.match(fs.readFileSync(claude, "utf8"), /^用户已有指令\n/);
+  // Consent remains usable over multiple cycles, including separators inserted by the engine.
+  await store.saveRule({ ...rule, enabled: false }, rule.id);
+  await autoDeploy(engine, "disable-third");
+  await store.saveRule({ ...rule, enabled: true }, rule.id);
+  assert.equal((await autoDeploy(engine, "enable-third")).outcome, "applied");
+  const snapshot = JSON.parse(
+    fs.readFileSync(
+      path.join(store.root, "deployments", `${enabled.deploymentId}.json`),
+      "utf8",
+    ),
+  );
+  assert.ok(snapshot.beforeState.instructionConsents.length);
+});
+
+for (const modification of [
+  "outside",
+  "missing",
+  "malformed",
+  "symlink",
+] as const) {
+  test(`instruction consent is revoked on ${modification} and does not return when old text returns`, async (t) => {
+    const { engine, store, root } = await fixture(t);
+    const rule = await store.saveRule({ title: "rule", body: "text" });
+    const target = engine.plan().changes[0].path;
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, "用户内容\n");
+    await engine.apply(engine.plan().id);
+    await store.saveRule({ ...rule, enabled: false }, rule.id);
+    await autoDeploy(engine, "disable");
+    const original = fs.readFileSync(target, "utf8");
+    if (modification === "outside") fs.appendFileSync(target, "外部变化\n");
+    if (modification === "missing") fs.unlinkSync(target);
+    if (modification === "malformed")
+      fs.appendFileSync(target, "<!-- harness-sync:begin -->");
+    if (modification === "symlink") {
+      fs.unlinkSync(target);
+      const external = path.join(root, "external.md");
+      fs.writeFileSync(external, original);
+      fs.symlinkSync(external, target);
+    }
+    await autoDeploy(engine, "observe-change");
+    assert.deepEqual(store.state().instructionConsents, []);
+    if (modification === "symlink") fs.unlinkSync(target);
+    fs.writeFileSync(target, original);
+    await store.saveRule({ ...rule, enabled: true }, rule.id);
+    assert.equal((await autoDeploy(engine, "enable")).outcome, "needs-review");
+    await engine.apply(engine.plan().id);
+    assert.equal(store.state().instructionConsents?.length, 1);
+  });
+}
+
+test("instruction consent is per store/path, legacy receipts preserve files, and manual rollback revokes new consent", async (t) => {
+  const { engine, store } = await fixture(t);
+  const rule = await store.saveRule({ title: "rule", body: "text" });
+  const paths = engine.plan().changes.map((c) => c.path);
+  fs.mkdirSync(path.dirname(paths[0]), { recursive: true });
+  fs.writeFileSync(paths[0], "已有内容\n");
+  const first = await engine.apply(engine.plan().id);
+  await engine.rollback(first.id!);
+  assert.equal(store.state().instructionConsents?.length || 0, 0);
+  assert.equal(
+    (await autoDeploy(engine, "after-rollback")).outcome,
+    "needs-review",
+  );
+  await engine.apply(engine.plan().id);
+  const other = await fixture(t);
+  await other.store.saveRule({ title: "rule", body: "text" });
+  const otherPath = other.engine.plan().changes[0].path;
+  fs.mkdirSync(path.dirname(otherPath), { recursive: true });
+  fs.writeFileSync(otherPath, "已有内容\n");
+  assert.equal(
+    (await autoDeploy(other.engine, "other-device")).outcome,
+    "needs-review",
+  );
+  const state = store.state();
+  delete state.receipts.find((r) => r.path === paths[1])!.instructionCreated;
+  writeJson(path.join(store.root, "state.json"), state);
+  await store.saveRule({ ...rule, enabled: false }, rule.id);
+  await autoDeploy(engine, "remove");
+  assert.equal(fs.existsSync(paths[1]), true);
+  fs.writeFileSync(paths[2], "另一个未授权路径\n");
+  await store.saveRule({ ...rule, enabled: true }, rule.id);
+  const blocked = await autoDeploy(engine, "enable");
+  assert.equal(blocked.outcome, "needs-review");
+  assert.ok(blocked.blockers?.some((b) => b.path === paths[2]));
+  assert.ok(!blocked.blockers?.some((b) => b.path === paths[0]));
+});
+
+test("scheduler takes over reused/legacy/invalid PIDs but rejects a matching live process start time", async (t) => {
+  const { store, engine } = await fixture(t);
+  const file = path.join(store.root, "scheduler-owner.json");
+  assert.ok(await processStartTime(process.pid));
+  assert.equal(await processStartTime(-1), null);
+  for (const previous of [
+    { pid: process.pid, startTime: "ps:old process" },
+    { pid: process.pid },
+    { pid: -1, startTime: "old" },
+    { pid: 2147483647, startTime: "old" },
+  ]) {
+    writeJson(file, { ...previous, token: "stale" });
+    const scheduler = await startBackgroundScheduler(store, engine);
+    try {
+      const owner = JSON.parse(fs.readFileSync(file, "utf8"));
+      assert.equal(owner.pid, process.pid);
+      assert.equal(owner.startTime, await processStartTime(process.pid));
+      await assert.rejects(startBackgroundScheduler(store), {
+        code: "SCHEDULER_RUNNING",
+      });
+      writeJson(file, { ...owner, token: "new-owner" });
+    } finally {
+      await scheduler.close();
+    }
+    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).token, "new-owner");
+  }
+});
+
+test("scheduler identity fallback rejects another real scheduler process and releases its probe on close", async (t) => {
+  const { store, home, defer } = await fixture(t);
+  const child = spawn(
+    process.execPath,
+    [
+      "--import",
+      "tsx",
+      "--input-type=module",
+      "-e",
+      `
+    import { Store } from './src/core/store.ts';
+    import { startBackgroundScheduler } from './src/core/sync-scheduler.ts';
+    const scheduler = await startBackgroundScheduler(new Store(${JSON.stringify(store.root)}, ${JSON.stringify(home)}));
+    process.send('ready');
+    process.on('message', async () => { await scheduler.close(); process.exit(0); });
+  `,
+    ],
+    { stdio: ["ignore", "ignore", "pipe", "ipc"] },
+  );
+  defer(async () => {
+    if (child.exitCode === null) {
+      child.kill();
+      await once(child, "exit");
+    }
+  });
+  let errors = "";
+  child.stderr!.on("data", (data) => {
+    errors += data.toString();
+  });
+  const ready = await Promise.race([
+    once(child, "message").then(([message]) => message),
+    once(child, "exit").then(() => {
+      throw new Error(errors);
+    }),
+  ]);
+  assert.equal(ready, "ready");
+  const file = path.join(store.root, "scheduler-owner.json");
+  const owner = JSON.parse(fs.readFileSync(file, "utf8"));
+  // Force the probe path even where ps works: runtime identities are process-local.
+  writeJson(file, { ...owner, startTime: "runtime:other-process" });
+  await assert.rejects(startBackgroundScheduler(store), {
+    code: "SCHEDULER_RUNNING",
+  });
+  writeJson(file, {
+    ...owner,
+    startTime: "runtime:other-process",
+    token: "wrong-token",
+  });
+  const replacement = await startBackgroundScheduler(store);
+  child.send("close");
+  await once(child, "exit");
+  assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).pid, process.pid);
+  await replacement.close();
+  assert.equal(fs.existsSync(file), false);
+});
+
+test("failed removal restores deleted self-created instruction files and their receipts", async (t) => {
+  const { store, engine } = await fixture(t);
+  const rule = await store.saveRule({ title: "rule", body: "text" });
+  await autoDeploy(engine, "create");
+  const state = store.state();
+  const paths = state.receipts.map((r) => r.path);
+  const contents = paths.map((p) => fs.readFileSync(p, "utf8"));
+  await store.saveRule({ ...rule, enabled: false }, rule.id);
+  const remove = fs.rmSync;
+  const mock = t.mock.method(
+    fs,
+    "rmSync",
+    (target: fs.PathLike, options?: fs.RmOptions) => {
+      if (target === paths[1]) throw new Error("injected removal failure");
+      return remove(target, options);
+    },
+  );
+  try {
+    await assert.rejects(
+      engine.apply(engine.plan().id),
+      /injected removal failure/,
+    );
+  } finally {
+    mock.mock.restore();
+  }
+  assert.deepEqual(store.state(), state);
+  assert.deepEqual(
+    paths.map((p) => fs.readFileSync(p, "utf8")),
+    contents,
+  );
+  assert.equal(engine.deployments()[0].status, "failed");
+});
+
+test("a fresh manual plan can reauthorize changed outside text without a false stale-plan rejection", async (t) => {
+  const { store, engine } = await fixture(t);
+  const rule = await store.saveRule({ title: "rule", body: "text" });
+  const target = engine.plan().changes[0].path;
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, "原内容\n");
+  await engine.apply(engine.plan().id);
+  await store.saveRule({ ...rule, enabled: false }, rule.id);
+  await autoDeploy(engine, "disable");
+  fs.appendFileSync(target, "新内容\n");
+  await store.saveRule({ ...rule, enabled: true }, rule.id);
+  await engine.apply(engine.plan().id);
+  assert.equal(store.state().instructionConsents?.length, 1);
+  assert.match(fs.readFileSync(target, "utf8"), /新内容/);
+});
+
+test("outside edits while managed revoke consent without losing the user's text on owned updates", async (t) => {
+  const { store, engine } = await fixture(t);
+  const rule = await store.saveRule({ title: "rule", body: "text" });
+  const target = engine.plan().changes[0].path;
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, "用户内容\n");
+  await engine.apply(engine.plan().id);
+  fs.appendFileSync(target, "区块外修改\n");
+  await store.saveRule({ ...rule, body: "updated" }, rule.id);
+  assert.equal((await autoDeploy(engine, "owned-update")).outcome, "applied");
+  assert.deepEqual(store.state().instructionConsents, []);
+  assert.match(fs.readFileSync(target, "utf8"), /区块外修改/);
+  await store.saveRule({ ...rule, enabled: false }, rule.id);
+  await autoDeploy(engine, "disable");
+  await store.saveRule({ ...rule, enabled: true }, rule.id);
+  assert.equal((await autoDeploy(engine, "enable")).outcome, "needs-review");
+});
 
 test("clean automatic deployment uses normal receipts/snapshots and can roll back", async (t) => {
   const { engine, store } = await fixture(t);

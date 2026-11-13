@@ -55,6 +55,7 @@ import type {
   Plan,
   PlanNotice,
   Receipt,
+  DeployState,
   Rule,
   Scope,
   Snapshot,
@@ -82,7 +83,7 @@ type Deployment = {
   date: string;
   changes: number;
   status: "pending" | "applied" | "failed" | "rolled-back";
-  beforeState: { receipts: Receipt[] };
+  beforeState: DeployState;
   files: SavedFile[];
 };
 
@@ -104,8 +105,35 @@ function replaceBlock(text: string, block: string | null) {
     ? `${text}${text && !text.endsWith("\n") ? "\n" : ""}${text ? "\n" : ""}${block}\n`
     : text;
 }
+export function instructionOutsideHash(text: string) {
+  return hash(replaceBlock(text, null));
+}
 export class Engine {
   constructor(readonly store: Store) {}
+  instructionConsents() {
+    return (this.store.state().instructionConsents || []).filter((consent) => {
+      try {
+        noSymlink(consent.path);
+        return (
+          exists(consent.path) &&
+          instructionOutsideHash(fs.readFileSync(consent.path, "utf8")) ===
+            consent.outsideHash
+        );
+      } catch {
+        return false;
+      }
+    });
+  }
+  // Caller holds the Store lock. Missing, unreadable or changed outside text revokes consent.
+  pruneInstructionConsents() {
+    const state = this.store.state();
+    const consents = this.instructionConsents();
+    if (consents.length !== (state.instructionConsents || []).length)
+      writeJson(path.join(this.store.root, "state.json"), {
+        ...state,
+        instructionConsents: consents,
+      });
+  }
   private deploymentCache = new Map<
     string,
     { key: string; value: Deployment }
@@ -342,12 +370,17 @@ export class Engine {
               "NO_REPLACEMENT",
               "替换全局指令前，需要先保存适用于该 Harness 的源指令",
             );
-          const after = replacement
+          let after = replacement
             ? spec.block + "\n"
             : replaceBlock(before, spec.removing ? null : spec.block || null);
+          const deleteCreated =
+            spec.removing &&
+            receipt?.instructionCreated === true &&
+            !after.trim();
+          if (deleteCreated) after = "";
           change.after = after;
           change.afterHash = hash(after);
-          if (!after && spec.removing) change.afterHash = absent;
+          if (deleteCreated) change.afterHash = absent;
           change.status =
             before === after
               ? "unchanged"
@@ -972,6 +1005,7 @@ export class Engine {
           409,
         );
       const plan = this.plan(options);
+      this.pruneInstructionConsents();
       if (plan.id !== expectedPlanId)
         throw new AppError(
           "STALE_PLAN",
@@ -1077,6 +1111,7 @@ export class Engine {
         );
       writeJson(recordPath, record);
       const done: SavedFile[] = [];
+      const instructionConsents = this.instructionConsents();
       try {
         for (const change of changed) {
           const adoption = state.receipts.find(
@@ -1136,8 +1171,37 @@ export class Engine {
         const receipts = state.receipts.filter(
           (r) => !changed.some((c) => c.path === r.path),
         );
+        for (const c of changed.filter((c) => c.kind === "instructions")) {
+          const receipt = state.receipts.find((r) => r.path === c.path);
+          const consent = instructionConsents.find((r) => r.path === c.path);
+          if (consent) consent.outsideHash = instructionOutsideHash(c.after);
+          // Only an explicit manual insertion into an unmanaged existing file grants consent.
+          if (
+            !options.validate &&
+            c.status === "update" &&
+            !receipt &&
+            !managedBlock(c.before) &&
+            !state.instructionReplacements?.some((r) => r.path === c.path)
+          ) {
+            const previous = instructionConsents.findIndex(
+              (r) => r.path === c.path,
+            );
+            if (previous >= 0) instructionConsents.splice(previous, 1);
+            instructionConsents.push({
+              path: c.path,
+              outsideHash: instructionOutsideHash(c.after),
+            });
+          }
+        }
         for (const c of changed.filter((c) => c.status !== "remove"))
           receipts.push({
+            ...(c.kind === "instructions"
+              ? {
+                  instructionCreated:
+                    state.receipts.find((r) => r.path === c.path)
+                      ?.instructionCreated ?? c.beforeHash === absent,
+                }
+              : {}),
             ...(c.status === "adopt" &&
             state.conflictChoices?.[c.path]?.use === "native"
               ? { adoptedSourceHash: state.conflictChoices[c.path].sourceHash }
@@ -1155,6 +1219,7 @@ export class Engine {
         writeJson(path.join(this.store.root, "state.json"), {
           ...state,
           receipts: confirmGlobalPaths(receipts),
+          instructionConsents,
           instructionReplacements: state.instructionReplacements?.filter(
             (r) => !changed.some((c) => c.path === r.path),
           ),
