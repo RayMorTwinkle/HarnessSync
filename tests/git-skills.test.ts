@@ -341,7 +341,7 @@ test("HTTP 两步安装固定候选提交，更新、差异、脱离与访问控
     "<html><head><!--HSYNC_TOKEN--></head><body>test</body></html>",
   );
   const server = await startServer(f.store, { port: 0, uiDirectory: ui });
-  t.after(() => server.server.close());
+  t.after(() => server.close());
   const origin = new URL(server.url).origin;
   const html = await (await fetch(server.url)).text();
   const token = html.match(/content="([a-f0-9]+)"/)![1];

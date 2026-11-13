@@ -19,7 +19,13 @@ import {
   cleanStaging,
   type Bundle,
 } from "./files.ts";
-import { kinds, stable, readManifest, writeManifest } from "./layout.ts";
+import {
+  kinds,
+  stable,
+  manifestSchema,
+  readManifest,
+  writeManifest,
+} from "./layout.ts";
 import type {
   AutoSyncSettings,
   SyncRuntime,
@@ -31,6 +37,12 @@ import type {
 } from "../shared/types.ts";
 
 type Library = { manifest: Manifest; bundles: Record<string, Bundle> };
+type HistoryChange = {
+  kind: (typeof kinds)[number];
+  id: string;
+  name: string;
+  action: string;
+};
 const empty = (): Library => ({
   manifest: { schemaVersion: 1, rules: [], skills: [], projects: [] },
   bundles: {},
@@ -473,45 +485,185 @@ export class Sync {
     });
   }
   async history() {
-    return this.store.lock(() =>
-      this.store.history().map((item) => {
-        const library = this.read(item.hash);
-        let before = empty();
-        try {
-          before = this.read(this.git(["rev-parse", `${item.hash}^1`]));
-        } catch {}
-        const changes = kinds.flatMap((kind) =>
-          [
-            ...new Set(
-              [...library.manifest[kind], ...before.manifest[kind]].map(
-                (e) => e.id,
-              ),
-            ),
-          ].flatMap((id) => {
-            const a = before.manifest[kind].find((e) => e.id === id),
-              b = library.manifest[kind].find((e) => e.id === id);
+    return this.store.lock(() => {
+      // These are local object queries; they do not need remote credential helpers.
+      const git = (args: string[]) => this.store.git(args);
+      const blobs = new Map<string, string>();
+      const blob = (id: string) => {
+        if (!blobs.has(id)) blobs.set(id, git(["cat-file", "blob", id]));
+        return blobs.get(id)!;
+      };
+      const trees = new Map<string, Map<string, string>>();
+      const tree = (commit?: string): Map<string, string> => {
+        if (!commit) return new Map();
+        if (!trees.has(commit)) {
+          const files = new Map<string, string>();
+          // Inspect paths and modes, never skill contents. Also detects legacy
+          // layouts when manifest.json itself did not change in this commit.
+          for (const row of git(["ls-tree", "-rz", commit])
+            .split("\0")
+            .filter(Boolean)) {
+            const match = row.match(
+              /^(100644|100755) blob ([a-f0-9]+)\t([\s\S]+)$/,
+            );
             if (
-              stable(a) === stable(b) &&
-              (kind !== "skills" ||
-                stable(before.bundles[id]) === stable(library.bundles[id]))
+              !match ||
+              !/^(manifest\.json|harness-sync\.json|entries\/(rules|skills|projects)\/[a-zA-Z0-9-]+\.json|skills\/[a-zA-Z0-9-]+\/.+)$/.test(
+                match[3],
+              )
             )
-              return [];
-            const entry = (b || a) as any;
-            return [
-              {
-                kind,
-                id,
-                name: entry.title || entry.name,
-                action: !a ? "新增" : !b ? "删除" : "修改",
-              },
-            ];
-          }),
+              throw new AppError(
+                "UNSAFE_REMOTE",
+                "远端包含不支持的文件或符号链接，请使用专用配置仓库",
+              );
+            files.set(match[3], match[2]);
+          }
+          const header = files.get("harness-sync.json");
+          if (header && JSON.parse(blob(header)).schemaVersion !== 2)
+            throw new AppError("INVALID_SCHEMA", "不支持的配置库版本");
+          trees.set(commit, files);
+        }
+        return trees.get(commit)!;
+      };
+      const entry = (
+        files: Map<string, string>,
+        kind: (typeof kinds)[number],
+        id: string,
+      ) => {
+        const object = files.get(`entries/${kind}/${id}.json`);
+        if (!object) return undefined;
+        const value = manifestSchema.shape[kind].element.parse(
+          JSON.parse(blob(object)),
         );
-        const device =
-          this.git(["show", "-s", "--format=%B", item.hash]).match(
-            /^设备：(.*)$/m,
-          )?.[1] || "未知设备（旧提交）";
-        return { ...item, device, changes };
+        if (value.id !== id)
+          throw new AppError("INVALID_ENTRY", "配置条目 ID 与路径不符");
+        return value;
+      };
+      const libraries = new Map<string, Library>();
+      const library = (commit?: string) => {
+        if (!commit) return empty();
+        if (!libraries.has(commit)) libraries.set(commit, this.read(commit));
+        return libraries.get(commit)!;
+      };
+      // NUL fields preserve tabs, multiline bodies and the optional device trailer.
+      const fields = git([
+        "log",
+        "-40",
+        "-z",
+        "--format=%H%x00%cI%x00%s%x00%P%x00%B",
+      ]).split("\0");
+      const history = [];
+      for (let i = 0; i + 4 < fields.length; i += 5) {
+        const [hash, date, message, parents, body] = fields.slice(i, i + 5);
+        const parent = parents.split(" ")[0] || undefined;
+        const after = tree(hash),
+          before = tree(parent);
+        let changes: HistoryChange[];
+        if (
+          !after.has("harness-sync.json") ||
+          (parent && !before.has("harness-sync.json"))
+        ) {
+          // A migration boundary needs the same semantic comparison as v1.
+          changes = this.historyChanges(library(hash), library(parent));
+        } else {
+          const changed = {
+            rules: new Set<string>(),
+            skills: new Set<string>(),
+            projects: new Set<string>(),
+          };
+          const resources = new Set<string>();
+          const paths = git([
+            "diff-tree",
+            "--root",
+            "--no-commit-id",
+            "-r",
+            "--no-renames",
+            "--name-status",
+            "-z",
+            ...(parent ? [parent, hash] : [hash]),
+            "--",
+            "entries",
+            "skills",
+            "harness-sync.json",
+            "manifest.json",
+          ]).split("\0");
+          for (let j = 0; j + 1 < paths.length; j += 2) {
+            const file = paths[j + 1];
+            const metadata = file.match(
+              /^entries\/(rules|skills|projects)\/([a-zA-Z0-9-]+)\.json$/,
+            );
+            const resource = file.match(/^skills\/([a-zA-Z0-9-]+)\//);
+            if (metadata)
+              changed[metadata[1] as (typeof kinds)[number]].add(metadata[2]);
+            if (resource) {
+              changed.skills.add(resource[1]);
+              resources.add(resource[1]);
+            }
+          }
+          changes = kinds.flatMap((kind) =>
+            [...changed[kind]]
+              .sort((a, b) => {
+                const af = `entries/${kind}/${a}.json`,
+                  bf = `entries/${kind}/${b}.json`;
+                // As in readManifest: current entries in filename order, then deletions.
+                return (
+                  Number(after.has(bf)) - Number(after.has(af)) ||
+                  (af < bf ? -1 : af > bf ? 1 : 0)
+                );
+              })
+              .flatMap((id) => {
+                const a = entry(before, kind, id),
+                  b = entry(after, kind, id);
+                if (
+                  (!a && !b) ||
+                  (stable(a) === stable(b) &&
+                    !(kind === "skills" && resources.has(id)))
+                )
+                  return [];
+                const value = (b || a)!;
+                return [
+                  {
+                    kind,
+                    id,
+                    name: "title" in value ? value.title : value.name,
+                    action: !a ? "新增" : !b ? "删除" : "修改",
+                  },
+                ];
+              }),
+          );
+        }
+        const device = body.match(/^设备：(.*)$/m)?.[1] || "未知设备（旧提交）";
+        history.push({ hash, date, message, device, changes });
+      }
+      return history;
+    });
+  }
+  private historyChanges(library: Library, before: Library): HistoryChange[] {
+    return kinds.flatMap((kind) =>
+      [
+        ...new Set(
+          [...library.manifest[kind], ...before.manifest[kind]].map(
+            (e) => e.id,
+          ),
+        ),
+      ].flatMap((id) => {
+        const a = before.manifest[kind].find((e) => e.id === id),
+          b = library.manifest[kind].find((e) => e.id === id);
+        if (
+          stable(a) === stable(b) &&
+          (kind !== "skills" ||
+            stable(before.bundles[id]) === stable(library.bundles[id]))
+        )
+          return [];
+        const value = (b || a)!;
+        return [
+          {
+            kind,
+            id,
+            name: "title" in value ? value.title : value.name,
+            action: !a ? "新增" : !b ? "删除" : "修改",
+          },
+        ];
       }),
     );
   }

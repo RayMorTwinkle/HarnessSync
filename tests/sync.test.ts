@@ -7,8 +7,9 @@ import { execFileSync, spawn } from "node:child_process";
 import { Store } from "../src/core/store.ts";
 import { Sync } from "../src/core/sync.ts";
 import { startSyncScheduler } from "../src/core/sync-scheduler.ts";
-import { stable, writeManifest } from "../src/core/layout.ts";
-import { parseSkill } from "../src/core/files.ts";
+import { kinds, stable, writeManifest } from "../src/core/layout.ts";
+import { parseSkill, skillMarkdown, type Bundle } from "../src/core/files.ts";
+import type { Manifest } from "../src/shared/types.ts";
 import { Engine } from "../src/core/engine.ts";
 import { startServer } from "../src/server.ts";
 
@@ -37,6 +38,302 @@ const skill = (name: string, body = "base") => ({
   name,
   description: "test",
   body,
+});
+
+// Reference the original full-library comparison, including ordering and defaults.
+function fullReadHistory(store: Store, sync: Sync) {
+  type Library = { manifest: Manifest; bundles: Record<string, Bundle> };
+  const reader = sync as unknown as { read(commit: string): Library };
+  return store.history().map((item) => {
+    const library = reader.read(item.hash);
+    let before: Library = {
+      manifest: { schemaVersion: 1, rules: [], skills: [], projects: [] },
+      bundles: {},
+    };
+    try {
+      before = reader.read(store.git(["rev-parse", `${item.hash}^1`]));
+    } catch {}
+    const changes = kinds.flatMap((kind) =>
+      [
+        ...new Set(
+          [...library.manifest[kind], ...before.manifest[kind]].map(
+            (e) => e.id,
+          ),
+        ),
+      ].flatMap((id) => {
+        const a = before.manifest[kind].find((e) => e.id === id);
+        const b = library.manifest[kind].find((e) => e.id === id);
+        if (
+          stable(a) === stable(b) &&
+          (kind !== "skills" ||
+            stable(before.bundles[id]) === stable(library.bundles[id]))
+        )
+          return [];
+        const entry = (b || a)!;
+        return [
+          {
+            kind,
+            id,
+            name: "title" in entry ? entry.title : entry.name,
+            action: !a ? "新增" : !b ? "删除" : "修改",
+          },
+        ];
+      }),
+    );
+    const device =
+      store
+        .git(["show", "-s", "--format=%B", item.hash])
+        .match(/^设备：(.*)$/m)?.[1] || "未知设备（旧提交）";
+    return { ...item, device, changes };
+  });
+}
+
+test("history matches full reads for root, entry changes, resources, formatting and first-parent merges", async (t) => {
+  const { a, sa } = await fixture(t);
+  const rule = await a.saveRule({ title: "原指令", body: "base" });
+  const entry = await a.saveSkill(skill("history-skill"));
+  const manifest = a.manifest();
+  manifest.projects.push({ id: "project-a", name: "原项目" });
+  writeManifest(a.repo, manifest);
+  a.git(["checkout", "--orphan", "history-cases"]);
+  a.commit("首个提交包含条目");
+  const root = a.git(["rev-parse", "HEAD"]);
+  manifest.rules[0].title = "新指令";
+  manifest.skills[0].description = "新说明";
+  manifest.projects[0].name = "新项目";
+  writeManifest(a.repo, manifest);
+  a.commit("修改条目");
+  const resource = path.join(a.skillPath(entry.id), '含 空格\t引号".bin');
+  fs.writeFileSync(resource, Buffer.from([0, 255]));
+  a.commit("新增技能资源");
+  fs.writeFileSync(resource, Buffer.from([1, 255]));
+  a.commit("修改技能资源");
+  fs.chmodSync(resource, 0o755);
+  a.commit("修改资源执行位");
+  fs.renameSync(resource, `${resource}.renamed`);
+  a.commit("重命名技能资源");
+  fs.rmSync(`${resource}.renamed`);
+  a.commit("删除技能资源");
+  const rulePath = path.join(a.repo, "entries/rules", `${rule.id}.json`);
+  const { enabled, scope, ...withoutDefaults } = manifest.rules[0];
+  fs.writeFileSync(
+    rulePath,
+    JSON.stringify({ ignored: true, ...withoutDefaults }),
+  );
+  fs.chmodSync(rulePath, 0o755);
+  fs.writeFileSync(
+    path.join(a.repo, "harness-sync.json"),
+    '{"schemaVersion":2}\n',
+  );
+  a.commit("仅格式、默认值和元数据执行位变化");
+  // Git rename detection must not merge two stable IDs into a modification.
+  manifest.rules[0] = { ...manifest.rules[0], id: "replacement-rule" };
+  writeManifest(a.repo, manifest);
+  a.commit("替换条目 ID");
+  a.git(["checkout", "-b", "history-side"]);
+  manifest.projects[0].name = "分支项目";
+  writeManifest(a.repo, manifest);
+  a.commit("分支修改项目");
+  a.git(["checkout", "history-cases"]);
+  a.git([
+    "-c",
+    "commit.gpgsign=false",
+    "merge",
+    "--no-ff",
+    "history-side",
+    "-m",
+    "合并\t分支\n\n多行正文",
+  ]);
+  manifest.rules = [];
+  manifest.skills = [];
+  manifest.projects = [];
+  writeManifest(a.repo, manifest);
+  fs.rmSync(a.skillPath(entry.id), { recursive: true });
+  a.commit("删除条目");
+
+  const before = a.git(["status", "--porcelain"]);
+  const expected = fullReadHistory(a, sa);
+  t.mock.method(sa as unknown as { read(commit: string): never }, "read", () =>
+    assert.fail("v2 history must not read whole libraries"),
+  );
+  const actual = await sa.history();
+  assert.deepEqual(actual, expected);
+  const changes = (message: string) =>
+    actual.find((item) => item.message === message)!.changes;
+  assert.deepEqual(
+    actual.find((item) => item.hash === root)!.changes.map((c) => c.action),
+    ["新增", "新增", "新增"],
+  );
+  assert.deepEqual(
+    changes("修改条目").map((c) => c.name),
+    ["新指令", "history-skill", "新项目"],
+  );
+  for (const message of [
+    "新增技能资源",
+    "修改技能资源",
+    "修改资源执行位",
+    "重命名技能资源",
+    "删除技能资源",
+  ])
+    assert.deepEqual(changes(message), [
+      { kind: "skills", id: entry.id, name: entry.name, action: "修改" },
+    ]);
+  assert.deepEqual(changes("仅格式、默认值和元数据执行位变化"), []);
+  assert.deepEqual(
+    changes("替换条目 ID").map((c) => [c.id, c.action]),
+    [
+      ["replacement-rule", "新增"],
+      [rule.id, "删除"],
+    ],
+  );
+  assert.deepEqual(
+    changes("删除条目").map((c) => [c.name, c.action]),
+    [
+      ["新指令", "删除"],
+      ["history-skill", "删除"],
+      ["分支项目", "删除"],
+    ],
+  );
+  assert.equal(
+    actual.find((item) => item.message === "合并\t分支")!.device,
+    "未知设备（旧提交）",
+  );
+  assert.equal(a.git(["status", "--porcelain"]), before);
+});
+
+test("history matches full reads across legacy manifest resource edits and v2 migration", async (t) => {
+  const { a, sa } = await fixture(t);
+  await a.saveRule({ title: "旧版指令", body: "base" });
+  const entry = await a.saveSkill(skill("legacy-history"));
+  const manifest = a.manifest();
+  fs.rmSync(path.join(a.repo, "harness-sync.json"));
+  fs.rmSync(path.join(a.repo, "entries"), { recursive: true });
+  fs.writeFileSync(
+    path.join(a.repo, "manifest.json"),
+    JSON.stringify(manifest),
+  );
+  a.git(["checkout", "--orphan", "legacy-history"]);
+  a.git(["rm", "--cached", "--ignore-unmatch", "harness-sync.json"]);
+  a.git(["rm", "-r", "--cached", "--ignore-unmatch", "entries"]);
+  a.commit("旧版首提交");
+  fs.writeFileSync(
+    path.join(a.skillPath(entry.id), "asset.bin"),
+    Buffer.from([0, 255]),
+  );
+  a.commit("旧版仅资源变化");
+  manifest.rules[0].title = "旧版改名";
+  fs.writeFileSync(
+    path.join(a.repo, "manifest.json"),
+    JSON.stringify(manifest),
+  );
+  a.commit("旧版条目变化");
+  a.migrate();
+  await a.saveRule({ title: "新版新增", body: "body" });
+  const expected = fullReadHistory(a, sa);
+  const reader = sa as unknown as { read(commit: string): unknown };
+  const read = reader.read.bind(sa);
+  const fullReads: string[] = [];
+  t.mock.method(reader, "read", (commit: string) => {
+    fullReads.push(commit);
+    return read(commit);
+  });
+  const actual = await sa.history();
+  assert.deepEqual(actual, expected);
+  assert.deepEqual(
+    new Set(fullReads),
+    new Set(
+      actual
+        .filter(
+          (h) =>
+            h.message.startsWith("旧版") || h.message === "迁移配置库到 v2",
+        )
+        .map((h) => h.hash),
+    ),
+  );
+  assert.equal(fullReads.length, new Set(fullReads).size);
+  assert.deepEqual(
+    actual.find((h) => h.message === "迁移配置库到 v2")!.changes,
+    [],
+  );
+  assert.deepEqual(
+    actual.find((h) => h.message === "旧版仅资源变化")!.changes,
+    [{ kind: "skills", id: entry.id, name: entry.name, action: "修改" }],
+  );
+});
+
+test("history benchmark: 40 commits, 32 skills and 3 MiB of resources", async (t) => {
+  const { a, sa } = await fixture(t);
+  const manifest = a.manifest();
+  const scope = { kind: "global" as const, harnesses: ["claude" as const] };
+  manifest.rules.push({
+    id: "benchmark-rule",
+    title: "计时指令",
+    body: "0",
+    enabled: true,
+    scope,
+  });
+  for (let i = 0; i < 32; i++) {
+    const id = `benchmark-${i.toString().padStart(2, "0")}`;
+    manifest.skills.push({
+      id,
+      name: id,
+      description: "test",
+      enabled: true,
+      scope,
+    });
+    fs.mkdirSync(a.skillPath(id));
+    fs.writeFileSync(
+      path.join(a.skillPath(id), "SKILL.md"),
+      skillMarkdown(id, "test", "base"),
+    );
+    fs.writeFileSync(
+      path.join(a.skillPath(id), "asset.bin"),
+      Buffer.alloc(96 * 1024, i),
+    );
+  }
+  writeManifest(a.repo, manifest);
+  a.git(["checkout", "--orphan", "history-benchmark"]);
+  a.commit("样本初始提交");
+  const file = path.join(a.repo, "entries/rules/benchmark-rule.json");
+  for (let i = 1; i < 41; i++) {
+    manifest.rules[0].body = String(i);
+    fs.writeFileSync(file, stable(manifest.rules[0]));
+    a.commit(`样本修改 ${i}`);
+  }
+  const git = a.git.bind(a);
+  const skillBlobs = new Set(
+    git(["ls-tree", "-r", "HEAD", "--", "skills", "entries/skills"])
+      .split("\n")
+      .map((row) => row.split(/\s+/)[2]),
+  );
+  const queries: string[][] = [];
+  t.mock.method(a, "git", (args: string[]) => {
+    queries.push(args);
+    if (args[0] === "cat-file")
+      assert.ok(!skillBlobs.has(args[2]), "unchanged skills must not be read");
+    return git(args);
+  });
+  t.mock.method(sa as unknown as { read(commit: string): never }, "read", () =>
+    assert.fail("v2 history must not read whole libraries"),
+  );
+  const start = performance.now();
+  const history = await sa.history();
+  t.diagnostic(
+    `history: ${(performance.now() - start).toFixed(1)} ms (40 commits, 32 skills, 3 MiB)`,
+  );
+  assert.equal(queries.filter((args) => args[0] === "log").length, 1);
+  assert.ok(queries.filter((args) => args[0] === "cat-file").length <= 42);
+  assert.ok(queries.length <= 125, "queries should scale with changed entries");
+  assert.equal(history.length, 40);
+  assert.ok(
+    history.every(
+      (item) =>
+        item.changes.length === 1 &&
+        item.changes[0].id === "benchmark-rule" &&
+        item.changes[0].action === "修改",
+    ),
+  );
+  assert.equal(history.at(-1)!.message, "样本修改 1");
 });
 
 test("v1 reads without writes, migrates once on mutation; v2 opens read-only with deterministic bytes", async (t) => {
