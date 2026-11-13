@@ -1,12 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Store } from "./store.ts";
-import { adapters, projectTargets } from "./adapters.ts";
 import {
   AppError,
   bundleDiskHash,
   bundleHash,
-  exists,
   parseSkill,
   readBundle,
   writeBundle,
@@ -57,30 +55,31 @@ export function resolvedSkillSource(store: Store, id: string) {
   return store.device().originRealPaths?.[id] || skillSource(store, id);
 }
 
-// A source inside a harness skills root is a deployment target, not an upstream.
+// Only a receipted deployment is exempt from upstream change checks.
 function insideSkillRoots(store: Store, p: string) {
-  let real: string;
-  try {
-    real = fs.realpathSync(p);
-  } catch {
-    return false;
-  }
-  const device = store.device();
-  const roots = adapters(store.home).flatMap((h) => [
-    h.skills,
-    ...h.sharedSkills,
-    ...Object.values(device.bindings).map(
-      (dir) => projectTargets(h.id, dir).skills,
-    ),
-  ]);
-  return roots.some((root) => {
-    const r = exists(root) ? fs.realpathSync(root) : path.resolve(root);
-    return real === r || real.startsWith(r + path.sep);
-  });
+  const resolve = (p: string) => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  const real = resolve(p);
+  return store
+    .state()
+    .receipts.some((r) => r.kind === "skill" && resolve(r.path) === real);
 }
 
+export type SkillSourceStatus = {
+  id: string;
+  name: string;
+  source: string;
+  changed: boolean;
+  status: "changed" | "unchanged" | "unreadable";
+  note: string;
+};
 export function sourceStatus(store: Store) {
-  return store.manifest().skills.flatMap((skill) => {
+  return store.manifest().skills.flatMap<SkillSourceStatus>((skill) => {
     const source = skillSource(store, skill.id);
     if (
       !source ||
@@ -98,6 +97,7 @@ export function sourceStatus(store: Store) {
           name: skill.name,
           source,
           changed,
+          status: changed ? "changed" : "unchanged",
           note: changed ? "源目录有更新" : "源目录与库一致",
         },
       ];
@@ -108,6 +108,7 @@ export function sourceStatus(store: Store) {
           name: skill.name,
           source,
           changed: false,
+          status: "unreadable",
           note: `源目录无法读取：${e.message}`,
         },
       ];

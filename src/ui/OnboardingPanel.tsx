@@ -13,7 +13,8 @@ import {
   TriangleAlert,
   Terminal,
 } from "lucide-react";
-import { harnessNames } from "../shared/harnesses.ts";
+import { useApp } from "./app-context.tsx";
+import { harnessName } from "./lib.ts";
 import type { Onboarding } from "../shared/types.ts";
 
 type Request = <T>(
@@ -32,6 +33,7 @@ export function OnboardingPanel({
   sync?: { connected: boolean; remote?: string };
   openSync: () => void;
 }) {
+  const { data } = useApp();
   const [record, setRecord] = useState<Onboarding | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -153,7 +155,7 @@ export function OnboardingPanel({
               <div className="onboarding-block-heading">
                 <span className="step-label">02</span>
                 <div>
-                  <h2>把管理入口装进 Harness</h2>
+                  <h2>把管理入口装进 AI 工具</h2>
                   <p>只部署中文管理技能，不会顺带发布其他待部署配置。</p>
                 </div>
               </div>
@@ -164,7 +166,7 @@ export function OnboardingPanel({
                     <strong>管理技能已部署</strong>
                     <p>
                       {record.bootstrap.targets
-                        .map((id) => harnessNames[id])
+                        .map((id) => harnessName(data, id))
                         .join(" · ")}
                     </p>
                   </div>
@@ -173,7 +175,7 @@ export function OnboardingPanel({
                 <div className="bootstrap-pending">
                   <Terminal size={23} />
                   <p>
-                    安装后，在任意一个已支持的 Harness
+                    安装后，在任意一个已支持的 AI 工具
                     中粘贴初始化提示词，即可让它通过同一 CLI 整理配置。
                   </p>
                 </div>
@@ -190,7 +192,7 @@ export function OnboardingPanel({
                 )}
                 {record.bootstrap
                   ? "更新中文管理技能"
-                  : "安装到已检测的 Harness"}
+                  : "安装到已检测的 AI 工具"}
                 <ArrowRight size={14} />
               </button>
             </section>
@@ -278,7 +280,10 @@ export function OnboardingPanel({
                     <div>
                       <strong>{i.path}</strong>
                       <span>
-                        {i.harnesses.map((h) => harnessNames[h]).join(" / ")} ·{" "}
+                        {i.harnesses
+                          .map((h) => harnessName(data, h))
+                          .join(" / ")}{" "}
+                        ·{" "}
                         {
                           {
                             main: "主全局文件",
@@ -314,7 +319,7 @@ export function OnboardingPanel({
                   <div>
                     <strong>{s.name}</strong>
                     <span>
-                      {s.harnesses.map((h) => harnessNames[h]).join(" / ")}
+                      {s.harnesses.map((h) => harnessName(data, h)).join(" / ")}
                       {s.managed ? " · 已由 HarnessSync 管理" : ""}
                       {s.ignored ? " · 外部保留" : ""}
                       {s.origin && s.origin !== "user"

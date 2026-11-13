@@ -14,8 +14,8 @@ description: 安装或升级 HarnessSync 的 CLI 与本机管理界面，并引�
 下载并查看同一固定版本的安装脚本，然后运行。默认安装到 `~/.local/share/harness-sync`，启动器为 `~/.local/bin/hsync`；用户指定目录时传入对应选项。
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.4.0/install.sh -o /tmp/harness-sync-install.sh
-bash /tmp/harness-sync-install.sh --ref v0.4.0
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.5.0/install.sh -o /tmp/harness-sync-install.sh
+bash /tmp/harness-sync-install.sh --ref v0.5.0
 ```
 
 实际执行时使用唯一临时文件，避免覆盖其他任务的 `/tmp` 文件。安装器支持 `--install-dir`、`--bin-dir`、`--ref`（标签或分支）和 `--repo`。升级可重复运行同一脚本并指定所需版本。构建失败不会切换当前版本；旧程序版本保留，配置库独立保存。

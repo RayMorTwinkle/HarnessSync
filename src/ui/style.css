@@ -290,49 +290,20 @@ svg {
 }
 .brand-caption {
   display: block;
+  white-space: nowrap;
   font-size: 9.5px;
-  letter-spacing: 1.35px;
+  letter-spacing: 1px;
   color: var(--text-4);
   font-weight: 500;
   margin-top: 4px;
-}
-.workspace-switch {
-  margin: 30px 0 28px;
-  display: flex;
-  align-items: center;
-  text-align: left;
-  border: 1px solid var(--border);
-  padding: 11px 10px;
-  border-radius: 8px;
-  gap: 9px;
-  font-size: 13px;
-  font-weight: 500;
-  background: var(--surface-2);
-}
-.workspace-switch > span:nth-child(2) {
-  flex: 1;
-}
-.workspace-switch small {
-  display: block;
-  font-size: 11.5px;
-  color: var(--text-4);
-  font-weight: 400;
-  margin-top: 4px;
-}
-.workspace-avatar {
-  width: 29px;
-  height: 29px;
-  background: var(--info-bg);
-  color: var(--text-2);
-  display: grid;
-  place-items: center;
-  border-radius: 7px;
-  font-size: 13px;
 }
 .nav-label {
   font-size: 11.5px;
   color: var(--text-4);
   margin: 0 14px 11px;
+}
+.brand + .nav-label {
+  margin-top: 34px;
   letter-spacing: 0.5px;
 }
 .secondary-label {
@@ -465,16 +436,6 @@ nav button.active svg {
   gap: 5px;
   font-size: 11.5px;
   color: var(--text-3);
-}
-.top-avatar {
-  height: 26px;
-  width: 26px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: var(--warn-bg);
-  color: var(--warn);
-  font-size: 11.5px;
 }
 .icon-button {
   display: inline-flex;
@@ -2168,7 +2129,6 @@ nav button {
     padding: 0;
   }
   .brand > span:last-child,
-  .workspace-switch,
   .nav-label,
   nav button > span,
   .sidebar-bottom .local-status,
@@ -2902,6 +2862,18 @@ nav button {
 .harness-icon.small.claude .oc-symbol {
   font-size: 13.5px;
 }
+.harness-icon.plugin {
+  background: var(--violet-bg);
+  color: var(--violet);
+}
+.monogram {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.harness-icon.small .monogram {
+  font-size: 9.5px;
+}
 .plan-warnings {
   padding: 13px 24px;
   background: var(--surface-3);
@@ -2917,6 +2889,9 @@ nav button {
 }
 .plan-warnings svg {
   margin-top: 3px;
+}
+.plan-warnings p.blocking {
+  color: var(--warn);
 }
 @media (max-width: 1100px) {
   .onboarding-columns {
@@ -3761,4 +3736,205 @@ body {
   align-items: center;
   gap: 8px;
   font-size: 12px;
+}
+
+/* Settings page: grouped rows, copy on the left, control on the right. */
+.settings-page {
+  max-width: 820px;
+  display: grid;
+  gap: 30px;
+}
+.settings-group > h2 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-3);
+  margin: 0 2px 10px;
+}
+.settings-rows {
+  padding: 0;
+}
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
+}
+.setting-row + .setting-row {
+  border-top: 1px solid var(--border-soft);
+}
+.setting-copy {
+  flex: 1;
+  min-width: 0;
+}
+.setting-copy strong {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text);
+}
+.setting-copy p {
+  margin-top: 4px;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--text-3);
+}
+.setting-copy code {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.setting-row.muted .setting-copy strong {
+  color: var(--text-3);
+}
+.setting-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.setting-control select {
+  width: auto;
+  min-width: 110px;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+.tool-row.off .harness-icon {
+  opacity: 0.45;
+  filter: grayscale(1);
+}
+.tool-row .setting-copy p {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tool-badge {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--violet);
+  background: var(--violet-bg);
+}
+.tool-error {
+  align-items: flex-start;
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.tool-error > svg {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+.tool-error .setting-copy strong,
+.tool-error .setting-copy p {
+  color: var(--warn);
+}
+.settings-group-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 10px 4px 0;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--text-4);
+}
+.settings-group-footer code {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.settings-group-footer a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--accent-text);
+  white-space: nowrap;
+}
+.appearance-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  max-width: 420px;
+}
+.settings-group .device-layout {
+  max-width: none;
+}
+@media (max-width: 640px) {
+  .setting-row {
+    padding: 14px 16px;
+  }
+  .settings-group-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+/* Header deployment status when the server writes clean changes itself. */
+.deploy-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.deploy-status:hover {
+  background: var(--surface-3);
+}
+.deploy-status.ok svg {
+  color: var(--accent);
+}
+.deploy-status.busy {
+  color: var(--text-3);
+}
+.deploy-status.warn {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+}
+
+.plan-paused {
+  display: grid;
+  gap: 6px;
+  padding: 14px 24px;
+  background: var(--warn-bg);
+  border-bottom: 1px solid var(--warn-border);
+  color: var(--warn);
+  font-size: 12px;
+}
+.plan-paused strong {
+  font-weight: 600;
+}
+.plan-paused button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  color: var(--warn);
+  line-height: 1.7;
+}
+.plan-paused button:not(:disabled):hover span {
+  text-decoration: underline;
+}
+.plan-paused button svg {
+  flex-shrink: 0;
+}
+.plan-paused code {
+  font-size: 11px;
+  opacity: 0.8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-paused small {
+  color: var(--text-3);
 }

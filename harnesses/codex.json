@@ -1,0 +1,55 @@
+{
+  "$schema": "../schema/harness.schema.json",
+  "id": "codex",
+  "name": "Codex",
+  "root": {
+    "default": "~/.codex",
+    "env": "CODEX_HOME"
+  },
+  "detect": ["{root}"],
+  "version": {
+    "command": "codex",
+    "args": ["--version"]
+  },
+  "instructions": {
+    "global": [
+      {
+        "path": "{root}/AGENTS.override.md",
+        "kind": "override",
+        "when": "non-empty"
+      },
+      {
+        "path": "{root}/AGENTS.md",
+        "kind": "main"
+      }
+    ],
+    "fragments": [],
+    "project": "AGENTS.md"
+  },
+  "skills": {
+    "global": "~/.agents/skills",
+    "project": ".agents/skills",
+    "reads": {
+      "global": [
+        "~/.agents/skills",
+        {
+          "path": "{root}/skills",
+          "legacy": true
+        }
+      ],
+      "project": [
+        ".agents/skills",
+        {
+          "path": ".codex/skills",
+          "legacy": true
+        }
+      ]
+    },
+    "sameNameCopies": "list"
+  },
+  "notes": {
+    "zh-CN": "使用共享 .agents/skills；兼容旧 .codex/skills 扫描。全局 override 存在时优先。",
+    "en": "Uses shared .agents/skills and scans legacy .codex/skills. A nonempty global AGENTS.override.md takes precedence."
+  },
+  "homepage": "https://learn.chatgpt.com/docs/build-skills"
+}

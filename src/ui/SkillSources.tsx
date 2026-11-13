@@ -10,6 +10,7 @@ import {
   Unlink,
 } from "lucide-react";
 import type { GitSkillSource, Skill } from "../shared/types.ts";
+import { DiffLines } from "./common.tsx";
 
 type Api = <T>(route: string, body?: unknown, method?: string) => Promise<T>;
 type Act = (fn: () => Promise<unknown>, message?: string) => Promise<unknown>;
@@ -370,32 +371,7 @@ export function SourceDialog({
               </button>
               {open === f.path && f.diff && !f.binary && (
                 <pre className="diff-code compact">
-                  {f.diff
-                    .split("\n")
-                    .filter(
-                      (line) =>
-                        !line.startsWith("Index: ") && !/^=+$/.test(line),
-                    )
-                    .map((line, i) => (
-                      <span
-                        key={i}
-                        className={
-                          line.startsWith("+")
-                            ? "added"
-                            : line.startsWith("-")
-                              ? "removed"
-                              : line.startsWith("@@")
-                                ? "range"
-                                : ""
-                        }
-                      >
-                        {line.startsWith("--- ")
-                          ? "--- 技能库"
-                          : line.startsWith("+++ ")
-                            ? "+++ 上游"
-                            : line || " "}
-                      </span>
-                    ))}
+                  <DiffLines diff={f.diff} from="技能库" to="上游" />
                 </pre>
               )}
             </div>

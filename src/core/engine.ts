@@ -1,3 +1,9 @@
+import {
+  registry,
+  selectedHarnesses,
+  listManifests,
+} from "./harness-registry.ts";
+import { lastAutoDeploy } from "./auto-deploy.ts";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -47,7 +53,9 @@ import type {
   HarnessId,
   Inspection,
   Plan,
+  PlanNotice,
   Receipt,
+  DeployState,
   Rule,
   Scope,
   Snapshot,
@@ -75,7 +83,7 @@ type Deployment = {
   date: string;
   changes: number;
   status: "pending" | "applied" | "failed" | "rolled-back";
-  beforeState: { receipts: Receipt[] };
+  beforeState: DeployState;
   files: SavedFile[];
 };
 
@@ -97,14 +105,49 @@ function replaceBlock(text: string, block: string | null) {
     ? `${text}${text && !text.endsWith("\n") ? "\n" : ""}${text ? "\n" : ""}${block}\n`
     : text;
 }
+export function instructionOutsideHash(text: string) {
+  return hash(replaceBlock(text, null));
+}
 export class Engine {
   constructor(readonly store: Store) {}
+  instructionConsents() {
+    return (this.store.state().instructionConsents || []).filter((consent) => {
+      try {
+        noSymlink(consent.path);
+        return (
+          exists(consent.path) &&
+          instructionOutsideHash(fs.readFileSync(consent.path, "utf8")) ===
+            consent.outsideHash
+        );
+      } catch {
+        return false;
+      }
+    });
+  }
+  // Caller holds the Store lock. Missing, unreadable or changed outside text revokes consent.
+  pruneInstructionConsents() {
+    const state = this.store.state();
+    const consents = this.instructionConsents();
+    if (consents.length !== (state.instructionConsents || []).length)
+      writeJson(path.join(this.store.root, "state.json"), {
+        ...state,
+        instructionConsents: consents,
+      });
+  }
   private deploymentCache = new Map<
     string,
     { key: string; value: Deployment }
   >();
   private matches(scope: Scope, harness: HarnessId, projectId?: string) {
-    if (!scope.harnesses.includes(harness)) return false;
+    if (
+      !selectedHarnesses(
+        scope.harnesses,
+        this.store.home,
+        this.store.root,
+        this.store.device().disabledHarnesses,
+      ).includes(harness)
+    )
+      return false;
     if (projectId)
       return scope.kind === "project" && scope.target === projectId;
     return (
@@ -165,7 +208,72 @@ export class Engine {
     const device = this.store.device();
     const changes: Change[] = [];
     const errors: string[] = [];
-    const warnings: string[] = [];
+    const notices: PlanNotice[] = [];
+    // Every producer explicitly chooses policy; legacy warnings are derived below.
+    const notice = (
+      code: PlanNotice["code"],
+      message: string,
+      blocking: boolean,
+      path?: string,
+    ) => notices.push({ code, message, blocking, ...(path ? { path } : {}) });
+    const disabled = device.disabledHarnesses || [];
+    const registered = registry(this.store.home, this.store.root);
+    const manifestWarnings = new Map<string, string[]>();
+    for (const error of registered.errors)
+      manifestWarnings.set(error.file, [
+        ...(manifestWarnings.get(error.file) || []),
+        ...error.issues.map((issue) => `${issue.path}：${issue.message}`),
+      ]);
+    for (const [file, issues] of manifestWarnings)
+      notice(
+        "plugin-manifest-error",
+        `${file}：${issues.join("；")}`,
+        false,
+        file,
+      );
+    const unknownIds = new Set(
+      [...manifest.rules, ...manifest.skills]
+        .flatMap((entry) => entry.scope.harnesses)
+        .filter((id) => !registered.entries.some((e) => e.manifest.id === id)),
+    );
+    for (const id of unknownIds)
+      notice(
+        "unknown-harness",
+        `未知 Harness ${id}：已忽略，可能未安装或已移除插件`,
+        false,
+      );
+    const allHarnesses = adapters(this.store.home, this.store.root);
+    const select = (ids: string[]) =>
+      selectedHarnesses(ids, this.store.home, this.store.root, disabled);
+    for (const receipt of state.receipts.filter((r) => !r.projectId)) {
+      const harness = allHarnesses.find((h) => h.id === receipt.harness);
+      if (!harness || disabled.includes(harness.id)) continue;
+      const old = receipt.globalPaths;
+      const differences = old
+        ? (["home", "skills", "instructions"] as const)
+            .filter((key) => old[key] !== harness[key])
+            .map((key) => `${old[key]} → ${harness[key]}`)
+        : receipt.kind === "instructions"
+          ? receipt.path !== harness.instructions
+            ? [`${receipt.path} → ${harness.instructions}`]
+            : []
+          : ![harness.skills, ...harness.sharedSkills].includes(
+                path.dirname(receipt.path),
+              )
+            ? [`${path.dirname(receipt.path)} → ${harness.skills}`]
+            : [];
+      if (differences.length)
+        notice(
+          "harness-root-changed",
+          `${harness.name} 全局部署路径已变化：${differences.join("；")}。自动部署已暂停，旧路径及收据保持原样；请预览并手动应用以确认迁移。`,
+          true,
+          receipt.path,
+        );
+    }
+    const instructionRenderings = new Map<
+      string,
+      { block: string | null | undefined; harness: string }
+    >();
     const wanted = new Set<string>();
     const stagingFingerprints: string[][] = [];
     if (this.pending().length)
@@ -180,6 +288,19 @@ export class Engine {
       sourceHash?: string;
       removing?: boolean;
     }) => {
+      spec.path = path.resolve(spec.path);
+      if (spec.kind === "instructions" && !spec.removing) {
+        const previous = instructionRenderings.get(spec.path);
+        if (previous && previous.block !== spec.block)
+          errors.push(
+            `指令目标 ${spec.path} 的内容冲突：${previous.harness} 与 ${spec.harness} 渲染了不同内容`,
+          );
+        else
+          instructionRenderings.set(spec.path, {
+            block: spec.block,
+            harness: spec.harness,
+          });
+      }
       if (wanted.has(spec.path)) return;
       wanted.add(spec.path);
       const receipt = state.receipts.find((r) => r.path === spec.path);
@@ -249,12 +370,17 @@ export class Engine {
               "NO_REPLACEMENT",
               "替换全局指令前，需要先保存适用于该 Harness 的源指令",
             );
-          const after = replacement
+          let after = replacement
             ? spec.block + "\n"
             : replaceBlock(before, spec.removing ? null : spec.block || null);
+          const deleteCreated =
+            spec.removing &&
+            receipt?.instructionCreated === true &&
+            !after.trim();
+          if (deleteCreated) after = "";
           change.after = after;
           change.afterHash = hash(after);
-          if (!after && spec.removing) change.afterHash = absent;
+          if (deleteCreated) change.afterHash = absent;
           change.status =
             before === after
               ? "unchanged"
@@ -388,7 +514,16 @@ export class Engine {
       }
       changes.push(change);
     };
-    for (const harness of adapters(this.store.home)) {
+    for (const harness of adapters(
+      this.store.home,
+      this.store.root,
+      disabled,
+    ).filter((h) => h.enabled)) {
+      const peers = sharedInstructionPeers(
+        harness.id,
+        this.store.home,
+        this.store.root,
+      ).filter((id) => !disabled.includes(id));
       const rules = manifest.rules
         .filter((r) => r.enabled && this.matches(r.scope, harness.id))
         .sort(
@@ -425,26 +560,27 @@ export class Engine {
           errors.push(`项目 ${project.name} 的目录不存在：${dir}`);
           continue;
         }
-        const targets = projectTargets(harness.id, dir);
         try {
+          const targets = projectTargets(
+            harness.id,
+            dir,
+            this.store.home,
+            this.store.root,
+          );
           if (
             manifest.rules.some(
               (r) =>
                 r.enabled &&
                 r.scope.kind === "project" &&
                 r.scope.target === project.id &&
-                sharedInstructionPeers.includes(harness.id) &&
-                sharedInstructionPeers.some((h) =>
-                  r.scope.harnesses.includes(h),
-                ) &&
-                !sharedInstructionPeers.every((h) =>
-                  r.scope.harnesses.includes(h),
-                ),
+                peers.includes(harness.id) &&
+                peers.some((h) => select(r.scope.harnesses).includes(h)) &&
+                !peers.every((h) => select(r.scope.harnesses).includes(h)),
             )
           )
             throw new AppError(
               "SHARED_PROJECT_INSTRUCTIONS",
-              "DeepSeek、OpenCode、Codex 共用项目 AGENTS.md；面向其中任一工具的项目指令需同时选择三者。Claude Code 使用独立 CLAUDE.md",
+              `共用项目 ${path.basename(targets.instructions)} 的 Harness 需同时选择：${peers.join("、")}`,
             );
           const block = this.instructions(rules, project.id);
           if (block)
@@ -472,15 +608,20 @@ export class Engine {
         const sourceHash = bundleDiskHash(sourcePath);
         parseSkill(fs.readFileSync(path.join(sourcePath, "SKILL.md"), "utf8"));
         const placement = placeSkills(
-          skill.scope.harnesses,
-          skillReaders(this.store.home, projectDir),
+          select(skill.scope.harnesses),
+          skillReaders(this.store.home, projectDir, this.store.root, disabled),
+          listManifests(this.store.home, this.store.root)
+            .filter((m) => m.skills.sameNameCopies === "collapse")
+            .map((m) => m.id),
         );
         const exposure = [
           ...new Set(placement.flatMap((d) => d.readers)),
-        ].filter((h) => !skill.scope.harnesses.includes(h));
+        ].filter((h) => !select(skill.scope.harnesses).includes(h));
         if (exposure.length)
-          warnings.push(
+          notice(
+            "shared-skill-exposure",
             `${skill.name}：共享技能目录也会被 ${exposure.join("、")} 读取，不能保证仅对所选 Harness 可见`,
+            false,
           );
         for (const entry of placement)
           add({
@@ -489,7 +630,7 @@ export class Engine {
             sourceId: skill.id,
             projectId,
             harness: entry.readers.find((h) =>
-              skill.scope.harnesses.includes(h),
+              select(skill.scope.harnesses).includes(h),
             )!,
             sourceHash,
           });
@@ -497,12 +638,30 @@ export class Engine {
         errors.push(`${skill.name}: ${e.message}`);
       }
     }
-    for (const receipt of state.receipts)
+    const retained = new Map<string, number>();
+    for (const receipt of state.receipts) {
       if (
-        (!options.onlySkillId || receipt.sourceId === options.onlySkillId) &&
-        !wanted.has(receipt.path)
+        (options.onlySkillId && receipt.sourceId !== options.onlySkillId) ||
+        wanted.has(receipt.path)
       )
-        add({ ...receipt, removing: true });
+        continue;
+      if (
+        disabled.includes(receipt.harness) ||
+        !allHarnesses.some((h) => h.id === receipt.harness)
+      ) {
+        retained.set(receipt.harness, (retained.get(receipt.harness) || 0) + 1);
+      } else add({ ...receipt, removing: true });
+    }
+    for (const [id, count] of retained) {
+      const harness = allHarnesses.find((h) => h.id === id);
+      notice(
+        "retained-harness-paths",
+        harness
+          ? `${harness.name} 已停用：${count} 个已管理路径保持原样，重新启用后恢复管理`
+          : `${id} 未安装：${count} 个已管理路径保持原样，重新安装后恢复管理`,
+        false,
+      );
+    }
     if (!options.onlySkillId)
       for (const replacement of state.instructionReplacements || [])
         if (!wanted.has(replacement.path))
@@ -517,18 +676,34 @@ export class Engine {
         if (exists(`${stage}-old`))
           errors.push(`暂存目录含原件备份，需先恢复未完成部署并检查：${stage}`);
         else
-          warnings.push(`发现 HarnessSync 暂存残留，应用计划时清理：${stage}`);
+          notice(
+            "staging-leftover",
+            `发现 HarnessSync 暂存残留，应用计划时清理：${stage}`,
+            true,
+            stage,
+          );
       }
     } catch (e: any) {
       errors.push(e.message);
     }
     if (!options.onlySkillId) {
       for (const p of device.ignoredNativePaths || [])
-        warnings.push(`外部保留：${p}`);
+        notice("ignored-native-path", `外部保留：${p}`, false, p);
       for (const s of sourceStatus(this.store))
-        if (s.changed || s.note.startsWith("源目录无法读取"))
-          warnings.push(`${s.name}：${s.note}`);
+        if (s.status !== "unchanged")
+          notice(
+            s.status === "changed"
+              ? "skill-source-changed"
+              : "skill-source-unreadable",
+            `${s.name}：${s.note}`,
+            true,
+            s.source,
+          );
     }
+    const uniqueNotices = [
+      ...new Map(notices.map((n) => [JSON.stringify(n), n])).values(),
+    ];
+    const warnings = [...new Set(uniqueNotices.map((n) => n.message))];
     const revision = this.store.revision();
     const id = hash(
       JSON.stringify({
@@ -543,6 +718,7 @@ export class Engine {
         ]),
         errors,
         warnings,
+        notices: uniqueNotices,
       }),
     );
     return {
@@ -550,7 +726,8 @@ export class Engine {
       revision,
       changes,
       errors: [...new Set(errors)],
-      warnings: [...new Set(warnings)],
+      warnings,
+      notices: uniqueNotices,
       createdAt: new Date().toISOString(),
     };
   }
@@ -770,9 +947,14 @@ export class Engine {
       });
   }
   private staging() {
-    const dirs = new Set(skillReaders(this.store.home).map((r) => r.dir));
+    const dirs = new Set(
+      skillReaders(this.store.home, undefined, this.store.root).map(
+        (r) => r.dir,
+      ),
+    );
     for (const dir of Object.values(this.store.device().bindings))
-      for (const r of skillReaders(this.store.home, dir)) dirs.add(r.dir);
+      for (const r of skillReaders(this.store.home, dir, this.store.root))
+        dirs.add(r.dir);
     for (const r of this.store.state().receipts)
       if (r.kind === "skill") dirs.add(path.dirname(r.path));
     return [...dirs].flatMap((dir) => stagingLeftovers(dir));
@@ -811,7 +993,10 @@ export class Engine {
   private pending() {
     return this.deployments().filter((d) => d.status === "pending");
   }
-  async apply(expectedPlanId: string, options: { onlySkillId?: string } = {}) {
+  async apply(
+    expectedPlanId: string,
+    options: { onlySkillId?: string; validate?: (plan: Plan) => void } = {},
+  ) {
     return this.store.lock(() => {
       if (this.pending().length)
         throw new AppError(
@@ -820,12 +1005,15 @@ export class Engine {
           409,
         );
       const plan = this.plan(options);
+      this.pruneInstructionConsents();
       if (plan.id !== expectedPlanId)
         throw new AppError(
           "STALE_PLAN",
           "源配置或目标文件已变化，请重新预览",
           409,
         );
+      // Automatic deployment rechecks device-local policy under the apply lock.
+      options.validate?.(plan);
       if (
         plan.errors.length ||
         plan.changes.some((c) => c.status === "conflict")
@@ -839,7 +1027,38 @@ export class Engine {
         (c) => !["unchanged", "skipped"].includes(c.status),
       );
       for (const stage of this.staging()) cleanStaging(stage);
+      const confirmGlobalPaths = (receipts: Receipt[]) => {
+        const harnesses = adapters(
+          this.store.home,
+          this.store.root,
+          this.store.device().disabledHarnesses,
+        );
+        return receipts.map((receipt) => {
+          const h = harnesses.find(
+            (h) => h.id === receipt.harness && h.enabled,
+          );
+          if (
+            !h ||
+            receipt.projectId ||
+            (options.onlySkillId && receipt.sourceId !== options.onlySkillId)
+          )
+            return receipt;
+          return {
+            ...receipt,
+            globalPaths: {
+              home: h.home,
+              skills: h.skills,
+              instructions: h.instructions,
+            },
+          };
+        });
+      };
       if (!changed.length) {
+        const state = this.store.state();
+        writeJson(path.join(this.store.root, "state.json"), {
+          ...state,
+          receipts: confirmGlobalPaths(state.receipts),
+        });
         if (!options.onlySkillId) new Sync(this.store).acknowledgeDeployment();
         return { id: null, changes: 0 };
       }
@@ -892,6 +1111,7 @@ export class Engine {
         );
       writeJson(recordPath, record);
       const done: SavedFile[] = [];
+      const instructionConsents = this.instructionConsents();
       try {
         for (const change of changed) {
           const adoption = state.receipts.find(
@@ -951,8 +1171,37 @@ export class Engine {
         const receipts = state.receipts.filter(
           (r) => !changed.some((c) => c.path === r.path),
         );
+        for (const c of changed.filter((c) => c.kind === "instructions")) {
+          const receipt = state.receipts.find((r) => r.path === c.path);
+          const consent = instructionConsents.find((r) => r.path === c.path);
+          if (consent) consent.outsideHash = instructionOutsideHash(c.after);
+          // Only an explicit manual insertion into an unmanaged existing file grants consent.
+          if (
+            !options.validate &&
+            c.status === "update" &&
+            !receipt &&
+            !managedBlock(c.before) &&
+            !state.instructionReplacements?.some((r) => r.path === c.path)
+          ) {
+            const previous = instructionConsents.findIndex(
+              (r) => r.path === c.path,
+            );
+            if (previous >= 0) instructionConsents.splice(previous, 1);
+            instructionConsents.push({
+              path: c.path,
+              outsideHash: instructionOutsideHash(c.after),
+            });
+          }
+        }
         for (const c of changed.filter((c) => c.status !== "remove"))
           receipts.push({
+            ...(c.kind === "instructions"
+              ? {
+                  instructionCreated:
+                    state.receipts.find((r) => r.path === c.path)
+                      ?.instructionCreated ?? c.beforeHash === absent,
+                }
+              : {}),
             ...(c.status === "adopt" &&
             state.conflictChoices?.[c.path]?.use === "native"
               ? { adoptedSourceHash: state.conflictChoices[c.path].sourceHash }
@@ -969,7 +1218,8 @@ export class Engine {
           });
         writeJson(path.join(this.store.root, "state.json"), {
           ...state,
-          receipts,
+          receipts: confirmGlobalPaths(receipts),
+          instructionConsents,
           instructionReplacements: state.instructionReplacements?.filter(
             (r) => !changed.some((c) => c.path === r.path),
           ),
@@ -1111,13 +1361,24 @@ export class Engine {
   }
   snapshot(): Snapshot {
     const versions =
-      this.store.home === process.env.HOME ? harnessVersions() : {};
+      this.store.home === process.env.HOME
+        ? harnessVersions(
+            this.store.home,
+            this.store.root,
+            this.store.device().disabledHarnesses,
+          )
+        : {};
     return {
+      autoDeploy: lastAutoDeploy(this.store),
       root: this.store.root,
       revision: this.store.revision(),
       manifest: this.store.manifest(),
       device: this.store.device(),
-      harnesses: adapters(this.store.home).map((h) => ({
+      harnesses: adapters(
+        this.store.home,
+        this.store.root,
+        this.store.device().disabledHarnesses,
+      ).map((h) => ({
         ...h,
         version: versions[h.id] || null,
         installed: h.installed || Boolean(versions[h.id]),

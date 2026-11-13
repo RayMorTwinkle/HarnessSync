@@ -1,6 +1,5 @@
 import {
   installGitSkills,
-  checkGitSkillUpdates,
   updateGitSkills,
   diffGitSkill,
   detachGitSkill,
@@ -13,7 +12,13 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { Engine, publicPlan } from "./core/engine.ts";
-import { startSyncScheduler } from "./core/sync-scheduler.ts";
+import { Settings } from "./core/settings.ts";
+import { LoginService, type ServiceOptions } from "./core/service.ts";
+import {
+  cachedSkillUpdates,
+  type UpdateChecker,
+} from "./core/update-checks.ts";
+import { startBackgroundScheduler } from "./core/sync-scheduler.ts";
 import { Sync } from "./core/sync.ts";
 import { Store } from "./core/store.ts";
 import { AppError, hash, parseSkill } from "./core/files.ts";
@@ -27,9 +32,23 @@ import {
 
 export async function startServer(
   store: Store,
-  options: { port?: number; dev?: boolean; uiDirectory?: string } = {},
+  options: {
+    port?: number;
+    dev?: boolean;
+    uiDirectory?: string;
+    background?: boolean;
+    service?: ServiceOptions;
+    schedulerIntervalMs?: number;
+    autoDeployDelayMs?: number;
+    updateChecker?: UpdateChecker;
+  } = {},
 ) {
   const engine = new Engine(store);
+  const settings = new Settings(
+    store,
+    new LoginService(store, options.service),
+  );
+  let background: Awaited<ReturnType<typeof startBackgroundScheduler>>;
   const token = crypto.randomBytes(32).toString("hex");
   const projectRoot = path.resolve(
     fileURLToPath(new URL("..", import.meta.url)),
@@ -110,14 +129,41 @@ export async function startServer(
         const resource = parts[1];
         const id = parts[2];
         let result: unknown;
-        if (req.method === "GET" && resource === "snapshot") {
+        if (req.method === "GET" && resource === "harnesses" && !id) {
+          result = store.harnesses();
+        } else if (req.method === "PUT" && resource === "harnesses" && id) {
+          const input = z
+            .strictObject({
+              enabled: z.boolean(),
+              revision: z.string().optional(),
+            })
+            .parse(body);
+          result = await store.setHarnessEnabled(
+            id,
+            input.enabled,
+            input.revision,
+          );
+        } else if (req.method === "GET" && resource === "snapshot") {
           const s = engine.snapshot();
           result = {
             ...s,
             plan: publicPlan(s.plan),
             sync: new Sync(store).local(),
           };
-        } else if (req.method === "GET" && resource === "inspect")
+        } else if (resource === "settings" && req.method === "GET")
+          result = await settings.get();
+        else if (resource === "settings" && req.method === "PUT")
+          result = await settings.patch(
+            body,
+            req.headers["if-match"] as string | undefined,
+          );
+        else if (
+          resource === "skills" &&
+          id === "updates" &&
+          req.method === "GET"
+        )
+          result = cachedSkillUpdates(store);
+        else if (req.method === "GET" && resource === "inspect")
           result = engine.inspect();
         else if (
           resource === "sync" &&
@@ -193,8 +239,7 @@ export async function startServer(
           req.method === "POST" &&
           id === "updates"
         )
-          result = await checkGitSkillUpdates(
-            store,
+          result = await background.checker.now(
             z.array(z.string()).default([]).parse(body.ids),
           );
         else if (
@@ -294,7 +339,34 @@ export async function startServer(
             body.revision,
           );
         else throw new AppError("NOT_FOUND", "接口不存在", 404);
-        return send(200, { ok: true, data: result });
+        // Preserve data shapes (including arrays); queue metadata belongs to the envelope.
+        const mutation =
+          !["GET", "HEAD"].includes(req.method!) &&
+          ([
+            "rules",
+            "projects",
+            "device",
+            "import",
+            "self-skill",
+            "restore",
+            "conflicts",
+          ].includes(resource) ||
+            (resource === "harnesses" && body.enabled === true) ||
+            (resource === "skills" &&
+              id !== "updates" &&
+              !(result as { selectionRequired?: boolean })
+                ?.selectionRequired) ||
+            (resource === "sync" &&
+              ["setup", "now", "resolve", "undo"].includes(id)) ||
+            (resource === "settings" && body.deploy?.auto === true));
+        const autoDeployQueued = mutation
+          ? background.queue(`api:${resource}${id ? "/" + id : ""}`)
+          : false;
+        return send(200, {
+          ok: true,
+          data: result,
+          ...(mutation ? { autoDeployQueued } : {}),
+        });
       }
       if (req.method !== "GET" && req.method !== "HEAD")
         return send(405, { ok: false, message: "Method not allowed" });
@@ -370,13 +442,29 @@ export async function startServer(
       resolve();
     });
   });
-  const stopSync = startSyncScheduler(new Sync(store));
+  try {
+    background = await startBackgroundScheduler(store, engine, {
+      intervalMs: options.schedulerIntervalMs,
+      debounceMs: options.autoDeployDelayMs,
+      serviceLog: options.background,
+      checker: options.updateChecker,
+    });
+  } catch (e) {
+    await vite?.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    throw e;
+  }
+  let closing: Promise<void> | undefined;
+  const stopBackground = () => (closing ??= background.close());
+  server.once("close", () => {
+    void stopBackground().catch(() => {});
+  });
   return {
     server,
     port: actualPort,
     url: `http://127.0.0.1:${actualPort}`,
     close: async () => {
-      await stopSync();
+      await stopBackground();
       await vite?.close();
       await new Promise<void>((resolve, reject) =>
         server.close((e) => (e ? reject(e) : resolve())),

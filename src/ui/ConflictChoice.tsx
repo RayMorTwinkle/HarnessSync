@@ -10,6 +10,7 @@ import {
   Upload,
 } from "lucide-react";
 import type { Change } from "../shared/types.ts";
+import { DiffLines } from "./common.tsx";
 
 export type ConflictUse = "library" | "native" | "skip";
 type FileChange = NonNullable<Change["fileChanges"]>[number];
@@ -168,31 +169,7 @@ function FileChanges({ files }: { files: FileChange[] }) {
           </button>
           {open === f.path && f.diff && (
             <pre className="diff-code compact">
-              {f.diff
-                .split("\n")
-                .filter(
-                  (line) => !line.startsWith("Index: ") && !/^=+$/.test(line),
-                )
-                .map((line, i) => (
-                  <span
-                    key={i}
-                    className={
-                      line.startsWith("+")
-                        ? "added"
-                        : line.startsWith("-")
-                          ? "removed"
-                          : line.startsWith("@@")
-                            ? "range"
-                            : ""
-                    }
-                  >
-                    {line.startsWith("--- ")
-                      ? "--- 本机目录"
-                      : line.startsWith("+++ ")
-                        ? "+++ 技能库"
-                        : line || " "}
-                  </span>
-                ))}
+              <DiffLines diff={f.diff} from="本机目录" to="技能库" />
             </pre>
           )}
         </div>

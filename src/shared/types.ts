@@ -1,14 +1,15 @@
 import { z } from "zod";
 
+import { harnessIdSchema } from "./harness-manifest.ts";
 import { harnessIds } from "./harnesses.ts";
 export { harnessIds, harnessNames } from "./harnesses.ts";
-export type HarnessId = (typeof harnessIds)[number];
+export type HarnessId = string;
 export const scopeSchema = z
   .object({
     kind: z.enum(["global", "device", "project"]).default("global"),
     target: z.string().optional(),
     harnesses: z
-      .array(z.enum(harnessIds))
+      .array(harnessIdSchema)
       .min(1)
       .default([...harnessIds]),
   })
@@ -64,6 +65,7 @@ export type Manifest = {
   projects: Project[];
 };
 export type Device = {
+  disabledHarnesses?: string[];
   id: string;
   name: string;
   home: string;
@@ -74,6 +76,11 @@ export type Device = {
   ignoredNativePaths?: string[];
 };
 export type Harness = {
+  source: "builtin" | "user";
+  enabled: boolean;
+  monogram?: string;
+  homepage?: string;
+  notes: { "zh-CN"?: string; en?: string };
   id: HarnessId;
   name: string;
   version: string | null;
@@ -90,6 +97,8 @@ export type Harness = {
   note: string;
 };
 export type Receipt = {
+  globalPaths?: { home: string; skills: string; instructions: string };
+  instructionCreated?: boolean;
   adoptedSourceHash?: string;
   adoptedLink?: string;
   kind: "instructions" | "skill";
@@ -101,6 +110,7 @@ export type Receipt = {
 };
 export type DeployState = {
   receipts: Receipt[];
+  instructionConsents?: { path: string; outsideHash: string }[];
   conflictChoices?: Record<
     string,
     {
@@ -148,15 +158,32 @@ export type Change = {
   }[];
   files?: Record<string, { content: string; mode: number }>;
 };
+export type PlanNotice = {
+  code:
+    | "harness-root-changed"
+    | "plugin-manifest-error"
+    | "unknown-harness"
+    | "retained-harness-paths"
+    | "shared-skill-exposure"
+    | "staging-leftover"
+    | "ignored-native-path"
+    | "skill-source-changed"
+    | "skill-source-unreadable";
+  message: string;
+  blocking: boolean;
+  path?: string;
+};
 export type Plan = {
   id: string;
   revision: string;
   changes: Change[];
   errors: string[];
   warnings?: string[];
+  notices: PlanNotice[];
   createdAt: string;
 };
 export type Snapshot = {
+  autoDeploy?: import("../core/auto-deploy.ts").AutoDeployResult | null;
   revision: string;
   manifest: Manifest;
   device: Device;
@@ -286,6 +313,7 @@ export type SyncRuntime = {
   changedAt?: string;
 };
 export type SyncStatus = {
+  autoDeploy?: import("../core/auto-deploy.ts").AutoDeployResult | null;
   auto: AutoSyncSettings;
   scheduler: SyncRuntime;
   remoteRepositoryRetained: true;

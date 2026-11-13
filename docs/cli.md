@@ -13,15 +13,23 @@
 | `apply --plan <id>`     | 执行对应计划，过期或冲突时拒绝部署                             |
 | `doctor`                | 检查部署偏离、变量、作用域和未完成部署                         |
 | `history`               | 查看源 Git 历史和部署历史                                      |
-| `restore <commit>`      | 恢复源配置并产生新提交，之后仍需部署                           |
+| `restore <commit>`      | 恢复源配置并产生新提交，按自动部署设置写入工具                 |
 | `rollback <deployment>` | 回滚最近一次有效部署，保留源配置                               |
-| `self-skill`            | 在源库中安装或更新中文管理技能，之后需预览部署                 |
+| `self-skill`            | 在源库中安装或更新中文管理技能，按自动部署设置写入工具         |
 | `open [--port <端口>]`  | 自动打开 Web UI；别名 `gui`、`webui`。复用同库服务或启动新服务 |
 | `serve [--port <端口>]` | 启动本机 GUI，默认 47821；`--dev` 用于源码开发                 |
 
 `doctor` 的 `healthy` 表示没有阻断性错误，不代表没有待部署变更；同时检查 `pendingChanges`。`observed: filesystem-only` 与 `sessionLoaded: unknown` 表示尚未观测会话加载。
 
 `open` 新启动的服务在当前终端运行，按 Ctrl+C 停止；复用已有服务时命令立即结束。默认端口 47821，浏览器启动失败时输出可手动访问的 URL。其他程序占用端口、或该端口的 HarnessSync 使用另一配置库时拒绝打开，可换用 `--port`。`serve` 保留仅启动服务、不打开浏览器的行为。
+
+## 本机设置与登录启动
+
+`config list [--json]` 查看完整设置和 meta；`config get <点号键>` 读取单项；`config set <点号键> <值>` 写入布尔值或数字。例如 `config set deploy.auto false`、`config set updates.intervalHours 168`、`config set startup.login true`。
+
+`service install|uninstall|status [--json]` 管理真实登录服务。支持 macOS LaunchAgent 与 Linux systemd user；源码 tsx 开发入口拒绝安装，需使用构建安装后的 dist/cli.js。`serve --background` 安静运行，默认端口 47821，不打开浏览器。`open` 复用同库后台服务；同一库只能有一个调度器。
+
+`deploy.auto` 默认开启。API 修改约 1.5 秒合并部署，CLI 修改末尾执行一次；同步拉取及调度器启动也补做。自动部署使用正常 plan/apply、收据、快照与回滚，只应用干净计划。`status` / `doctor` 的 `autoDeploy.outcome` 为 `needs-review` 时，先看 blockers，再 `plan` 和手动 apply。关闭自动部署后保留原有手动流程。`updates.check` 默认开启，每 24 小时后台检查 Git 技能更新（可选 6/24/168），只检查不安装。设置、API、保守边界与服务限制见 [本机设置](settings.md)。
 
 ## 首次初始化
 
@@ -89,7 +97,7 @@ DeepSeek、OpenCode、Codex 共用项目 `AGENTS.md`，其项目指令必须同�
 
 ## 远端同步
 
-所有命令支持 `--json`，仅修改源库，不自动部署。请使用用户拥有的私有、专用 Git 仓库；非 GitHub URL 的私有性由用户管理。
+所有命令支持 `--json`。同步合并后按 `deploy.auto` 设置尝试部署干净计划。请使用用户拥有的私有、专用 Git 仓库；非 GitHub URL 的私有性由用户管理。
 
 | 命令                                                 | 功能                                                                                          |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------- |
@@ -113,11 +121,11 @@ DeepSeek、OpenCode、Codex 共用项目 `AGENTS.md`，其项目指令必须同�
 
 GUI 接口：`GET /api/sync/status`（也支持 `/api/sync`），`POST /api/sync/setup`（`{url?,create?,branch?}`）、`POST /api/sync/now`、`POST /api/sync/resolve`（`{entryId,keep}`）、`POST /api/sync/disconnect`；沿用会话 token、Host 和 Origin 校验。
 
-自动同步在 setup 成功后默认开启（120 秒 debounce、10 分钟拉取），仅在 serve/open 服务或 sync watch 运行时执行。状态查询不访问网络。失败指数退避至最多 30 分钟；不自动部署。完整协议、恢复规则、请求/响应示例和限制见 [自动同步与撤销](sync-api.md)。
+自动同步在 setup 成功后默认开启（120 秒 debounce、10 分钟拉取），仅在 serve/open 服务或 sync watch 运行时执行。状态查询不访问网络。失败指数退避至最多 30 分钟；自动部署只应用干净计划。完整协议、恢复规则、请求/响应示例和限制见 [自动同步与撤销](sync-api.md)。
 
 ## Git 技能与上游（v0.4）
 
-只更新源库，不自动部署；安装或更新后仍需 `plan` → `apply --plan <id>`。
+安装和更新先保存源库，再按 `deploy.auto` 尝试自动部署。needs-review 时再用 `plan` → `apply --plan <id>`。
 
 | 命令                                                               | 功能                                             |
 | ------------------------------------------------------------------ | ------------------------------------------------ |
@@ -176,6 +184,7 @@ Git 包在安装、比较上游及更新时将文件权限统一为 `0644`（普
 | 方法与端点                     | 请求                                                                                       | data 返回                                                                                             |
 | ------------------------------ | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
 | `POST /api/skills/install`     | `{source, skills?: string[], all?: boolean, ref?: string, commit?: string, scope?: Scope}` | `{selectionRequired,url,ref,commit,candidates:[{name,description,subpath,error?}],installed:Skill[]}` |
+| `GET /api/skills/updates`      | 无                                                                                         | 缓存结果数组，不访问网络                                                                              |
 | `POST /api/skills/updates`     | `{ids?: string[]}`                                                                         | `[{id,name,checkedAt,commit,latestCommit?,available?,error?}]`                                        |
 | `POST /api/skills/update`      | `{ids:string[],force?:boolean}`                                                            | `[{id,name,commit,files:FileDiff[],note}]`                                                            |
 | `GET /api/skills/<id>/diff`    | 无                                                                                         | `{id,commit,latestCommit,files:FileDiff[]}`                                                           |
@@ -209,3 +218,17 @@ Git 包在安装、比较上游及更新时将文件权限统一为 `0644`（普
 `FileDiff` 为 `{path,status:"added"|"removed"|"modified",binary,beforeMode?,afterMode?,diff}`。文本返回 unified diff；二进制只返回变化提示，不返回原始数据。权限变化也列入文件摘要。GUI 应保留候选查询的 `commit` 用于第二步，并用检查结果的 `commit` 确认它仍对应当前技能版本。
 
 限制：不递归获取 Git submodule，不下载 Git LFS 对象（保留仓库中的指针文件）；固定提交需要远端允许 depth-one fetch 该 SHA。临时下载不复用工作树；批量更新可能重复下载同仓库，但检查更新会按 URL 去重。检查结果是上一次观测，不代表运行中的 Harness 已加载该配置。
+
+## Harness plugins
+
+- `hsync harness list [--json]`: list built-in and local plugins, enabled state, validation errors and plugin directory.
+- `hsync harness validate <file>`: validate JSON anywhere; errors include file and JSON paths; invalid files exit 1. Does not initialize a store or run version commands.
+- `hsync harness dir`: print the device-local plugin directory (`--root` is respected).
+- `hsync harness enable <id>` / `hsync harness disable <id>`: change device-local management state. Re-plan before applying.
+- Existing `--harness <ids>` accepts registered IDs separated by commas, or `all`. Unknown CLI IDs are errors. Stored unknown IDs remain readable and produce planning warnings.
+
+Paths wanted by enabled tools remain managed, including shared copies. Only
+unwanted receipts owned by disabled or missing tools are retained unchanged.
+Re-enabling resumes management. The original four-ID scope
+means all enabled tools, including future plugins. See [plugins.md](plugins.md)
+for contributor setup, path semantics, API contracts and security boundaries.

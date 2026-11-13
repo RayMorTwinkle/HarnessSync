@@ -1,0 +1,22 @@
+{
+  "$schema": "../../../schema/harness.schema.json",
+  "id": "acme",
+  "name": "Acme Agent",
+  "homepage": "https://example.com/acme",
+  "monogram": "Ac",
+  "root": { "env": "ACME_HOME", "default": "~/.acme" },
+  "detect": ["{root}"],
+  "version": { "command": "acme", "args": ["--version"] },
+  "instructions": {
+    "global": [{ "path": "{root}/ACME.md", "kind": "main" }],
+    "fragments": [],
+    "project": "ACME.md"
+  },
+  "skills": {
+    "global": "{root}/skills",
+    "project": ".acme/skills",
+    "reads": { "global": ["{root}/skills"], "project": [".acme/skills"] },
+    "sameNameCopies": "list"
+  },
+  "notes": { "en": "Fictional test harness; filesystem deployment only." }
+}

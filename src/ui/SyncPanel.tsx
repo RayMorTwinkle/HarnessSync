@@ -21,6 +21,7 @@ import type {
   SyncConflict,
   SyncStatus,
 } from "../shared/types.ts";
+import { useApp } from "./app-context.tsx";
 
 type HistoryItem = {
   hash: string;
@@ -74,6 +75,7 @@ export function SyncPanel({
   api: Api;
   openPlan: () => void;
 }) {
+  const { autoDeploy } = useApp();
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [loadError, setLoadError] = useState("");
   const [mode, setMode] = useState<"create" | "url">("create");
@@ -232,11 +234,11 @@ export function SyncPanel({
           <ArrowDownToLine size={16} />
           <span>
             其他设备带来了 <strong>{pendingDeploy}</strong>{" "}
-            项变更，已合并到技能库，还没有写入各 Harness。
+            项变更，已合并到技能库，还没有写入各 AI 工具。
           </span>
           <button className="button small primary" onClick={openPlan}>
             <Zap size={13} />
-            预览并部署
+            查看并部署
           </button>
         </div>
       )}
@@ -248,7 +250,9 @@ export function SyncPanel({
             <p>
               {conflicts.length
                 ? "有冲突待处理，处理完之前暂停推送，其他设备不受影响。"
-                : "同步只更新源配置；拉取后请预览部署，再写入各 Harness。"}
+                : autoDeploy
+                  ? "拉取到的改动会自动写入各 AI 工具；遇到需要确认的情况会提示你。"
+                  : "同步只更新源配置；拉取后请预览部署，再写入各 AI 工具。"}
             </p>
           </div>
           <span className={`sync-badge ${conflicts.length ? "warn" : ""}`}>
@@ -302,7 +306,10 @@ export function SyncPanel({
             className="button primary"
             disabled={busy}
             onClick={() =>
-              run(() => api<SyncStatus>("sync/now", {}), "同步完成，请预览部署")
+              run(
+                () => api<SyncStatus>("sync/now", {}),
+                autoDeploy ? "同步完成" : "同步完成，请预览部署",
+              )
             }
           >
             {busy ? (
@@ -681,7 +688,10 @@ function SyncFacts() {
         <li>按条目合并：不同条目的修改自动合并，不会互相覆盖。</li>
         <li>同一条目两边都改时记为冲突，本机版本保留，暂停推送直到你选择。</li>
         <li>每次合并或处理冲突前保存安全点，可在「版本与部署」中恢复。</li>
-        <li>同步从不直接写入 Harness 目录，部署始终需要预览确认。</li>
+        <li>
+          同步只改技能库。写入各 AI 工具时只动 HarnessSync
+          管理的文件，每次都保留快照。
+        </li>
       </ul>
     </section>
   );

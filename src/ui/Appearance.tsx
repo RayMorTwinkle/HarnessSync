@@ -41,25 +41,74 @@ function applyAppearance(theme: Theme, size: TextSize) {
 }
 
 // Run before the first render so a dark-mode user never sees a light flash.
-applyAppearance(
-  read<Theme>("hsync.theme", ["system", "light", "dark"], "system"),
-  read<TextSize>("hsync.textSize", ["normal", "large", "xlarge"], "normal"),
-);
+let current = {
+  theme: read<Theme>("hsync.theme", ["system", "light", "dark"], "system"),
+  size: read<TextSize>(
+    "hsync.textSize",
+    ["normal", "large", "xlarge"],
+    "normal",
+  ),
+};
+applyAppearance(current.theme, current.size);
+const listeners = new Set<() => void>();
+
+// The top-bar menu and the settings page edit the same preference.
+function useAppearance() {
+  const [value, setValue] = useState(current);
+  useEffect(() => {
+    const update = () => setValue(current);
+    listeners.add(update);
+    return () => void listeners.delete(update);
+  }, []);
+  const set = (patch: Partial<typeof current>) => {
+    current = { ...current, ...patch };
+    applyAppearance(current.theme, current.size);
+    write("hsync.theme", current.theme);
+    write("hsync.textSize", current.size);
+    listeners.forEach((l) => l());
+  };
+  return [value, set] as const;
+}
+
+export function AppearanceOptions() {
+  const [{ theme, size }, set] = useAppearance();
+  return (
+    <>
+      <span className="appearance-label">主题</span>
+      <div className="appearance-options">
+        {themes.map((t) => (
+          <button
+            key={t.id}
+            className={theme === t.id ? "active" : ""}
+            aria-pressed={theme === t.id}
+            onClick={() => set({ theme: t.id })}
+          >
+            {t.icon}
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <span className="appearance-label">字号</span>
+      <div className="appearance-options sizes">
+        {sizes.map((s) => (
+          <button
+            key={s.id}
+            className={size === s.id ? "active" : ""}
+            aria-pressed={size === s.id}
+            onClick={() => set({ size: s.id })}
+          >
+            <span className={`size-sample ${s.id}`}>文</span>
+            {s.label}
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
 
 export function AppearanceMenu() {
   const [open, setOpen] = useState(false);
-  const [theme, setTheme] = useState<Theme>(() =>
-    read("hsync.theme", ["system", "light", "dark"], "system"),
-  );
-  const [size, setSize] = useState<TextSize>(() =>
-    read("hsync.textSize", ["normal", "large", "xlarge"], "normal"),
-  );
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    applyAppearance(theme, size);
-    write("hsync.theme", theme);
-    write("hsync.textSize", size);
-  }, [theme, size]);
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent | KeyboardEvent) => {
@@ -90,34 +139,7 @@ export function AppearanceMenu() {
       </button>
       {open && (
         <div className="appearance-menu" role="dialog" aria-label="外观">
-          <span className="appearance-label">主题</span>
-          <div className="appearance-options">
-            {themes.map((t) => (
-              <button
-                key={t.id}
-                className={theme === t.id ? "active" : ""}
-                aria-pressed={theme === t.id}
-                onClick={() => setTheme(t.id)}
-              >
-                {t.icon}
-                {t.label}
-              </button>
-            ))}
-          </div>
-          <span className="appearance-label">字号</span>
-          <div className="appearance-options sizes">
-            {sizes.map((s) => (
-              <button
-                key={s.id}
-                className={size === s.id ? "active" : ""}
-                aria-pressed={size === s.id}
-                onClick={() => setSize(s.id)}
-              >
-                <span className={`size-sample ${s.id}`}>文</span>
-                {s.label}
-              </button>
-            ))}
-          </div>
+          <AppearanceOptions />
         </div>
       )}
     </div>

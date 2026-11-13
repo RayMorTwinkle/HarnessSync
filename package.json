@@ -1,6 +1,6 @@
 {
   "name": "harness-sync",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "description": "Local-first instructions and skills for your AI harnesses",
@@ -23,7 +23,8 @@
     "start": "node dist/cli.js serve",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
-    "format": "prettier --write src tests vite.config.ts tsconfig.json index.html package.json README.md CONTEXT.md AGENTS.md docs skills"
+    "format": "prettier --write src tests vite.config.ts tsconfig.json index.html package.json README.md CONTEXT.md AGENTS.md docs skills",
+    "schema:harness": "tsx scripts/harness-schema.ts"
   },
   "dependencies": {
     "commander": "^14.0.0",
@@ -45,5 +46,11 @@
     "tsx": "^4.20.0",
     "typescript": "^5.9.0",
     "vite": "^7.0.0"
-  }
+  },
+  "files": [
+    "dist",
+    "harnesses",
+    "schema",
+    "skills"
+  ]
 }

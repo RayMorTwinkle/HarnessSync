@@ -3,7 +3,7 @@
 set -euo pipefail
 
 repo="${HSYNC_REPO:-https://github.com/RayMorTwinkle/HarnessSync.git}"
-ref="${HSYNC_REF:-v0.4.0}"
+ref="${HSYNC_REF:-v0.5.0}"
 install_dir="${HSYNC_INSTALL_DIR:-${HOME}/.local/share/harness-sync}"
 bin_dir="${HSYNC_BIN_DIR:-${HOME}/.local/bin}"
 stage=""
@@ -16,7 +16,7 @@ usage() {
 HarnessSync 安装器
 
 用法：bash install.sh [选项]
-  --ref <tag或分支>       安装版本，默认 v0.4.0
+  --ref <tag或分支>       安装版本，默认 v0.5.0
   --install-dir <目录>    程序目录，默认 ~/.local/share/harness-sync
   --bin-dir <目录>        hsync 启动器目录，默认 ~/.local/bin
   --repo <Git地址>        源仓库，也可使用本地 Git 仓库进行验证
@@ -91,6 +91,7 @@ printf '正在安装依赖并构建 CLI 与 GUI…\n'
   node dist/cli.js --version
   node dist/cli.js --help >/dev/null
   [ -f dist/ui/index.html ] || die '构建未生成 GUI。'
+  [ -f harnesses/codex.json ] && [ -f schema/harness.schema.json ] || die '缺少 Harness 清单或 JSON Schema。'
 )
 commit="$(git -C "$stage" rev-parse HEAD)"
 release="${commit}-$(date +%Y%m%d%H%M%S)-$$"
