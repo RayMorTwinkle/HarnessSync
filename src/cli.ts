@@ -1,10 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
+import { Sync } from "./core/sync.ts";
+import {
+  ignoreNativePaths,
+  refreshSkills,
+  skillSource,
+  sourceStatus,
+} from "./core/skill-sources.ts";
 import { Store } from "./core/store.ts";
 import { Engine, publicPlan } from "./core/engine.ts";
 import { startServer } from "./server.ts";
-import { scopeSchema, harnessIds } from "./shared/types.ts";
+import { scopeSchema, harnessIds, type Scope } from "./shared/types.ts";
 import {
   createOnboarding,
   getOnboarding,
@@ -19,7 +26,7 @@ import { openWebUi, parsePort } from "./web-ui.ts";
 const cli = new Command()
   .name("hsync")
   .description("HarnessSync · 统一管理四种 AI Harness 的指令与技能")
-  .version("0.2.2")
+  .version("0.3.0")
   .option("--root <directory>", "配置库目录")
   .option("--json", "机器可读 JSON 输出");
 let store: Store;
@@ -44,6 +51,20 @@ const scope = (o: any) =>
     target: o.target,
     harnesses: o.harness.split(","),
   });
+// Edits keep the stored scope; only options given on the command line override it.
+const editScope = (o: any, cmd: Command, current: Scope) => {
+  const given = (name: string) => cmd.getOptionValueSource(name) === "cli";
+  const kind = given("scope") ? o.scope : current.kind;
+  return scopeSchema.parse({
+    kind,
+    target: given("target")
+      ? o.target
+      : kind === current.kind
+        ? current.target
+        : undefined,
+    harnesses: given("harness") ? o.harness.split(",") : current.harnesses,
+  });
+};
 const findId = (
   list: { id: string; name?: string; title?: string }[],
   input: string,
@@ -65,7 +86,13 @@ cli
   .action(
     run(async () => {
       const x = new Engine(await getStore()).snapshot();
-      return { ...x, plan: publicPlan(x.plan) };
+      return {
+        ...x,
+        sourceUpdates: sourceStatus(await getStore()).filter(
+          (s) => s.changed || s.note.startsWith("源目录无法读取"),
+        ),
+        plan: publicPlan(x.plan),
+      };
     }),
   );
 cli
@@ -97,7 +124,11 @@ cli
       if (!healthy) process.exitCode = 1;
       return {
         healthy,
+        sourceUpdates: sourceStatus(await getStore()).filter(
+          (s) => s.changed || s.note.startsWith("源目录无法读取"),
+        ),
         errors: plan.errors,
+        warnings: plan.warnings,
         conflicts: conflicts.map((c) => ({ path: c.path, reason: c.reason })),
         pendingDeployments: pending,
         pendingChanges: plan.changes.filter(
@@ -167,6 +198,33 @@ onboard
   .command("unstage-instructions")
   .description("取消尚未发布的全局指令替换登记")
   .action(run(async () => unstageInstructions(await getStore())));
+const sync = cli.command("sync").description("通过用户私有 Git 仓库同步源配置");
+sync
+  .command("setup")
+  .option("--url <git-url>")
+  .option("--create [name]")
+  .option("--branch <branch>")
+  .action(run(async (o) => new Sync(await getStore()).setup(o)));
+sync
+  .command("status")
+  .action(run(async () => new Sync(await getStore()).status()));
+sync.command("now").action(run(async () => new Sync(await getStore()).now()));
+sync
+  .command("resolve <entry-id>")
+  .requiredOption("--keep <choice>", "local / remote / both")
+  .action(run(async (id, o) => new Sync(await getStore()).resolve(id, o.keep)));
+sync
+  .command("disconnect")
+  .action(run(async () => new Sync(await getStore()).disconnect()));
+onboard
+  .command("ignore <paths...>")
+  .description("将链接入口标记为本机外部保留，后续不再推荐导入")
+  .option("--remove", "取消外部保留")
+  .action(
+    run(async (paths, o) =>
+      ignoreNativePaths(await getStore(), paths, !o.remove),
+    ),
+  );
 const rules = cli.command("rules").description("管理全局、设备或项目指令");
 rules
   .command("list")
@@ -188,18 +246,23 @@ scopeOptions(
 scopeOptions(
   rules
     .command("edit <id>")
-    .requiredOption("--title <title>")
-    .requiredOption("--file <file>"),
+    .option("--title <title>")
+    .option("--file <file>"),
 ).action(
-  run(async (id, o) => {
+  run(async (id, o, cmd) => {
     const s = await getStore();
+    const key = findId(s.manifest().rules, id);
+    const current = s.manifest().rules.find((r) => r.id === key)!;
     return s.saveRule(
       {
-        title: o.title,
-        body: fs.readFileSync(path.resolve(o.file), "utf8"),
-        scope: scope(o),
+        ...current,
+        title: o.title ?? current.title,
+        body: o.file
+          ? fs.readFileSync(path.resolve(o.file), "utf8")
+          : current.body,
+        scope: editScope(o, cmd, current.scope),
       },
-      findId(s.manifest().rules, id),
+      key,
     );
   }),
 );
@@ -213,6 +276,26 @@ const skills = cli.command("skills").description("管理完整 Skill 包");
 skills
   .command("list")
   .action(run(async () => (await getStore()).manifest().skills));
+skills
+  .command("refresh [id]")
+  .description("从本机源目录刷新完整技能包，保留范围、启停和显示名")
+  .option("--all", "刷新所有有本机源目录的技能")
+  .action(
+    run(async (id, o) => {
+      const s = await getStore();
+      if (Boolean(id) === Boolean(o.all))
+        throw new AppError("INVALID_ARGUMENT", "请选择技能 ID 或 --all");
+      return refreshSkills(
+        s,
+        o.all
+          ? s
+              .manifest()
+              .skills.filter((x) => skillSource(s, x.id))
+              .map((x) => x.id)
+          : [findId(s.manifest().skills, id)],
+      );
+    }),
+  );
 skills.command("show <id>").action(
   run(async (id) => {
     const s = await getStore();
@@ -242,12 +325,19 @@ scopeOptions(
     .command("edit <id>")
     .requiredOption("--file <file>", "包含 YAML frontmatter 的 SKILL.md"),
 ).action(
-  run(async (id, o) => {
+  run(async (id, o, cmd) => {
     const s = await getStore();
     const value = parseSkill(fs.readFileSync(path.resolve(o.file), "utf8"));
+    const key = findId(s.manifest().skills, id);
+    const current = s.manifest().skills.find((x) => x.id === key)!;
     return s.saveSkill(
-      { ...value, scope: scope(o) },
-      findId(s.manifest().skills, id),
+      {
+        ...value,
+        enabled: current.enabled,
+        displayName: current.displayName,
+        scope: editScope(o, cmd, current.scope),
+      },
+      key,
     );
   }),
 );

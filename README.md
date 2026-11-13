@@ -4,14 +4,14 @@
 
 当前适配 **DeepSeek Harness、OpenCode V2、Codex 和 Claude Code**，提供本机 Web GUI 和 CLI，共用同一套核心。
 
-当前版本 **v0.2.2**。已提供本机配置管理与 Git 历史；跨设备远端同步、合并仍在后续范围内。
+当前发布版本 **v0.3.0**：支持通过私有 GitHub 仓库跨设备同步，源配置逐条存储，设备数据保留本机。
 
 ## 安装
 
 需要 **Node.js 22.12+、npm、Git**。安装器面向 macOS 与 Linux；Windows 请在 WSL 内使用。目前真实 Harness 会话验收环境为 macOS；跨平台测试不能替代各 Harness 的实际会话验收。
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.2.2/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.3.0/install.sh | bash
 ```
 
 默认安装到 `~/.local/share/harness-sync`，命令启动器为 `~/.local/bin/hsync`。不需要 sudo，不修改 shell 配置，不自动改写已有 Harness 配置。若启动器目录不在 PATH 中，按安装器提示添加，或直接使用完整路径：
@@ -29,9 +29,9 @@ curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.2.2/in
 希望先查看脚本或指定目录时：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.2.2/install.sh -o install-harness-sync.sh
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.3.0/install.sh -o install-harness-sync.sh
 bash install-harness-sync.sh --help
-bash install-harness-sync.sh --ref v0.2.2 \
+bash install-harness-sync.sh --ref v0.3.0 \
   --install-dir "$HOME/.local/share/harness-sync" \
   --bin-dir "$HOME/.local/bin"
 ```
@@ -48,7 +48,7 @@ bash install-harness-sync.sh --ref v0.2.2 \
 可以把下面这段话交给有终端和网络权限的 AI；此方式让 AI 读取安装 Skill，不要求预先安装 HarnessSync：
 
 ```text
-请读取 https://github.com/RayMorTwinkle/HarnessSync/blob/v0.2.2/skills/harness-sync-install/SKILL.md，按其中说明在本机安装 HarnessSync，并完成扫描和管理技能部署。保留原有配置，把生成的初始化提示词交给我。
+请读取 https://github.com/RayMorTwinkle/HarnessSync/blob/v0.3.0/skills/harness-sync-install/SKILL.md，按其中说明在本机安装 HarnessSync，并完成扫描和管理技能部署。保留原有配置，把生成的初始化提示词交给我。
 ```
 
 也可把 `skills/harness-sync-install/` 完整目录放入所用 Harness 支持的用户技能目录。它不依赖仓库外的个人技能或本机固定路径。
@@ -158,16 +158,40 @@ hsync self-skill
 
 所有命令支持 `--help`。`--json` 可放在子命令后。失败返回非零退出码及 JSON 错误。若目录或配置被其他进程修改，重新获取源版本或部署计划；系统不会自动覆盖。
 
-普通导入只复制到中央库，不接管原目录。如果原生目录与库中同名，预览会显示冲突；确认要由 HarnessSync 管理时显式使用 `--adopt`。已入库的 Skill 可以接管内容完全一致的原生目录。共享兼容目录只允许普通导入。
+普通导入先复制到中央库；部署计划选择的原生目录如果完整内容与源相同，会显示“接管”，应用时仅登记收据，不重写文件。内容不同仍显示冲突。`--adopt` 可在导入时显式接管支持的原生目录；共享兼容目录使用普通导入，再检查部署计划。
+
+## 跨设备同步
+
+使用自己拥有的私有 GitHub 仓库或其他专用 Git 仓库：
+
+```sh
+hsync sync setup --create                      # 需要 gh 已安装并登录
+hsync sync setup --url git@github.com:USER/config.git  # 与 create 二选一
+hsync sync status --json
+hsync sync now --json
+hsync sync resolve ENTRY_ID --keep local       # 或 remote / both
+hsync plan                                    # 审查后再 apply
+hsync sync disconnect                         # 保留本地配置
+```
+
+新机器可选择直接开始本地配置，或用 `sync setup --url` 恢复已有远端库。远端为空时推送本地；双方已有内容时按条目三方合并，技能按元数据与完整包一起比较。冲突保留本地并记录待处理项，其余条目仍同步。`both` 为远端副本生成新 ID，技能名称加数字后缀；删除冲突需选择保留本地或远端。
+
+同步与解决冲突前保留 Git 安全点，可从 `history` 找到原提交并用 `restore` 恢复。解决选择先保存在本地，再运行 `sync now` 推送。同步不会部署原生目录；每次拉取后请审查 `plan`。设备作用域源条目会同步，但只在目标设备部署；设备身份、变量、目录绑定、部署与初始化快照均留在 Git 外。Git URL 不应含令牌或密码。
+
+v1 的 `manifest.json` 仍可只读打开；首次修改或同步自动迁移为逐条文件并提交「迁移配置库到 v2」。迁移无需手工导入。
 
 ## 文件布局
 
 ```text
 ~/.harness-sync/
   repo/                   # 可迁移的源配置 Git 仓库
-    manifest.json         # 项目、指令片段、技能元数据
+    harness-sync.json     # schemaVersion: 2
+    entries/rules/<id>.json
+    entries/skills/<id>.json
+    entries/projects/<id>.json
     skills/<stable-id>/   # 完整技能包
     .git/
+  sync.json               # 远端地址、分支、同步时间与待处理冲突（本机）
   device.json             # 本机身份、变量、项目目录绑定
   state.json              # 本机文件所有权与部署收据
   deployments/            # 本机部署快照
@@ -183,7 +207,7 @@ hsync self-skill
 | Codex            | `$CODEX_HOME/AGENTS.md`，有非空 `AGENTS.override.md` 时优先                | `~/.agents/skills`                 | `.agents/skills`   |
 | Claude Code      | `$CLAUDE_CONFIG_DIR/CLAUDE.md`，默认 `~/.claude/CLAUDE.md`                 | `~/.claude/skills`                 | `.claude/skills`   |
 
-DeepSeek、OpenCode 和 Codex 共用项目根 `AGENTS.md`，面向其中任一工具的项目指令须同时选择三者。Claude Code 使用独立的项目 `CLAUDE.md`。技能采用实际文件复制；Codex 的共享 `.agents/skills` 和 Claude 的 `.claude/skills` 可能被其他工具兼容扫描，不能将 Harness 选择理解为严格隔离。旧条目保留既有选择，不自动扩大范围。
+DeepSeek、OpenCode 和 Codex 共用项目根 `AGENTS.md`，面向其中任一工具的项目指令须同时选择三者。Claude Code 使用独立的项目 `CLAUDE.md`。技能采用实际文件复制；Harness 选择表示确保所选工具可读取。放置器依据读取目录表依次最小化同名重复、未选工具可见性、副本数量，平局优先非旧版目录；旧收据中的多余副本会在计划中撤下。共享目录仍可能被其他工具读取，不能将 Harness 选择理解为严格隔离。旧条目保留既有选择，不自动扩大范围。
 
 ## 变量与生效
 
@@ -197,7 +221,7 @@ DeepSeek、OpenCode 和 Codex 共用项目根 `AGENTS.md`，面向其中任一�
 
 ## 当前边界
 
-- 当前是本机版本：**未实现远端同步、跨设备冲突合并或桌面安装包**。本地 Git 历史不等于多端同步。
+- 尚未提供桌面安装包；远端 Git 认证由用户的 SSH 或凭证助手管理。
 - 每个项目在一台机器上绑定一个目录；多 checkout/worktree 绑定待扩展。
 - 中央库 Skill 名称唯一，暂不支持同名 Skill 按作用域覆盖。
 - 扫描支持最多六层分类目录、真实路径与链接入口去重，并识别平铺 Markdown。平铺技能需要先整理成目录包；插件托管和系统内置技能不自动纳管。

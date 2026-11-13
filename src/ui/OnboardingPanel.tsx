@@ -5,6 +5,7 @@ import {
   Copy,
   FileText,
   FolderSearch,
+  GitBranch,
   Loader2,
   RefreshCw,
   ShieldCheck,
@@ -23,9 +24,13 @@ type Request = <T>(
 export function OnboardingPanel({
   request,
   refresh,
+  sync,
+  openSync,
 }: {
   request: Request;
   refresh: () => Promise<unknown>;
+  sync?: { connected: boolean; remote?: string };
+  openSync: () => void;
 }) {
   const [record, setRecord] = useState<Onboarding | null>(null);
   const [busy, setBusy] = useState("");
@@ -77,6 +82,12 @@ export function OnboardingPanel({
             text: "复制提示词，集中处理关键分歧",
             done: false,
           },
+          {
+            n: "04",
+            title: "跨设备同步",
+            text: "可选：连接你的私有 Git 仓库",
+            done: Boolean(sync?.connected),
+          },
         ].map((step) => (
           <div key={step.n} className={step.done ? "done" : ""}>
             <span>{step.done ? <CheckCircle2 size={18} /> : step.n}</span>
@@ -125,7 +136,9 @@ export function OnboardingPanel({
           <div className="inventory-stats">
             {[
               ["真实技能目录", inventory.summary.physicalSkills],
-              ["技能名称", inventory.summary.names],
+              ["默认可导入", inventory.summary.importableSkills ?? 0],
+              ["托管技能（默认排除）", inventory.summary.excludedSkills ?? 0],
+              ["外部保留", inventory.summary.ignoredSkills ?? 0],
               ["全局指令文件", inventory.summary.instructionFiles],
               ["同名不同内容", inventory.summary.nameConflicts],
             ].map(([label, count]) => (
@@ -216,6 +229,24 @@ export function OnboardingPanel({
               </small>
             </section>
           </div>
+          <section className="panel onboarding-block onboarding-sync">
+            <div className="onboarding-block-heading">
+              <span className="step-label">04</span>
+              <div>
+                <h2>跨设备同步（可选）</h2>
+                <p>
+                  {sync?.connected
+                    ? `已连接 ${sync.remote}。其他设备连接同一仓库即可恢复这套配置。`
+                    : "整理完成后，把配置备份到你自己的 GitHub 私有仓库；新设备连接后直接恢复，不用再整理一遍。"}
+                </p>
+              </div>
+            </div>
+            <button className="button" onClick={openSync}>
+              <GitBranch size={14} />
+              {sync?.connected ? "查看同步状态" : "设置跨设备同步"}
+              <ArrowRight size={14} />
+            </button>
+          </section>
           <details className="panel inventory-details">
             <summary>
               <FileText size={16} />
@@ -285,6 +316,10 @@ export function OnboardingPanel({
                     <span>
                       {s.harnesses.map((h) => harnessNames[h]).join(" / ")}
                       {s.managed ? " · 已由 HarnessSync 管理" : ""}
+                      {s.ignored ? " · 外部保留" : ""}
+                      {s.origin && s.origin !== "user"
+                        ? ` · ${s.origin}（默认不导入）`
+                        : ""}
                       {!s.valid ? " · 需要整理格式" : ""}
                     </span>
                     <code>{s.path}</code>
@@ -293,6 +328,7 @@ export function OnboardingPanel({
                       .map((p) => (
                         <code key={p}>链接入口：{p}</code>
                       ))}
+                    {s.originReason && <small>{s.originReason}</small>}
                     {s.error && <small className="invalid">{s.error}</small>}
                   </div>
                   <span className="tiny-tag">

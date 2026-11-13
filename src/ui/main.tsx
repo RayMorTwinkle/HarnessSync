@@ -8,6 +8,7 @@ import {
   Box,
   Check,
   CheckCircle2,
+  Cloud,
   ChevronDown,
   ChevronRight,
   Circle,
@@ -49,8 +50,11 @@ import type {
   Change,
 } from "../shared/types.ts";
 import "./style.css";
+
+declare const __APP_VERSION__: string;
 import { harnessIds, harnessNames } from "../shared/harnesses.ts";
 import { OnboardingPanel } from "./OnboardingPanel.tsx";
+import { SyncPanel } from "./SyncPanel.tsx";
 
 type Page =
   | "overview"
@@ -58,6 +62,7 @@ type Page =
   | "instructions"
   | "projects"
   | "onboarding"
+  | "sync"
   | "history"
   | "device";
 const navigation: { id: Page; title: string; icon: typeof Box }[] = [
@@ -66,6 +71,7 @@ const navigation: { id: Page; title: string; icon: typeof Box }[] = [
   { id: "instructions", title: "全局指令", icon: FileText },
   { id: "projects", title: "项目", icon: Folder },
   { id: "onboarding", title: "首次初始化", icon: Sparkles },
+  { id: "sync", title: "跨设备同步", icon: Cloud },
   { id: "history", title: "版本与部署", icon: History },
   { id: "device", title: "设备与变量", icon: Settings2 },
 ];
@@ -314,7 +320,7 @@ function App() {
           <div className="local-status">
             <span className="status-dot" />
             <span>本地服务运行中</span>
-            <span className="version">v0.2</span>
+            <span className="version">v{__APP_VERSION__}</span>
           </div>
           <button className="device-mini" onClick={() => setPage("device")}>
             <span className="device-avatar">
@@ -384,6 +390,7 @@ function App() {
                     device: "设备变量与本地目录绑定保存在这台计算机。",
                     onboarding:
                       "先建立清单与管理入口，再让你常用的 AI 协助整理。",
+                    sync: "用你自己的私有 Git 仓库，在多台设备间保持同一套配置。",
                   }[page]
                 }
               </p>
@@ -401,7 +408,12 @@ function App() {
             </button>
           </div>
           {page === "onboarding" && (
-            <OnboardingPanel request={api} refresh={refresh} />
+            <OnboardingPanel
+              request={api}
+              refresh={refresh}
+              sync={data.sync}
+              openSync={() => setPage("sync")}
+            />
           )}
           {page === "overview" && (
             <>
@@ -1008,6 +1020,15 @@ function App() {
               </p>
             </>
           )}
+          {page === "sync" && (
+            <SyncPanel
+              data={data}
+              busy={busy}
+              act={act}
+              api={api}
+              openPlan={openPlan}
+            />
+          )}
           {page === "history" && (
             <div className="history-columns">
               <section>
@@ -1361,6 +1382,7 @@ function App() {
       {planOpen && (
         <PlanDrawer
           plan={data.plan}
+          home={data.device.home}
           busy={busy}
           close={() => setPlanOpen(false)}
           apply={async () => {
@@ -1841,11 +1863,13 @@ function DeviceSettings({
 }
 function PlanDrawer({
   plan,
+  home,
   busy,
   close,
   apply,
 }: {
   plan: Plan;
+  home: string;
   busy: boolean;
   close: () => void;
   apply: () => Promise<void>;
@@ -1855,8 +1879,27 @@ function PlanDrawer({
     changed[0] || plan.changes[0] || null,
   );
   const [error, setError] = useState("");
+  const [status, setStatus] = useState<Change["status"] | "all">("all");
   const conflicts = plan.changes.filter((c) => c.status === "conflict");
+  const short = (p: string) =>
+    p === home || p.startsWith(home + "/") ? "~" + p.slice(home.length) : p;
+  const order: Change["status"][] = [
+    "conflict",
+    "create",
+    "update",
+    "adopt",
+    "remove",
+    "unchanged",
+  ];
+  const counts = Object.fromEntries(
+    order.map((k) => [k, plan.changes.filter((c) => c.status === k).length]),
+  ) as Record<Change["status"], number>;
+  const visible = plan.changes
+    .filter((c) => status === "all" || c.status === status)
+    .sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
+  const linkReplace = (c: Change) => c.reason === "以副本替换链接";
   const labels = {
+    adopt: "接管",
     create: "新增",
     update: "更新",
     remove: "撤下",
@@ -1917,19 +1960,43 @@ function PlanDrawer({
         )}
         <div className="plan-layout">
           <div className="change-list">
+            {plan.changes.length > 0 && (
+              <div className="change-filter" role="tablist">
+                {(["all", ...order] as const)
+                  .filter((k) => k === "all" || counts[k] > 0)
+                  .map((k) => (
+                    <button
+                      key={k}
+                      role="tab"
+                      aria-selected={status === k}
+                      className={status === k ? "selected" : ""}
+                      onClick={() => setStatus(k)}
+                    >
+                      {k === "all" ? "全部" : labels[k]}
+                      <span>
+                        {k === "all" ? plan.changes.length : counts[k]}
+                      </span>
+                    </button>
+                  ))}
+              </div>
+            )}
             {plan.changes.length ? (
-              plan.changes.map((c) => (
+              visible.map((c) => (
                 <button
                   key={c.path}
                   className={selected?.path === c.path ? "selected" : ""}
                   onClick={() => setSelected(c)}
                 >
-                  <span className={`change-tag ${c.status}`}>
-                    {labels[c.status]}
+                  <span
+                    className={`change-tag ${c.status} ${linkReplace(c) ? "link" : ""}`}
+                  >
+                    {linkReplace(c) ? "替换链接" : labels[c.status]}
                   </span>
                   <div>
                     <strong>{c.path.split("/").slice(-1)[0]}</strong>
-                    <small title={c.path}>{c.path}</small>
+                    <small title={c.path}>
+                      {short(c.path.split("/").slice(0, -1).join("/"))}
+                    </small>
                   </div>
                   <ChevronRight size={13} />
                 </button>
@@ -1946,7 +2013,7 @@ function PlanDrawer({
             {selected ? (
               <>
                 <div className="diff-heading">
-                  <code>{selected.path}</code>
+                  <code title={selected.path}>{short(selected.path)}</code>
                   <span className={`change-tag ${selected.status}`}>
                     {labels[selected.status]}
                   </span>
@@ -1961,7 +2028,22 @@ function PlanDrawer({
                   )}
                   {selected.reason}
                 </div>
-                {selected.status === "conflict" ? (
+                {selected.status === "adopt" ? (
+                  <div className="conflict-detail calm">
+                    <h3>内容完全一致，只登记归属</h3>
+                    <p>
+                      这个目录与技能库中的版本逐字节相同。部署不会改写任何文件，只记录它由
+                      HarnessSync 管理，之后的更新和撤下都会经过预览。
+                    </p>
+                  </div>
+                ) : linkReplace(selected) ? (
+                  <div className="conflict-detail calm">
+                    <h3>以副本替换软链接</h3>
+                    <p>
+                      部署时只移除这个链接本身，换成技能库中的完整副本；链接指向的源目录不会被修改。回滚会恢复原来的链接。源目录之后有更新时，用「刷新」把改动带回技能库。
+                    </p>
+                  </div>
+                ) : selected.status === "conflict" ? (
                   <div className="conflict-detail">
                     <h3>保留文件，先解决来源差异</h3>
                     <p>
@@ -1971,23 +2053,29 @@ function PlanDrawer({
                 ) : (
                   <pre className="diff-code">
                     {selected.diff ? (
-                      selected.diff.split("\n").map((line, i) => (
-                        <span
-                          key={i}
-                          className={
-                            line.startsWith("+")
-                              ? "added"
-                              : line.startsWith("-")
-                                ? "removed"
-                                : line.startsWith("@@")
-                                  ? "range"
-                                  : ""
-                          }
-                        >
-                          {line || " "}
-                          <br />
-                        </span>
-                      ))
+                      selected.diff
+                        .split("\n")
+                        .filter(
+                          (line) =>
+                            !line.startsWith("Index: ") && !/^=+$/.test(line),
+                        )
+                        .map((line, i) => (
+                          <span
+                            key={i}
+                            className={
+                              line.startsWith("+")
+                                ? "added"
+                                : line.startsWith("-")
+                                  ? "removed"
+                                  : line.startsWith("@@")
+                                    ? "range"
+                                    : ""
+                            }
+                          >
+                            {line || " "}
+                            <br />
+                          </span>
+                        ))
                     ) : (
                       <span className="muted">
                         文本未变化。Skill 的资源或执行权限也会参与完整包比较。

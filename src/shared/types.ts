@@ -57,6 +57,8 @@ export type Device = {
   variables: Record<string, string>;
   bindings: Record<string, string>;
   origins?: Record<string, string>;
+  originRealPaths?: Record<string, string>;
+  ignoredNativePaths?: string[];
 };
 export type Harness = {
   id: HarnessId;
@@ -75,6 +77,7 @@ export type Harness = {
   note: string;
 };
 export type Receipt = {
+  adoptedLink?: string;
   kind: "instructions" | "skill";
   harness: HarnessId;
   path: string;
@@ -92,7 +95,7 @@ export type Change = {
   harness: HarnessId;
   sourceId?: string;
   projectId?: string;
-  status: "create" | "update" | "remove" | "unchanged" | "conflict";
+  status: "adopt" | "create" | "update" | "remove" | "unchanged" | "conflict";
   reason: string;
   beforeHash: string;
   afterHash: string;
@@ -124,6 +127,12 @@ export type Snapshot = {
     status: "pending" | "applied" | "failed" | "rolled-back";
   }[];
   root: string;
+  sync?: {
+    connected: boolean;
+    remote?: string;
+    lastSyncTime?: string;
+    conflicts: number;
+  };
 };
 export type DiscoveredSkill = {
   key: string;
@@ -139,6 +148,10 @@ export type DiscoveredSkill = {
   projectIds: string[];
   linked: boolean;
   entryFile?: string;
+  origin: "user" | "platform" | "tool-managed" | "system";
+  originReason: string;
+  sourceUrl?: string;
+  ignored: boolean;
 };
 export type Inspection = {
   skills: DiscoveredSkill[];
@@ -169,6 +182,9 @@ export type Inspection = {
     unverified: number;
   }[];
   summary: {
+    importableSkills: number;
+    excludedSkills: number;
+    ignoredSkills: number;
     physicalSkills: number;
     names: number;
     validSkills: number;
@@ -190,4 +206,41 @@ export type Onboarding = {
     targets: HarnessId[];
     changes: number;
   };
+};
+
+export type SyncConflict = {
+  entryId: string;
+  kind: "rules" | "skills" | "projects";
+  localCommit: string;
+  remoteCommit: string;
+  reason: "entry" | "name";
+  localId?: string;
+};
+export type SyncConfig = {
+  url: string;
+  branch: string;
+  lastSyncedCommit?: string;
+  lastSyncTime?: string;
+  conflicts: SyncConflict[];
+};
+export type SyncStatus = {
+  connected: boolean;
+  remote?: string;
+  branch?: string;
+  ahead: number;
+  behind: number;
+  lastSyncedCommit?: string;
+  lastSyncTime?: string;
+  conflicts: SyncConflict[];
+  pushBlocked?: boolean;
+  message: string;
+};
+export type SyncSetup = {
+  url?: string;
+  create?: string | boolean;
+  branch?: string;
+};
+export type SyncResolve = {
+  entryId: string;
+  keep: "local" | "remote" | "both";
 };

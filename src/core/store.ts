@@ -17,9 +17,16 @@ import {
   skillMarkdown,
   writeBundle,
   bundleHash,
+  bundleDiskHash,
   type Bundle,
 } from "./files.ts";
-import { adapters, projectTargets } from "./adapters.ts";
+import { isIgnoredNativePath } from "./skill-sources.ts";
+import {
+  adapters,
+  projectTargets,
+  placeSkills,
+  skillReaders,
+} from "./adapters.ts";
 import {
   ruleInput,
   skillInput,
@@ -30,16 +37,12 @@ import {
   type Scope,
 } from "../shared/types.ts";
 
-const manifestSchema = z.object({
-  schemaVersion: z.literal(1),
-  rules: z.array(ruleInput.extend({ id: z.string() })),
-  skills: z.array(
-    skillInput
-      .omit({ body: true })
-      .extend({ id: z.string(), source: z.string().optional() }),
-  ),
-  projects: z.array(z.object({ id: z.string(), name: z.string() })),
-});
+import {
+  manifestSchema,
+  diskManifest,
+  writeManifest,
+  readManifest,
+} from "./layout.ts";
 
 export class Store {
   readonly root: string;
@@ -59,13 +62,11 @@ export class Store {
     // Opening an existing store must be genuinely read-only: harness sandboxes
     // may permit inspection of the user configuration but not home-directory writes.
     if (
-      [
-        "repo/manifest.json",
-        "repo/.git",
-        "device.json",
-        "state.json",
-        "deployments",
-      ].every((p) => exists(path.join(this.root, p)))
+      (exists(path.join(this.repo, "manifest.json")) ||
+        exists(path.join(this.repo, "harness-sync.json"))) &&
+      ["repo/.git", "device.json", "state.json", "deployments"].every((p) =>
+        exists(path.join(this.root, p)),
+      )
     ) {
       this.manifest();
       this.device();
@@ -79,8 +80,11 @@ export class Store {
         recursive: true,
         mode: 0o700,
       });
-      if (!exists(path.join(this.repo, "manifest.json")))
-        writeJson(path.join(this.repo, "manifest.json"), {
+      if (
+        !exists(path.join(this.repo, "manifest.json")) &&
+        !exists(path.join(this.repo, "harness-sync.json"))
+      )
+        writeManifest(this.repo, {
           schemaVersion: 1,
           rules: [],
           skills: [],
@@ -111,7 +115,14 @@ export class Store {
     return this;
   }
   manifest(): Manifest {
-    return manifestSchema.parse(json(path.join(this.repo, "manifest.json")));
+    return diskManifest(this.repo);
+  }
+  // Caller holds store.lock. Read paths never migrate.
+  migrate() {
+    if (exists(path.join(this.repo, "manifest.json"))) {
+      writeManifest(this.repo, this.manifest());
+      this.commit("迁移配置库到 v2");
+    }
   }
   device(): Device {
     return json(path.join(this.root, "device.json"));
@@ -126,7 +137,7 @@ export class Store {
         m,
         d: this.device(),
         s: this.state(),
-        skills: m.skills.map((s) => readBundle(this.skillPath(s.id))),
+        skills: m.skills.map((s) => bundleDiskHash(this.skillPath(s.id))),
       }),
     );
   }
@@ -139,14 +150,15 @@ export class Store {
     return execFileSync("git", args, {
       cwd: this.repo,
       encoding: "utf8",
-      timeout: 15_000,
+      timeout: 60_000,
+      maxBuffer: 32 * 1024 * 1024,
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
     }).trim();
   }
   commit(message: string) {
-    this.git(["add", "--all"]);
-    if (this.git(["status", "--porcelain"]))
+    this.git(["add", "--all", "--", ".", ":(exclude)skills/.hsync-staging-*"]);
+    if (this.git(["diff", "--cached", "--name-only"]))
       this.git(["-c", "commit.gpgsign=false", "commit", "-m", message]);
   }
   history() {
@@ -212,8 +224,6 @@ export class Store {
       !m.projects.some((p) => p.id === scope.target)
     )
       throw new AppError("PROJECT_NOT_FOUND", "作用域引用的项目不存在");
-    if (scope.kind === "device" && scope.target !== this.device().id)
-      throw new AppError("DEVICE_NOT_FOUND", "本地版本只可选择当前设备");
   }
   async mutate<T>(
     message: string,
@@ -222,6 +232,7 @@ export class Store {
   ): Promise<T> {
     return this.lock(() => {
       this.checkRevision(revision);
+      this.migrate();
       const m = this.manifest();
       const before = JSON.stringify(m);
       const beforeDevice = this.device();
@@ -233,19 +244,35 @@ export class Store {
       let result: T;
       try {
         result = fn(m);
+        const local = this.device();
+        let migrated = false;
+        for (const skill of m.skills) {
+          if (skill.source && path.isAbsolute(skill.source)) {
+            local.origins = {
+              ...local.origins,
+              [skill.id]: local.origins?.[skill.id] || skill.source,
+            };
+            skill.source = "local-import";
+            migrated = true;
+          }
+        }
+        if (migrated) writeJson(path.join(this.root, "device.json"), local);
         manifestSchema.parse(m);
-        writeJson(path.join(this.repo, "manifest.json"), m);
+        writeManifest(this.repo, m);
         this.commit(message);
       } catch (e) {
         for (const dir of fs.readdirSync(path.join(this.repo, "skills")))
-          if (!beforeBundles.some((b) => b.id === dir))
+          if (
+            !dir.startsWith(".hsync-staging-") &&
+            !beforeBundles.some((b) => b.id === dir)
+          )
             fs.rmSync(path.join(this.repo, "skills", dir), {
               recursive: true,
               force: true,
             });
         for (const b of beforeBundles)
           writeBundle(this.skillPath(b.id), b.files);
-        writeJson(path.join(this.repo, "manifest.json"), JSON.parse(before));
+        writeManifest(this.repo, JSON.parse(before));
         writeJson(path.join(this.root, "device.json"), beforeDevice);
         writeJson(path.join(this.root, "state.json"), beforeState);
         this.git(["reset", "--mixed", "HEAD"]);
@@ -322,7 +349,8 @@ export class Store {
     revision?: string,
     adopt = false,
   ) {
-    const absolute = fs.realpathSync(path.resolve(source));
+    const original = path.resolve(source);
+    const absolute = fs.realpathSync(original);
     const bundle = readBundle(absolute);
     if (!bundle["SKILL.md"])
       throw new AppError("INVALID_SKILL", "目录中没有 SKILL.md");
@@ -379,7 +407,7 @@ export class Store {
             "只能接管适配器的原生部署目录，目录名需与 Skill name 一致；共享兼容目录可普通导入",
           );
         if (adopt) {
-          noSymlink(absolute);
+          noSymlink(path.dirname(original));
           const state = this.state();
           for (const target of native) {
             if (state.receipts.some((r) => r.path === target.p))
@@ -398,13 +426,48 @@ export class Store {
                 "SCOPE_MISMATCH",
                 "Skill 的适用范围与待接管目录不符",
               );
+            noSymlink(path.dirname(target.p));
+            if (isIgnoredNativePath(this, target.p))
+              throw new AppError(
+                "IGNORED_NATIVE_PATH",
+                "该目录已标记外部保留，请先取消保留",
+              );
+            const adoptedLink = fs.lstatSync(target.p).isSymbolicLink()
+              ? fs.readlinkSync(target.p)
+              : undefined;
+            if (
+              adoptedLink !== undefined &&
+              !placeSkills(
+                entry.scope.harnesses,
+                skillReaders(
+                  this.home,
+                  target.projectId ? d.bindings[target.projectId] : undefined,
+                ),
+              ).some(
+                (placement) =>
+                  path.join(placement.dir, entry.name) === target.p,
+              )
+            )
+              throw new AppError(
+                "NOT_PLACEMENT_TARGET",
+                "链接不在当前技能放置目标中；请普通导入并保留原链接，或调整 Harness 选择后再接管",
+              );
             state.receipts.push({
+              adoptedLink,
               kind: "skill",
               harness: target.h,
               path: target.p,
               sourceId: entry.id,
               projectId: target.projectId,
-              hash: bundleHash(bundle),
+              hash:
+                adoptedLink === undefined
+                  ? bundleHash(bundle)
+                  : hash(
+                      JSON.stringify({
+                        link: adoptedLink,
+                        bundle: bundleHash(bundle),
+                      }),
+                    ),
             });
           }
           writeJson(path.join(this.root, "state.json"), state);
@@ -412,7 +475,9 @@ export class Store {
         if (!existing) {
           writeBundle(this.skillPath(entry.id), bundle);
           m.skills.push(entry);
-          d.origins = { ...d.origins, [entry.id]: absolute };
+          d.origins = { ...d.origins, [entry.id]: original };
+          if (original !== absolute)
+            d.originRealPaths = { ...d.originRealPaths, [entry.id]: absolute };
           writeJson(path.join(this.root, "device.json"), d);
         }
         return entry;
@@ -446,6 +511,7 @@ export class Store {
           const d = this.device();
           if (d.origins) {
             delete d.origins[id];
+            if (d.originRealPaths) delete d.originRealPaths[id];
             writeJson(path.join(this.root, "device.json"), d);
           }
         }
@@ -529,8 +595,10 @@ export class Store {
       this.checkRevision(revision);
       // Restore only versioned source; native harness files change on the next explicit deployment.
       this.git(["cat-file", "-e", `${commit}^{commit}`]);
-      manifestSchema.parse(
-        JSON.parse(this.git(["show", `${commit}:manifest.json`])),
+      // Validate both legacy and v2 source before restoring.
+      readManifest(
+        this.git(["ls-tree", "-r", "--name-only", commit]).split("\n"),
+        (f) => this.git(["show", `${commit}:${f}`]),
       );
       this.git([
         "restore",
