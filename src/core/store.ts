@@ -37,12 +37,7 @@ import {
   type Scope,
 } from "../shared/types.ts";
 
-import {
-  manifestSchema,
-  diskManifest,
-  writeManifest,
-  readManifest,
-} from "./layout.ts";
+import { manifestSchema, diskManifest, writeManifest } from "./layout.ts";
 
 export class Store {
   readonly root: string;
@@ -159,7 +154,13 @@ export class Store {
   commit(message: string) {
     this.git(["add", "--all", "--", ".", ":(exclude)skills/.hsync-staging-*"]);
     if (this.git(["diff", "--cached", "--name-only"]))
-      this.git(["-c", "commit.gpgsign=false", "commit", "-m", message]);
+      this.git([
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        `${message}\n\n设备：${this.device().name.replace(/[\r\n]/g, " ")}`,
+      ]);
   }
   history() {
     return this.git(["log", "-40", "--format=%H%x09%cI%x09%s"])
@@ -589,28 +590,7 @@ export class Store {
     });
   }
   async restoreSource(commit: string, revision?: string) {
-    if (!/^[0-9a-f]{40}$/.test(commit))
-      throw new AppError("INVALID_COMMIT", "需要完整的提交 SHA");
-    return this.lock(() => {
-      this.checkRevision(revision);
-      // Restore only versioned source; native harness files change on the next explicit deployment.
-      this.git(["cat-file", "-e", `${commit}^{commit}`]);
-      // Validate both legacy and v2 source before restoring.
-      readManifest(
-        this.git(["ls-tree", "-r", "--name-only", commit]).split("\n"),
-        (f) => this.git(["show", `${commit}:${f}`]),
-      );
-      this.git([
-        "restore",
-        "--source",
-        commit,
-        "--staged",
-        "--worktree",
-        "--",
-        ".",
-      ]);
-      this.commit(`恢复配置至 ${commit.slice(0, 8)}`);
-      return { commit };
-    });
+    const { Sync } = await import("./sync.ts");
+    return new Sync(this).restore(commit, revision);
   }
 }

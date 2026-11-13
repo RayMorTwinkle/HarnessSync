@@ -10,6 +10,7 @@ import {
   skillReaders,
   placeSkills,
 } from "./adapters.ts";
+import { Sync } from "./sync.ts";
 import { Store } from "./store.ts";
 import { isIgnoredNativePath, sourceStatus } from "./skill-sources.ts";
 import { scanMachine } from "./scanner.ts";
@@ -564,7 +565,10 @@ export class Engine {
         );
       const changed = plan.changes.filter((c) => c.status !== "unchanged");
       for (const stage of this.staging()) cleanStaging(stage);
-      if (!changed.length) return { id: null, changes: 0 };
+      if (!changed.length) {
+        if (!options.onlySkillId) new Sync(this.store).acknowledgeDeployment();
+        return { id: null, changes: 0 };
+      }
       const state = this.store.state();
       const record: Deployment = {
         id: `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
@@ -679,12 +683,13 @@ export class Engine {
         throw e;
       }
       try {
+        if (!options.onlySkillId) new Sync(this.store).acknowledgeDeployment();
         this.pruneDeployments();
       } catch (e: any) {
         return {
           id: record.id,
           changes: changed.length,
-          warnings: [`部署已完成，但旧快照清理失败：${e.message}`],
+          warnings: [`部署已完成，但同步标记或旧快照清理失败：${e.message}`],
         };
       }
       return { id: record.id, changes: changed.length };

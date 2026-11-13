@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
+import { startSyncScheduler } from "./core/sync-scheduler.ts";
 import { Sync } from "./core/sync.ts";
 import {
   ignoreNativePaths,
@@ -209,6 +210,50 @@ sync
   .command("status")
   .action(run(async () => new Sync(await getStore()).status()));
 sync.command("now").action(run(async () => new Sync(await getStore()).now()));
+const auto = sync.command("auto").description("设置本机自动同步");
+for (const mode of ["on", "off"])
+  auto
+    .command(mode)
+    .action(
+      run(async () =>
+        new Sync(await getStore()).setAuto({ enabled: mode === "on" }),
+      ),
+    );
+auto
+  .command("set")
+  .option("--debounce <秒>", "编辑停止后的等待秒数")
+  .option("--interval <分钟>", "定期同步间隔")
+  .action(
+    run(async (o) =>
+      new Sync(await getStore()).setAuto({
+        ...(o.debounce !== undefined
+          ? { debounceSeconds: Number(o.debounce) }
+          : {}),
+        ...(o.interval !== undefined
+          ? { pullIntervalMinutes: Number(o.interval) }
+          : {}),
+      }),
+    ),
+  );
+sync
+  .command("history")
+  .action(run(async () => new Sync(await getStore()).history()));
+sync.command("undo").action(run(async () => new Sync(await getStore()).undo()));
+sync
+  .command("watch")
+  .description("前台自动同步，按 Ctrl+C 退出")
+  .action(async () => {
+    const stop = startSyncScheduler(new Sync(await getStore()));
+    output({
+      message: "自动同步调度器已启动，按 Ctrl+C 退出；设置关闭时等待开启",
+    });
+    const close = async () => {
+      await stop();
+      process.exit(0);
+    };
+    process.once("SIGINT", close);
+    process.once("SIGTERM", close);
+  });
 sync
   .command("resolve <entry-id>")
   .requiredOption("--keep <choice>", "local / remote / both")
@@ -244,10 +289,7 @@ scopeOptions(
   ),
 );
 scopeOptions(
-  rules
-    .command("edit <id>")
-    .option("--title <title>")
-    .option("--file <file>"),
+  rules.command("edit <id>").option("--title <title>").option("--file <file>"),
 ).action(
   run(async (id, o, cmd) => {
     const s = await getStore();
