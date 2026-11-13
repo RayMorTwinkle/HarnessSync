@@ -121,7 +121,7 @@ marked optional. Empty scope lists are not an alias for all tools.
 | `instructions.global[].kind` | `main`, `override`, `shared`, or `rules`. Shared/rules entries are scan-only.                                                                        |
 | `instructions.global[].when` | Optional `non-empty`; requires an existing regular file with size greater than zero.                                                                 |
 | `instructions.fragments`     | Array of scan-only globs ending in `/**/*.md`; empty is allowed. Recursive scanning stops after depth 6 and does not follow directory symlinks.      |
-| `instructions.project`       | Relative project path without `..`, templates, or control characters; normally a filename. Equal paths form shared-instruction peer groups.          |
+| `instructions.project`       | Relative project path without `.`, `..`, empty segments, absolute paths, templates, or control characters; normally a filename. Equal paths form shared-instruction peer groups.          |
 | `skills.global`              | Native global skill-directory template.                                                                                                              |
 | `skills.project`             | Native relative project skill directory, with the same relative-path restrictions.                                                                   |
 | `skills.reads.global`        | Nonempty array of path templates or `{ "path": "…", "legacy": true }`. Enumerate every supported discovery directory.                                |
@@ -199,16 +199,39 @@ reported once per ID, and manifest validation issues are grouped per file.
 
 ## Security and packaging
 
-JSON manifests cannot supply executable plugin code, hooks, shell commands, or
-arbitrary arguments. The optional version probe runs a locally installed bare
-executable from PATH through `execFileSync`, with no shell, a four-second timeout
-and bounded output. This is still execution of a local executable: PATH and the
-installed tool must be trusted. Version probes are cached by command and args;
-validation, listing and planning never invoke them. Snapshot/onboarding may query
-versions. A manifest cannot install an executable.
+User manifests never execute version commands: their optional `version` field is
+schema-validated but ignored at runtime, and their version is reported as unknown.
+The field is retained for contributors preparing a built-in PR; it only runs
+once the manifest ships in the package's `harnesses/` directory. Disabled
+harnesses are never probed, including when a cached version exists.
 
-Plugins name filesystem paths, including absolute global paths; they are not a
-filesystem sandbox. Treat manifests as deployment configuration you review.
+Only enabled built-ins may run a locally installed bare executable from PATH
+through `execFileSync`, with no shell, a four-second timeout and bounded output.
+Bare names and version-shaped arguments do not make an executable safe (for
+example, `rm version` could delete a file). Built-in manifests, PATH and installed
+executables must therefore be trusted. Probes are cached by command and args;
+validation, listing and planning do not execute them. Snapshot/onboarding may
+query versions. Manifests cannot install executables.
+
+Resolved global roots, skill directories, reader directories and instruction
+parent directories must be strictly inside HOME and outside HARNESS_SYNC_HOME.
+HOME itself, filesystem roots, ancestors and outside locations are rejected with
+JSON-path errors, including environment overrides. Fragment and detection roots
+follow the same restriction. Project paths stay inside the project binding and
+outside HARNESS_SYNC_HOME; a project instruction file may live directly in the
+project root (for example `AGENTS.md`). These are lexical path checks, not a
+filesystem sandbox: filesystem symlinks remain subject to the deployment engine's
+symlink refusal. Review manifests as deployment configuration.
+
+Only actual receipted skill paths are exempt from upstream-source change checks;
+a declared reader root does not suppress warnings for unrelated source folders.
+When a previously deployed global root, skills directory or instruction path
+changes, a blocking `harness-root-changed` notice names old and new paths.
+Automatic deployment preserves the old files and receipts and creates nothing at
+the new location. The migration remains visible in the plan for manual apply;
+manual apply confirms it using the usual ownership and snapshot checks. Existing
+receipts without root metadata use their target paths to detect relocation.
+
 Writes still go through plan → apply, native-content checks, ownership receipts,
 symlink refusal and deployment snapshots. A changed manifest invalidates a
 reviewed plan. No plugin-specific filesystem mutation runs in the UI. A successful

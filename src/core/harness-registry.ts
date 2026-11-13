@@ -26,7 +26,12 @@ const builtinDir = fileURLToPath(
     import.meta.url,
   ),
 );
-export function validateHarnessFile(file: string): {
+export function validateHarnessFile(
+  file: string,
+  home = os.homedir(),
+  root?: string,
+  checkPaths = true,
+): {
   manifest?: HarnessManifest;
   claimedId?: string;
   error?: ManifestError;
@@ -39,7 +44,14 @@ export function validateHarnessFile(file: string): {
     const result = harnessManifestSchema.safeParse(raw, {
       error: z.locales.zhCN().localeError,
     });
-    if (result.success) return { manifest: result.data, claimedId };
+    if (result.success) {
+      const issues = checkPaths
+        ? resolvedPathIssues(result.data, home, root)
+        : [];
+      return issues.length
+        ? { claimedId, error: { file, issues } }
+        : { manifest: result.data, claimedId };
+    }
     return {
       claimedId,
       error: {
@@ -67,6 +79,59 @@ export function validateHarnessFile(file: string): {
       },
     };
   }
+}
+function resolvedPathIssues(m: HarnessManifest, home: string, root?: string) {
+  const base = manifestRoot(m, home);
+  const store = path.dirname(pluginDirectory(home, root));
+  const inside = (p: string, parent: string) => {
+    const relative = path.relative(parent, p);
+    return (
+      relative !== "" &&
+      relative !== ".." &&
+      !relative.startsWith("../") &&
+      !path.isAbsolute(relative)
+    );
+  };
+  const paths: [string, string][] = [
+    [
+      m.root.env && home === os.homedir() && process.env[m.root.env]
+        ? "$.root.env"
+        : "$.root.default",
+      base,
+    ],
+    ["$.skills.global", resolveTemplate(m.skills.global, home, base)],
+    ...m.skills.reads.global.map((r, i): [string, string] => [
+      `$.skills.reads.global[${i}]${typeof r === "string" ? "" : ".path"}`,
+      resolveTemplate(typeof r === "string" ? r : r.path, home, base),
+    ]),
+    ...m.instructions.global.flatMap((e, i): [string, string][] => [
+      [
+        `$.instructions.global[${i}].path`,
+        path.dirname(resolveTemplate(e.path, home, base)),
+      ],
+      [`$.instructions.global[${i}].path`, resolveTemplate(e.path, home, base)],
+    ]),
+    ...m.instructions.fragments.map((p, i): [string, string] => [
+      `$.instructions.fragments[${i}]`,
+      resolveTemplate(p.replace(/\/\*\*\/\*\.md$/, ""), home, base),
+    ]),
+    ...m.detect.map((p, i): [string, string] => [
+      `$.detect[${i}]`,
+      resolveTemplate(p, home, base),
+    ]),
+  ];
+  return paths.flatMap(([key, p]) =>
+    !inside(p, path.resolve(home)) ||
+    p === path.resolve(store) ||
+    inside(p, path.resolve(store))
+      ? [
+          {
+            path: key,
+            message: `解析路径必须严格位于 HOME 内且不能位于 HARNESS_SYNC_HOME 内：${p}`,
+          },
+        ]
+      : [],
+  );
 }
 type Entry = {
   manifest: HarnessManifest;
@@ -113,6 +178,7 @@ export function registry(home = os.homedir(), root?: string) {
       });
   }
   const stamp = JSON.stringify([
+    home,
     listingErrors,
     files.map((f) => {
       try {
@@ -129,7 +195,7 @@ export function registry(home = os.homedir(), root?: string) {
     const candidates: Entry[] = [];
     const claims: { id: string; source: Entry["source"] }[] = [];
     for (const f of files) {
-      const result = validateHarnessFile(f.file);
+      const result = validateHarnessFile(f.file, home, root, false);
       if (result.claimedId)
         claims.push({ id: result.claimedId, source: f.source });
       if (result.error) errors.push(result.error);
@@ -161,7 +227,13 @@ export function registry(home = os.homedir(), root?: string) {
     data = { stamp, entries, errors };
     cache.set(pluginDir, data);
   }
-  return { ...data, pluginDir };
+  const errors = [...data.errors];
+  const entries = data.entries.filter((entry) => {
+    const issues = resolvedPathIssues(entry.manifest, home, root);
+    if (issues.length) errors.push({ file: entry.file, issues });
+    return !issues.length;
+  });
+  return { ...data, entries, errors, pluginDir };
 }
 export const listManifests = (home = os.homedir(), root?: string) =>
   registry(home, root).entries.map((e) => e.manifest);
@@ -177,7 +249,7 @@ export function resolveTemplate(
       (_, name, fallback) =>
         (home === os.homedir() && process.env[name]) || fallback,
     )
-    .replaceAll("{root}", root);
+    .replaceAll("{root}", () => root);
   if (value === "~" || value.startsWith("~/")) value = home + value.slice(1);
   return path.resolve(project || home, value);
 }
@@ -276,4 +348,18 @@ export function selectedHarnesses(
   return listManifests(home, root)
     .map((m) => m.id)
     .filter((id) => !disabled.includes(id) && (all || ids.includes(id)));
+}
+
+export function resolveProjectPath(
+  template: string,
+  project: string,
+  home: string,
+  root: string | undefined,
+  key: string,
+) {
+  const target = path.resolve(project, template);
+  const store = path.resolve(path.dirname(pluginDirectory(home, root)));
+  if (target === store || target.startsWith(store + path.sep))
+    throw new Error(`${key}：项目目标不能位于 HARNESS_SYNC_HOME 内：${target}`);
+  return target;
 }
