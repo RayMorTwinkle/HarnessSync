@@ -13,7 +13,8 @@ import {
   TriangleAlert,
   Terminal,
 } from "lucide-react";
-import { harnessNames } from "../shared/harnesses.ts";
+import { useApp } from "./app-context.tsx";
+import { harnessName } from "./lib.ts";
 import type { Onboarding } from "../shared/types.ts";
 
 type Request = <T>(
@@ -32,6 +33,7 @@ export function OnboardingPanel({
   sync?: { connected: boolean; remote?: string };
   openSync: () => void;
 }) {
+  const { data } = useApp();
   const [record, setRecord] = useState<Onboarding | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -164,7 +166,7 @@ export function OnboardingPanel({
                     <strong>管理技能已部署</strong>
                     <p>
                       {record.bootstrap.targets
-                        .map((id) => harnessNames[id])
+                        .map((id) => harnessName(data, id))
                         .join(" · ")}
                     </p>
                   </div>
@@ -278,7 +280,7 @@ export function OnboardingPanel({
                     <div>
                       <strong>{i.path}</strong>
                       <span>
-                        {i.harnesses.map((h) => harnessNames[h]).join(" / ")} ·{" "}
+                        {i.harnesses.map((h) => harnessName(data, h)).join(" / ")} ·{" "}
                         {
                           {
                             main: "主全局文件",
@@ -314,7 +316,7 @@ export function OnboardingPanel({
                   <div>
                     <strong>{s.name}</strong>
                     <span>
-                      {s.harnesses.map((h) => harnessNames[h]).join(" / ")}
+                      {s.harnesses.map((h) => harnessName(data, h)).join(" / ")}
                       {s.managed ? " · 已由 HarnessSync 管理" : ""}
                       {s.ignored ? " · 外部保留" : ""}
                       {s.origin && s.origin !== "user"
