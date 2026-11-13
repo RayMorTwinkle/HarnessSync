@@ -104,6 +104,23 @@ cli
   .command("plan")
   .description("预览完整部署差异")
   .action(run(async () => publicPlan(new Engine(await getStore()).plan())));
+const conflicts = cli.command("conflicts").description("处理本机同名技能冲突");
+conflicts
+  .command("list")
+  .action(run(async () => new Engine(await getStore()).conflicts()));
+conflicts
+  .command("choose <target>")
+  .requiredOption("--use <choice>", "library / native / skip")
+  .action(
+    run(async (target, o) =>
+      new Engine(await getStore()).chooseConflict(target, o.use),
+    ),
+  );
+conflicts
+  .command("clear [path]")
+  .action(
+    run(async (target) => new Engine(await getStore()).clearConflicts(target)),
+  );
 cli
   .command("apply")
   .description("部署已预览的计划")
@@ -131,9 +148,12 @@ cli
         errors: plan.errors,
         warnings: plan.warnings,
         conflicts: conflicts.map((c) => ({ path: c.path, reason: c.reason })),
+        skipped: plan.changes
+          .filter((c) => c.status === "skipped")
+          .map((c) => ({ path: c.path, reason: c.reason })),
         pendingDeployments: pending,
         pendingChanges: plan.changes.filter(
-          (c) => !["unchanged", "conflict"].includes(c.status),
+          (c) => !["unchanged", "conflict", "skipped"].includes(c.status),
         ).length,
         observed: "filesystem-only",
         sessionLoaded: "unknown",

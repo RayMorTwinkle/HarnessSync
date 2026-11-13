@@ -1231,3 +1231,31 @@ test("review 5: a recovered retry pulls remote changes but waits for the last ed
   );
   assert.equal((await sa.status()).scheduler.pendingPush, false);
 });
+
+test("同步保留 __proto__、constructor 和 toString 技能资源", async (t) => {
+  const { a, b, sa, sb, remote } = await fixture(t);
+  const resources = Object.fromEntries(
+    ["__proto__", "constructor", "toString"].map((name) => [
+      name,
+      { content: Buffer.from(`资源 ${name}`).toString("base64"), mode: 0o755 },
+    ]),
+  );
+  const entry = await a.saveSkill(
+    skill("prototype-resource"),
+    undefined,
+    undefined,
+    resources,
+  );
+  await sa.setup({ url: remote });
+  await sb.setup({ url: remote });
+  for (const name of Object.keys(resources)) {
+    assert.equal(
+      fs.readFileSync(path.join(b.skillPath(entry.id), name), "utf8"),
+      `资源 ${name}`,
+    );
+    assert.equal(
+      fs.statSync(path.join(b.skillPath(entry.id), name)).mode & 0o777,
+      0o755,
+    );
+  }
+});

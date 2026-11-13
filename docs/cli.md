@@ -50,6 +50,12 @@
 
 CLI 暂无独立的 `skills add` 命令；新建包含 `SKILL.md` 的目录后使用 `skills import`，也可在 GUI 新建。
 
+## 同名技能冲突
+
+`conflicts list` 列出冲突和逐文件差异；`conflicts choose <路径或技能名> --use library|native|skip` 分别选择库版本覆盖、原生收库或跳过；`conflicts clear [完整路径]` 清除单个或全部本机选择。选择之后重新 plan/apply。原生变化使选择失效；多路径同名需给完整路径。doctor 的 skipped 列为待处理。
+
+`native` 会立即产生源库提交，之后仍需预览部署；`library` 的计划状态为 replace，`skip` 为 skipped。完整 API、返回结构、恢复和大小限制见 [同名冲突说明](conflicts.md)。
+
 ## 指令、项目和设备
 
 | 命令                                                 | 功能                                 |

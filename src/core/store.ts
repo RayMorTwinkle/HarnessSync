@@ -322,7 +322,9 @@ export class Store {
           scope: input.scope,
           source: m.skills.find((s) => s.id === id)?.source,
         };
-        const bundle = id ? readBundle(this.skillPath(id)) : {};
+        const bundle: Bundle = id
+          ? readBundle(this.skillPath(id))
+          : Object.create(null);
         if (resources) Object.assign(bundle, resources);
         const metadata = bundle["SKILL.md"]
           ? parseSkill(

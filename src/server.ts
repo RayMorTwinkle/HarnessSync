@@ -184,6 +184,28 @@ export async function startServer(
             body.revision,
             z.boolean().default(false).parse(body.adopt),
           );
+        else if (req.method === "GET" && resource === "plan")
+          result = publicPlan(engine.plan());
+        else if (req.method === "GET" && resource === "conflicts" && !id)
+          result = engine.conflicts();
+        else if (
+          req.method === "POST" &&
+          resource === "conflicts" &&
+          id === "choose"
+        )
+          result = await engine.chooseConflict(
+            z.string().min(1).parse(body.path),
+            z.enum(["library", "native", "skip"]).parse(body.use),
+            z.string().optional().parse(body.fingerprint),
+          );
+        else if (
+          req.method === "POST" &&
+          resource === "conflicts" &&
+          id === "clear"
+        )
+          result = await engine.clearConflicts(
+            z.string().min(1).optional().parse(body.path),
+          );
         else if (req.method === "POST" && resource === "apply")
           result = await engine.apply(z.string().parse(body.planId));
         else if (req.method === "POST" && resource === "rollback")

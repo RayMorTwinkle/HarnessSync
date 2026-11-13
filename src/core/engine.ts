@@ -11,6 +11,13 @@ import {
   placeSkills,
 } from "./adapters.ts";
 import { Sync } from "./sync.ts";
+import {
+  nativeHash,
+  matchesNativeHash,
+  readNative,
+  restoreNative,
+  type NativeTree,
+} from "./native-snapshot.ts";
 import { Store } from "./store.ts";
 import { isIgnoredNativePath, sourceStatus } from "./skill-sources.ts";
 import { scanMachine } from "./scanner.ts";
@@ -29,6 +36,7 @@ import {
   json,
   noSymlink,
   parseSkill,
+  skillMarkdown,
   readBundle,
   writeBundle,
   writeJson,
@@ -49,6 +57,8 @@ const START = "<!-- harness-sync:begin -->";
 const END = "<!-- harness-sync:end -->";
 const absent = hash("ABSENT");
 type SavedFile = {
+  native?: NativeTree;
+  afterNativeHash?: string;
   path: string;
   kind: "instructions" | "skill";
   existed: boolean;
@@ -201,8 +211,15 @@ export class Engine {
             );
           change.beforeHash = adoptedSkillHash(spec.path, receipt.adoptedLink);
         } else {
-          noSymlink(spec.path);
-          change.beforeHash = diskHash(spec.path, spec.kind);
+          if (spec.kind === "skill" && !receipt && exists(spec.path))
+            noSymlink(path.dirname(spec.path));
+          else noSymlink(spec.path);
+          try {
+            change.beforeHash = diskHash(spec.path, spec.kind);
+          } catch (e) {
+            if (spec.kind !== "skill" || receipt || !exists(spec.path)) throw e;
+            change.beforeHash = nativeHash(spec.path);
+          }
         }
         const present = exists(spec.path);
         if (spec.kind === "instructions") {
@@ -256,11 +273,52 @@ export class Engine {
           );
         } else {
           change.afterHash = spec.removing ? absent : spec.sourceHash!;
-          if (present && !receipt && change.beforeHash !== change.afterHash)
-            throw new AppError(
-              "TARGET_CONFLICT",
-              "目标已存在且内容不同，不属于 HarnessSync；请先导入或使用独立名称",
-            );
+          const choice = state.conflictChoices?.[spec.path];
+          const fingerprint =
+            present && !receipt ? nativeHash(spec.path) : undefined;
+          const valid =
+            choice &&
+            choice.sourceId === spec.sourceId &&
+            choice.fingerprint === fingerprint;
+          const nativeAdoption =
+            valid &&
+            choice.use === "native" &&
+            choice.sourceHash === spec.sourceHash;
+          const collision =
+            present &&
+            !receipt &&
+            (change.beforeHash !== change.afterHash ||
+              fs.lstatSync(spec.path).isSymbolicLink());
+          if (collision) {
+            change.conflictFingerprint = fingerprint;
+            change.conflictOptions = ["library", "native", "skip"];
+            this.conflictDiff(change, spec.sourceId!);
+            if (!valid)
+              throw new AppError(
+                "TARGET_CONFLICT",
+                choice
+                  ? "原生目录在选择后变化，请重新选择冲突处理方式"
+                  : "目标已存在且内容不同，请选择 library、native 或 skip",
+              );
+            if (choice.use === "skip") {
+              change.status = "skipped";
+              change.reason = "已跳过，待处理";
+              changes.push(change);
+              return;
+            }
+            if (!nativeAdoption && choice.use !== "library")
+              throw new AppError(
+                "TARGET_CONFLICT",
+                "源配置已变化，请重新选择冲突处理方式",
+              );
+            change.beforeHash = fingerprint!;
+          }
+          if (
+            (nativeAdoption && !fs.lstatSync(spec.path).isSymbolicLink()) ||
+            (receipt?.adoptedSourceHash !== undefined &&
+              receipt.adoptedSourceHash === spec.sourceHash)
+          )
+            change.afterHash = receipt?.hash || diskHash(spec.path, "skill");
           if (
             receipt &&
             !(receipt.adoptedLink !== undefined
@@ -272,15 +330,18 @@ export class Engine {
               "已部署 Skill 被外部修改；请先导入修改或回滚部署",
             );
           change.status =
-            present && !receipt
-              ? "adopt"
-              : change.beforeHash === change.afterHash
-                ? "unchanged"
-                : spec.removing
-                  ? "remove"
-                  : present
-                    ? "update"
-                    : "create";
+            collision &&
+            (!nativeAdoption || fs.lstatSync(spec.path).isSymbolicLink())
+              ? "replace"
+              : present && !receipt
+                ? "adopt"
+                : change.beforeHash === change.afterHash
+                  ? "unchanged"
+                  : spec.removing
+                    ? "remove"
+                    : present
+                      ? "update"
+                      : "create";
           if (["create", "update", "remove"].includes(change.status)) {
             change.before = present
               ? fs.readFileSync(path.join(spec.path, "SKILL.md"), "utf8")
@@ -292,20 +353,23 @@ export class Engine {
                   "utf8",
                 );
           }
-          change.diff = createTwoFilesPatch(
-            spec.path + "/SKILL.md",
-            spec.path + "/SKILL.md",
-            change.before,
-            change.after,
-            "",
-            "",
-          );
+          if (!change.conflictOptions)
+            change.diff = createTwoFilesPatch(
+              spec.path + "/SKILL.md",
+              spec.path + "/SKILL.md",
+              change.before,
+              change.after,
+              "",
+              "",
+            );
         }
         if (change.status !== "unchanged")
           change.reason =
             receipt?.adoptedLink !== undefined
               ? "以副本替换链接"
               : {
+                  replace: "以库版本覆盖，原件保存到部署快照",
+                  skipped: "已跳过，待处理",
                   adopt: "内容一致，接管现有目录",
                   create: "部署新的配置",
                   update: "源配置有更新",
@@ -469,6 +533,7 @@ export class Engine {
     const id = hash(
       JSON.stringify({
         revision,
+        choices: state.conflictChoices,
         staging: stagingFingerprints,
         changes: changes.map((c) => [
           c.path,
@@ -488,6 +553,191 @@ export class Engine {
       warnings: [...new Set(warnings)],
       createdAt: new Date().toISOString(),
     };
+  }
+  private conflictDiff(change: Change, sourceId: string) {
+    let tree: NativeTree;
+    try {
+      tree = readNative(change.path);
+    } catch (e) {
+      if (!(e instanceof AppError) || e.code !== "SNAPSHOT_TOO_LARGE") throw e;
+      change.diff = `${e.message}，无法生成完整差异或覆盖；仍可选择 skip`;
+      return;
+    }
+    const library = readBundle(this.store.skillPath(sourceId));
+    let native = tree.files;
+    let prefix = "";
+    if (native[""].link !== undefined) {
+      prefix = `符号链接：${native[""].link} → 库版本目录（不会写入链接目标）\n`;
+      try {
+        native = readNative(fs.realpathSync(change.path)).files;
+      } catch {
+        change.diff = prefix;
+        return;
+      }
+    }
+    change.fileChanges = [
+      ...new Set([
+        ...Object.keys(native).filter(
+          (p) =>
+            native[p].content !== undefined || native[p].link !== undefined,
+        ),
+        ...Object.keys(library),
+      ]),
+    ]
+      .sort()
+      .flatMap((p) => {
+        const before = native[p],
+          after = library[p];
+        const a =
+            before?.link !== undefined
+              ? Buffer.from(before.link)
+              : Buffer.from(before?.content || "", "base64"),
+          b = Buffer.from(after?.content || "", "base64");
+        if (
+          before?.link === undefined &&
+          before?.content === after?.content &&
+          before?.mode === after?.mode
+        )
+          return [];
+        const binary = [a, b].some(
+          (v) => v.includes(0) || !Buffer.from(v.toString("utf8")).equals(v),
+        );
+        return [
+          {
+            path: p,
+            status: !before
+              ? ("added" as const)
+              : !after
+                ? ("removed" as const)
+                : ("modified" as const),
+            binary,
+            ...(before?.link !== undefined ? { beforeLink: before.link } : {}),
+            beforeSize: a.length,
+            afterSize: b.length,
+            beforeHash: hash(a.toString("base64")),
+            afterHash: hash(b.toString("base64")),
+            ...(binary
+              ? {}
+              : {
+                  diff: createTwoFilesPatch(
+                    p,
+                    p,
+                    before?.link !== undefined
+                      ? `符号链接：${before.link}\n`
+                      : a.toString("utf8"),
+                    b.toString("utf8"),
+                  ),
+                }),
+          },
+        ];
+      });
+    change.diff =
+      prefix +
+      (change.fileChanges.find((f) => f.path === "SKILL.md")?.diff || "");
+  }
+  conflicts() {
+    return publicPlan(this.plan()).changes.filter((c) => c.conflictOptions);
+  }
+  private conflictTarget(target: string) {
+    const matches = this.conflicts().filter(
+      (c) =>
+        c.path === path.resolve(target) || path.basename(c.path) === target,
+    );
+    if (matches.length !== 1)
+      throw new AppError(
+        "AMBIGUOUS_CONFLICT",
+        "未找到唯一冲突，请使用计划中的完整路径",
+        409,
+      );
+    return matches[0];
+  }
+  async chooseConflict(
+    target: string,
+    use: "library" | "native" | "skip",
+    fingerprint?: string,
+  ) {
+    if (!["library", "native", "skip"].includes(use))
+      throw new AppError("INVALID_CHOICE", "请选择 library、native 或 skip");
+    const revision = this.store.revision();
+    const selected = this.conflictTarget(target);
+    if (fingerprint && fingerprint !== selected.conflictFingerprint)
+      throw new AppError("STALE_TARGET", "冲突已变化，请重新预览", 409);
+    const choose = () => {
+      if (nativeHash(selected.path) !== selected.conflictFingerprint)
+        throw new AppError("STALE_TARGET", "原生目录已变化，请重新预览", 409);
+      const state = this.store.state();
+      state.conflictChoices = {
+        ...state.conflictChoices,
+        [selected.path]: {
+          use,
+          fingerprint: selected.conflictFingerprint!,
+          sourceId: selected.sourceId!,
+          ...(use === "native"
+            ? {
+                sourceHash: bundleDiskHash(
+                  this.store.skillPath(selected.sourceId!),
+                ),
+              }
+            : {}),
+        },
+      };
+      writeJson(path.join(this.store.root, "state.json"), state);
+      return {
+        path: selected.path,
+        use,
+        fingerprint: selected.conflictFingerprint,
+      };
+    };
+    if (use !== "native")
+      return this.store.lock(() => {
+        this.store.checkRevision(revision);
+        if (use === "library") readNative(selected.path);
+        return choose();
+      });
+    return this.store.mutate(
+      "采用原生技能解决冲突",
+      (manifest) => {
+        if (nativeHash(selected.path) !== selected.conflictFingerprint)
+          throw new AppError("STALE_TARGET", "原生目录已变化，请重新预览", 409);
+        const entry = manifest.skills.find((s) => s.id === selected.sourceId)!;
+        const bundle = readBundle(fs.realpathSync(selected.path));
+        if (!bundle["SKILL.md"])
+          throw new AppError("INVALID_SKILL", "目录中缺少 SKILL.md");
+        const parsed = parseSkill(
+          Buffer.from(bundle["SKILL.md"].content, "base64").toString("utf8"),
+        );
+        if (parsed.name !== entry.name)
+          throw new AppError(
+            "SOURCE_NAME_CHANGED",
+            "原生 name 必须与对应库技能一致",
+          );
+        const old = parseSkill(
+          fs.readFileSync(
+            path.join(this.store.skillPath(entry.id), "SKILL.md"),
+            "utf8",
+          ),
+        );
+        bundle["SKILL.md"].content = Buffer.from(
+          skillMarkdown(parsed.name, parsed.description, parsed.body, {
+            ...old.metadata,
+            ...parsed.metadata,
+          }),
+        ).toString("base64");
+        writeBundle(this.store.skillPath(entry.id), bundle);
+        entry.description = parsed.description;
+        return choose();
+      },
+      revision,
+    );
+  }
+  async clearConflicts(target?: string) {
+    return this.store.lock(() => {
+      const state = this.store.state();
+      if (target) delete state.conflictChoices?.[path.resolve(target)];
+      else state.conflictChoices = {};
+      writeJson(path.join(this.store.root, "state.json"), state);
+      return { choices: state.conflictChoices || {} };
+    });
   }
   deployments() {
     return fs
@@ -529,13 +779,35 @@ export class Engine {
   }
   private pruneDeployments() {
     const records = this.deployments();
-    for (const d of records.slice(20)) {
-      if (d.status === "pending" || d.status === "failed") continue;
+    const protectedIds = new Set(
+      records.filter((d) => d.status === "pending").map((d) => d.id),
+    );
+    const latest = records.find((d) => d.status === "applied");
+    if (latest) protectedIds.add(latest.id);
+    let count = protectedIds.size;
+    let bytes = records
+      .filter((d) => protectedIds.has(d.id))
+      .reduce(
+        (n, d) =>
+          n +
+          fs.statSync(path.join(this.store.root, "deployments", `${d.id}.json`))
+            .size,
+        0,
+      );
+    for (const d of records) {
+      if (protectedIds.has(d.id)) continue;
       const file = path.join(this.store.root, "deployments", `${d.id}.json`);
+      const size = fs.statSync(file).size;
+      if (count < 20 && bytes + size <= 128 * 1024 * 1024) {
+        count++;
+        bytes += size;
+        continue;
+      }
       fs.unlinkSync(file);
       this.deploymentCache.delete(file);
     }
   }
+
   private pending() {
     return this.deployments().filter((d) => d.status === "pending");
   }
@@ -563,7 +835,9 @@ export class Engine {
           "请先解决预览中的错误和冲突",
           409,
         );
-      const changed = plan.changes.filter((c) => c.status !== "unchanged");
+      const changed = plan.changes.filter(
+        (c) => !["unchanged", "skipped"].includes(c.status),
+      );
       for (const stage of this.staging()) cleanStaging(stage);
       if (!changed.length) {
         if (!options.onlySkillId) new Sync(this.store).acknowledgeDeployment();
@@ -577,6 +851,7 @@ export class Engine {
         status: "pending",
         beforeState: state,
         files: changed.map((c) => ({
+          ...(c.status === "replace" ? { native: readNative(c.path) } : {}),
           adopted: c.status === "adopt",
           path: c.path,
           kind: c.kind,
@@ -590,7 +865,9 @@ export class Engine {
           ...(c.kind === "skill"
             ? {
                 files:
-                  c.status !== "adopt" && exists(c.path)
+                  c.status !== "adopt" &&
+                  c.status !== "replace" &&
+                  exists(c.path)
                     ? readBundle(c.path)
                     : {},
               }
@@ -605,6 +882,14 @@ export class Engine {
         "deployments",
         `${record.id}.json`,
       );
+      if (
+        Buffer.byteLength(JSON.stringify(record, null, 2) + "\n") >
+        64 * 1024 * 1024
+      )
+        throw new AppError(
+          "SNAPSHOT_TOO_LARGE",
+          "单次部署快照超过 64 MiB，请拆分源配置后重新预览",
+        );
       writeJson(recordPath, record);
       const done: SavedFile[] = [];
       try {
@@ -613,9 +898,11 @@ export class Engine {
             (r) => r.path === change.path,
           )?.adoptedLink;
           if (
-            (adoption !== undefined
-              ? adoptedSkillHash(change.path, adoption)
-              : diskHash(change.path, change.kind)) !== change.beforeHash
+            (change.conflictFingerprint && exists(change.path)
+              ? nativeHash(change.path)
+              : adoption !== undefined
+                ? adoptedSkillHash(change.path, adoption)
+                : diskHash(change.path, change.kind)) !== change.beforeHash
           )
             throw new AppError(
               "STALE_TARGET",
@@ -624,7 +911,12 @@ export class Engine {
             );
           if (change.status === "adopt") continue;
           done.push(record.files.find((f) => f.path === change.path)!);
-          if (adoption !== undefined) fs.unlinkSync(change.path);
+          if (
+            adoption !== undefined ||
+            (change.status === "replace" &&
+              fs.lstatSync(change.path).isSymbolicLink())
+          )
+            fs.unlinkSync(change.path);
           if (change.kind === "skill") {
             if (change.status === "remove")
               fs.rmSync(change.path, { recursive: true, force: true });
@@ -637,6 +929,11 @@ export class Engine {
                   409,
                 );
               writeBundle(change.path, files);
+              const saved = record.files.find((f) => f.path === change.path)!;
+              if (saved.native) {
+                saved.afterNativeHash = nativeHash(change.path);
+                writeJson(recordPath, record);
+              }
             }
           } else {
             if (change.afterHash === absent)
@@ -656,6 +953,10 @@ export class Engine {
         );
         for (const c of changed.filter((c) => c.status !== "remove"))
           receipts.push({
+            ...(c.status === "adopt" &&
+            state.conflictChoices?.[c.path]?.use === "native"
+              ? { adoptedSourceHash: state.conflictChoices[c.path].sourceHash }
+              : {}),
             path: c.path,
             kind: c.kind,
             harness: c.harness,
@@ -697,6 +998,10 @@ export class Engine {
   }
   private restoreFile(f: SavedFile) {
     if (f.adopted) return;
+    if (f.native) {
+      restoreNative(f.path, f.native);
+      return;
+    }
     if (f.link !== undefined) {
       noSymlink(path.dirname(f.path));
       if (exists(f.path) && fs.lstatSync(f.path).isSymbolicLink()) {
@@ -733,11 +1038,42 @@ export class Engine {
           409,
         );
       for (const f of record.files) {
+        if (
+          f.afterNativeHash &&
+          exists(f.path) &&
+          matchesNativeHash(f.path, f.afterNativeHash)
+        )
+          continue;
+        if (f.afterNativeHash && record.status === "applied")
+          throw new AppError(
+            "ROLLBACK_DRIFT",
+            `目标有部署后的新修改：${f.path}`,
+            409,
+          );
         const pendingLink =
           record.status === "pending" &&
           f.link !== undefined &&
           exists(f.path) &&
           fs.lstatSync(f.path).isSymbolicLink();
+        const originalNative =
+          record.status === "pending" &&
+          f.native &&
+          exists(f.path) &&
+          f.beforeHash !== undefined &&
+          matchesNativeHash(f.path, f.beforeHash);
+        if (originalNative) continue;
+        if (
+          record.status === "pending" &&
+          f.native?.files[""].link !== undefined &&
+          !exists(f.path)
+        )
+          continue;
+        if (f.afterNativeHash)
+          throw new AppError(
+            "ROLLBACK_DRIFT",
+            `目标有部署后的新修改：${f.path}`,
+            409,
+          );
         const actual = pendingLink
           ? adoptedSkillHash(f.path, f.link!)
           : diskHash(f.path, f.kind);

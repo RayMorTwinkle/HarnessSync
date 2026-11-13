@@ -52,7 +52,7 @@ export function noSymlink(p: string) {
   }
 }
 export function readBundle(root: string): Bundle {
-  const output: Bundle = {};
+  const output: Bundle = Object.create(null);
   let size = 0;
   const walk = (dir: string) => {
     for (const entry of fs
