@@ -5,6 +5,8 @@ import { execFileSync } from "node:child_process";
 import { Store } from "./store.ts";
 import {
   AppError,
+  atomicWrite,
+  hash,
   exists,
   json,
   writeJson,
@@ -13,10 +15,14 @@ import {
   noSymlink,
   parseSkill,
   skillMarkdown,
+  stagingLeftovers,
+  cleanStaging,
   type Bundle,
 } from "./files.ts";
 import { kinds, stable, readManifest, writeManifest } from "./layout.ts";
 import type {
+  AutoSyncSettings,
+  SyncRuntime,
   Manifest,
   SyncConfig,
   SyncStatus,
@@ -33,6 +39,482 @@ const message = "同步仅更新源配置；请运行 hsync plan 审查后再 ap
 
 export class Sync {
   constructor(readonly store: Store) {}
+  private autoPath() {
+    return path.join(this.store.root, "sync-auto.json");
+  }
+  private autoState(): {
+    settings: AutoSyncSettings;
+    runtime: SyncRuntime;
+    userConfigured?: boolean;
+  } {
+    noSymlink(this.autoPath());
+    if (exists(this.autoPath())) return json(this.autoPath());
+    return {
+      settings: {
+        enabled: !!this.config(false)?.lastSyncTime,
+        debounceSeconds: 120,
+        pullIntervalMinutes: 10,
+      },
+      runtime: { failures: 0, pendingDeployment: 0, pendingPush: false },
+    };
+  }
+  private saveAuto(value: ReturnType<Sync["autoState"]>) {
+    noSymlink(this.autoPath());
+    writeJson(this.autoPath(), value);
+  }
+  acknowledgeDeployment() {
+    if (!exists(this.autoPath())) return;
+    const state = this.autoState();
+    state.runtime.pendingDeployment = 0;
+    this.saveAuto(state);
+  }
+  autoSettings() {
+    return this.autoState().settings;
+  }
+  async setAuto(input: Partial<AutoSyncSettings>) {
+    if (
+      !input ||
+      typeof input !== "object" ||
+      Array.isArray(input) ||
+      Object.keys(input).some(
+        (k) =>
+          !["enabled", "debounceSeconds", "pullIntervalMinutes"].includes(k),
+      ) ||
+      (input.enabled !== undefined && typeof input.enabled !== "boolean") ||
+      [input.debounceSeconds, input.pullIntervalMinutes].some(
+        (n) => n !== undefined && (!Number.isInteger(n) || n < 1 || n > 86400),
+      )
+    )
+      throw new AppError(
+        "SYNC_OPTIONS",
+        "自动同步参数需要布尔值及 1 至 86400 的整数间隔",
+      );
+    return this.store.lock(() => {
+      const value = this.autoState();
+      Object.assign(value.settings, input);
+      if (input.enabled !== undefined) value.userConfigured = true;
+      value.runtime.nextRunAt =
+        value.settings.enabled && this.config(false)
+          ? new Date(
+              Date.now() + value.settings.pullIntervalMinutes * 60_000,
+            ).toISOString()
+          : undefined;
+      value.runtime.pullDueAt = value.runtime.nextRunAt;
+      this.saveAuto(value);
+      return value.settings;
+    });
+  }
+  private sourceStamp() {
+    const rows = [this.store.git(["rev-parse", "HEAD"])];
+    const walk = (dir: string) => {
+      for (const name of fs.readdirSync(dir).sort()) {
+        if (name === ".git" || name.startsWith(".hsync-staging-")) continue;
+        const file = path.join(dir, name),
+          stat = fs.lstatSync(file, { bigint: true });
+        rows.push(
+          `${path.relative(this.store.repo, file)}:${stat.ino}:${stat.size}:${stat.mode}:${stat.mtimeNs}:${stat.ctimeNs}`,
+        );
+        if (stat.isDirectory()) walk(file);
+      }
+    };
+    walk(this.store.repo);
+    return hash(rows.join("\n"));
+  }
+  private fingerprint(library = this.current()) {
+    return hash(
+      stable({
+        manifest: {
+          schemaVersion: 1,
+          ...Object.fromEntries(
+            kinds.map((kind) => [
+              kind,
+              [...library.manifest[kind]].sort((a, b) =>
+                a.id.localeCompare(b.id),
+              ),
+            ]),
+          ),
+        },
+        bundles: Object.fromEntries(
+          library.manifest.skills.map((skill) => [
+            skill.id,
+            library.bundles[skill.id],
+          ]),
+        ),
+      }),
+    );
+  }
+  private undoPath() {
+    return path.join(this.store.root, "sync-undo.json");
+  }
+  private recoveryPath() {
+    return path.join(this.store.root, "sync-recovery.json");
+  }
+  private sourceFiles(): Bundle {
+    noSymlink(this.store.repo);
+    const files: Bundle = {};
+    for (const name of fs.readdirSync(this.store.repo)) {
+      if ([".git", "entries", "skills"].includes(name)) continue;
+      if (!["manifest.json", "harness-sync.json"].includes(name))
+        throw new AppError(
+          "UNSAFE_SOURCE",
+          "源库包含不支持的文件，拒绝同步或恢复",
+        );
+      const file = path.join(this.store.repo, name);
+      noSymlink(file);
+      files[name] = {
+        content: fs.readFileSync(file).toString("base64"),
+        mode: fs.statSync(file).mode & 0o777,
+      };
+    }
+    const entries = path.join(this.store.repo, "entries");
+    noSymlink(entries);
+    if (exists(entries))
+      for (const kind of fs.readdirSync(entries)) {
+        if (!kinds.includes(kind as (typeof kinds)[number]))
+          throw new AppError("UNSAFE_SOURCE", "源库包含不支持的条目目录");
+        const dir = path.join(entries, kind);
+        noSymlink(dir);
+        for (const name of fs.readdirSync(dir)) {
+          if (!/^[a-zA-Z0-9-]+\.json$/.test(name))
+            throw new AppError("UNSAFE_SOURCE", "源库条目文件路径无效");
+          const file = path.join(dir, name);
+          noSymlink(file);
+          files[`entries/${kind}/${name}`] = {
+            content: fs.readFileSync(file).toString("base64"),
+            mode: fs.statSync(file).mode & 0o777,
+          };
+        }
+      }
+    const skills = path.join(this.store.repo, "skills");
+    noSymlink(skills);
+    if (exists(skills))
+      for (const id of fs.readdirSync(skills)) {
+        if (id.startsWith(".hsync-staging-")) continue;
+        if (!/^[a-zA-Z0-9-]+$/.test(id))
+          throw new AppError("UNSAFE_SOURCE", "源库技能目录路径无效");
+        const dir = path.join(skills, id);
+        noSymlink(dir);
+        for (const [name, file] of Object.entries(readBundle(dir)))
+          files[`skills/${id}/${name}`] = file;
+      }
+    return files;
+  }
+  private libraryFiles(library: Library): Bundle {
+    const files: Bundle = {};
+    const add = (name: string, value: unknown) => {
+      files[name] = {
+        content: Buffer.from(stable(value)).toString("base64"),
+        mode: 0o644,
+      };
+    };
+    add("harness-sync.json", { schemaVersion: 2 });
+    for (const kind of kinds)
+      for (const entry of library.manifest[kind])
+        add(`entries/${kind}/${entry.id}.json`, entry);
+    for (const { id } of library.manifest.skills)
+      for (const [name, file] of Object.entries(library.bundles[id]))
+        files[`skills/${id}/${name}`] = file;
+    return files;
+  }
+  private requireRecovered() {
+    noSymlink(this.recoveryPath());
+    noSymlink(this.undoPath());
+    if (exists(this.recoveryPath()))
+      throw new AppError(
+        "SYNC_RECOVERY",
+        "上次源操作未完成，请先运行 hsync sync undo 恢复安全快照",
+      );
+    if (
+      exists(this.undoPath()) &&
+      (!json<any>(this.undoPath()).head ||
+        json<any>(this.undoPath()).undoCommit)
+    )
+      throw new AppError(
+        "SYNC_RECOVERY",
+        "上次源操作未完成，请先运行 hsync sync undo 恢复安全快照",
+      );
+  }
+  private checkpoint(
+    after: Library,
+    conflicts: SyncConflict[],
+    operation: string,
+  ) {
+    this.requireRecovered();
+    const c = this.config(false);
+    const record = {
+      beforeFiles: this.sourceFiles(),
+      afterFiles: this.libraryFiles(after),
+      before: this.safety(),
+      beforeFingerprint: this.fingerprint(),
+      afterFingerprint: this.fingerprint(after),
+      conflicts: c?.conflicts || [],
+      afterConflicts: conflicts,
+      operation,
+      remote: c?.url,
+      branch: c?.branch,
+      pendingDeployment: this.autoState().runtime.pendingDeployment,
+    };
+    const file = operation === "merge" ? this.recoveryPath() : this.undoPath();
+    noSymlink(file);
+    writeJson(file, record);
+    return record;
+  }
+  private finishCheckpoint() {
+    noSymlink(this.undoPath());
+    const record = json<any>(this.undoPath());
+    record.head = this.head();
+    writeJson(this.undoPath(), record);
+  }
+  async restore(commit: string, revision?: string) {
+    if (!/^[0-9a-f]{40}$/.test(commit))
+      throw new AppError("INVALID_COMMIT", "需要完整的提交 SHA");
+    return this.store.lock(() => {
+      this.store.checkRevision(revision);
+      const library = this.read(commit);
+      this.checkpoint(library, [], "restore");
+      this.write(library);
+      this.store.commit(`恢复配置至 ${commit.slice(0, 8)}`);
+      const c = this.config(false);
+      if (c) {
+        c.conflicts = [];
+        this.save(c);
+      }
+      this.finishCheckpoint();
+      return { commit };
+    });
+  }
+  private restoreFiles(beforeFiles: Bundle, files = this.sourceFiles()) {
+    for (const name of Object.keys(beforeFiles)) {
+      if (
+        !/^(manifest\.json|harness-sync\.json|entries\/(rules|skills|projects)\/[a-zA-Z0-9-]+\.json|skills\/[a-zA-Z0-9-]+\/.+)$/.test(
+          name,
+        ) ||
+        name.split("/").some((part) => ["..", ".", ".git"].includes(part))
+      )
+        throw new AppError(
+          "SYNC_RECOVERY",
+          "安全快照包含不支持的源路径，拒绝恢复",
+        );
+      // A bundle file may become a directory; validate its existing ancestors first.
+      for (
+        let target = path.join(this.store.repo, name);
+        ;
+        target = path.dirname(target)
+      ) {
+        try {
+          noSymlink(target);
+          break;
+        } catch (error: any) {
+          if (error.code !== "ENOTDIR") throw error;
+        }
+      }
+    }
+    for (const name of Object.keys(files))
+      if (!beforeFiles[name]) fs.rmSync(path.join(this.store.repo, name));
+    const removeEmptyDirectory = (dir: string) => {
+      noSymlink(dir);
+      for (const item of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (!item.isDirectory())
+          throw new AppError(
+            "SYNC_UNDO_CHANGED",
+            "恢复路径中仍有外部文件，拒绝覆盖",
+          );
+        removeEmptyDirectory(path.join(dir, item.name));
+      }
+      fs.rmdirSync(dir);
+    };
+    for (const [name, data] of Object.entries(beforeFiles)) {
+      const target = path.join(this.store.repo, name);
+      if (exists(target) && fs.statSync(target).isDirectory())
+        removeEmptyDirectory(target);
+      atomicWrite(
+        path.join(this.store.repo, name),
+        Buffer.from(data.content, "base64"),
+        data.mode,
+      );
+    }
+  }
+  private swapBackups(record: any) {
+    const result: {
+      stage: string;
+      target: string;
+      bundle: Bundle;
+      id: string;
+    }[] = [];
+    for (const stage of stagingLeftovers(
+      path.join(this.store.repo, "skills"),
+    )) {
+      const { target: id } = json<{ target: string }>(`${stage}.json`);
+      if (!/^[a-zA-Z0-9-]+$/.test(id)) continue;
+      const target = this.store.skillPath(id);
+      if (exists(target) || !exists(`${stage}-old`)) continue;
+      const expected = (files: Bundle) =>
+        Object.fromEntries(
+          Object.entries(files)
+            .filter(([name]) => name.startsWith(`skills/${id}/`))
+            .map(([name, file]) => [name.slice(`skills/${id}/`.length), file]),
+        );
+      const before = expected(record.beforeFiles),
+        after = expected(record.afterFiles);
+      if (
+        !Object.keys(before).length ||
+        stable(readBundle(`${stage}-old`)) !== stable(before) ||
+        !exists(stage) ||
+        stable(readBundle(stage)) !== stable(after) ||
+        result.some((item) => item.id === id)
+      )
+        throw new AppError(
+          "SYNC_UNDO_CHANGED",
+          "目录交换备份或暂存内容已改变，拒绝恢复",
+        );
+      result.push({ stage, target, bundle: before, id });
+    }
+    return result;
+  }
+  async undo() {
+    return this.store.lock(() => {
+      const file = exists(this.recoveryPath())
+        ? this.recoveryPath()
+        : this.undoPath();
+      if (!exists(file))
+        throw new AppError("SYNC_UNDO", "没有可撤销的解决冲突或恢复操作");
+      noSymlink(file);
+      const record = json<any>(file);
+      const c = this.config(false),
+        head = this.head();
+      const partial = !record.head || !!record.undoCommit;
+      const files = this.sourceFiles();
+      const swaps = partial ? this.swapBackups(record) : [];
+      for (const swap of swaps)
+        for (const [name, data] of Object.entries(swap.bundle))
+          files[`skills/${swap.id}/${name}`] = data;
+      const sameFile = (a: any, b: any) =>
+        a?.content === b?.content &&
+        (!a || (a.mode & 0o111) === (b.mode & 0o111));
+      const safeFiles = [
+        ...new Set([
+          ...Object.keys(files),
+          ...Object.keys(record.beforeFiles),
+          ...Object.keys(record.afterFiles),
+        ]),
+      ].every(
+        (name) =>
+          sameFile(files[name], record.beforeFiles[name]) ||
+          sameFile(files[name], record.afterFiles[name]) ||
+          (!files[name] &&
+            !sameFile(record.beforeFiles[name], record.afterFiles[name])),
+      );
+      let safeHead =
+        head === (record.head || record.before) ||
+        head === record.undoCommit ||
+        head === record.targetHead;
+      if (!record.head && !safeHead) {
+        safeHead =
+          this.git(["rev-parse", `${head}^1`]) === record.before &&
+          /^(解决同步冲突：|恢复配置至 )/.test(
+            this.git(["show", "-s", "--format=%s", head]),
+          );
+      }
+      if (
+        !safeHead ||
+        !safeFiles ||
+        (!partial && this.fingerprint() !== record.afterFingerprint) ||
+        record.remote !== c?.url ||
+        record.branch !== c?.branch ||
+        (stable(c?.conflicts || []) !== stable(record.conflicts) &&
+          stable(c?.conflicts || []) !== stable(record.afterConflicts))
+      )
+        throw new AppError(
+          "SYNC_UNDO_CHANGED",
+          "操作后源配置、同步连接或冲突已改变，拒绝覆盖；请从同步历史选择恢复点",
+        );
+      this.read(record.before);
+      const beforeFiles = record.beforeFiles as Bundle;
+      // Persist the new commit before changing source, so an interrupted undo can resume.
+      if (!record.undoCommit) {
+        record.undoCommit = this.git([
+          "-c",
+          "commit.gpgsign=false",
+          "commit-tree",
+          this.git(["rev-parse", `${record.before}^{tree}`]),
+          "-p",
+          head,
+          "-m",
+          `撤销同步操作：${record.operation}\n\n设备：${this.store.device().name}`,
+        ]);
+        writeJson(file, record);
+      }
+      for (const swap of swaps) {
+        noSymlink(swap.target);
+        if (
+          exists(swap.target) ||
+          stable(readBundle(`${swap.stage}-old`)) !== stable(swap.bundle)
+        )
+          throw new AppError(
+            "SYNC_UNDO_CHANGED",
+            "目录交换备份已改变，拒绝恢复",
+          );
+        fs.renameSync(`${swap.stage}-old`, swap.target);
+      }
+      this.restoreFiles(beforeFiles, files);
+      this.git(["reset", "--mixed", record.undoCommit]);
+      if (c) {
+        c.conflicts = record.conflicts;
+        this.save(c);
+      }
+      if (record.operation === "merge") {
+        const state = this.autoState();
+        state.runtime.pendingDeployment = record.pendingDeployment;
+        this.saveAuto(state);
+      }
+      for (const swap of swaps) cleanStaging(swap.stage);
+      fs.rmSync(file);
+      return this.result(c);
+    });
+  }
+  async history() {
+    return this.store.lock(() =>
+      this.store.history().map((item) => {
+        const library = this.read(item.hash);
+        let before = empty();
+        try {
+          before = this.read(this.git(["rev-parse", `${item.hash}^1`]));
+        } catch {}
+        const changes = kinds.flatMap((kind) =>
+          [
+            ...new Set(
+              [...library.manifest[kind], ...before.manifest[kind]].map(
+                (e) => e.id,
+              ),
+            ),
+          ].flatMap((id) => {
+            const a = before.manifest[kind].find((e) => e.id === id),
+              b = library.manifest[kind].find((e) => e.id === id);
+            if (
+              stable(a) === stable(b) &&
+              (kind !== "skills" ||
+                stable(before.bundles[id]) === stable(library.bundles[id]))
+            )
+              return [];
+            const entry = (b || a) as any;
+            return [
+              {
+                kind,
+                id,
+                name: entry.title || entry.name,
+                action: !a ? "新增" : !b ? "删除" : "修改",
+              },
+            ];
+          }),
+        );
+        const device =
+          this.git(["show", "-s", "--format=%B", item.hash]).match(
+            /^设备：(.*)$/m,
+          )?.[1] || "未知设备（旧提交）";
+        return { ...item, device, changes };
+      }),
+    );
+  }
   private configPath() {
     return path.join(this.store.root, "sync.json");
   }
@@ -240,17 +722,23 @@ export class Sync {
         .split(/\s+/)
         .map(Number);
     return {
+      auto: this.autoSettings(),
+      scheduler: this.autoState().runtime,
+      remoteRepositoryRetained: true,
       connected: !!c,
       remote: c?.url,
       branch: c?.branch,
       ahead,
       behind,
+      lastFetchedCommit: c?.lastFetchedCommit,
       lastSyncedCommit: c?.lastSyncedCommit,
       lastSyncTime: c?.lastSyncTime,
       conflicts: c?.conflicts || [],
-      message: c?.conflicts.length
-        ? `有 ${c.conflicts.length} 个冲突待处理；解决前暂停推送，用 hsync sync resolve <id> --keep local|remote|both 处理后再 sync now`
-        : message,
+      message: !c
+        ? "本机已断开同步；远端仓库仍然保留，不会被删除"
+        : c.conflicts.length
+          ? `有 ${c.conflicts.length} 个冲突待处理；解决前暂停推送，用 hsync sync resolve <id> --keep local|remote|both 处理后再 sync now`
+          : message,
     };
   }
   // Local view for snapshots; never touches the network.
@@ -266,7 +754,7 @@ export class Sync {
   async status() {
     return this.store.lock(() => {
       const c = this.config(false);
-      return this.result(c, c && this.fetch(c));
+      return this.result(c, c?.lastFetchedCommit);
     });
   }
   async setup(options: SyncSetup) {
@@ -327,17 +815,130 @@ export class Sync {
       };
       this.git(["check-ref-format", `refs/heads/${c.branch}`]);
       this.save(c);
-      return this.nowLocked(c);
+      return this.attempt(c, true);
     });
   }
   async now() {
-    return this.store.lock(() => this.nowLocked(this.config()!));
+    return this.store.lock(() => this.attempt(this.config()!));
   }
-  private nowLocked(c: SyncConfig) {
+  private failed(
+    state: ReturnType<Sync["autoState"]>,
+    error: Error,
+    now = Date.now(),
+  ) {
+    state.runtime.lastError = error.message;
+    state.runtime.failures++;
+    state.runtime.nextRunAt = state.settings.enabled
+      ? new Date(
+          now +
+            Math.min(
+              30 * 60_000,
+              30_000 * 2 ** Math.min(state.runtime.failures - 1, 10),
+            ),
+        ).toISOString()
+      : undefined;
+    this.saveAuto(state);
+  }
+  private attempt(c: SyncConfig, enable = false, deferPush = false) {
+    const firstSync = !c.lastSyncTime;
+    const state = this.autoState();
+    state.runtime.pendingPush ||= !deferPush;
+    state.runtime.lastAttemptAt = new Date().toISOString();
+    this.saveAuto(state);
+    try {
+      const result = this.nowLocked(c, !deferPush);
+      const latest = this.autoState();
+      if (enable || (firstSync && !latest.userConfigured))
+        latest.settings.enabled = true;
+      latest.runtime.lastSuccessAt = new Date().toISOString();
+      latest.runtime.lastError = undefined;
+      latest.runtime.failures = 0;
+      latest.runtime.pendingPush = !!result.pushBlocked || result.ahead > 0;
+      if (!deferPush) latest.runtime.changedAt = undefined;
+      latest.runtime.observedSource = this.sourceStamp();
+      latest.runtime.nextRunAt = latest.settings.enabled
+        ? new Date(
+            Date.now() + latest.settings.pullIntervalMinutes * 60_000,
+          ).toISOString()
+        : undefined;
+      latest.runtime.pullDueAt = latest.runtime.nextRunAt;
+      if (latest.settings.enabled && latest.runtime.changedAt)
+        latest.runtime.nextRunAt = new Date(
+          Math.min(
+            Date.parse(latest.runtime.nextRunAt!),
+            Date.parse(latest.runtime.changedAt) +
+              latest.settings.debounceSeconds * 1000,
+          ),
+        ).toISOString();
+      if (
+        latest.runtime.pendingPush &&
+        !c.conflicts.length &&
+        !latest.runtime.changedAt
+      )
+        latest.runtime.nextRunAt = new Date().toISOString();
+      this.saveAuto(latest);
+      return { ...result, auto: latest.settings, scheduler: latest.runtime };
+    } catch (e: any) {
+      const latest = this.autoState();
+      this.failed(latest, e);
+      throw e;
+    }
+  }
+  async tick(now = Date.now()) {
+    const initial = this.autoState();
+    if (!this.config(false) || !initial.settings.enabled) return;
+    const next = initial.runtime.nextRunAt;
+    if (next && now < Date.parse(next)) {
+      try {
+        if (this.sourceStamp() === initial.runtime.observedSource) return;
+      } catch {}
+    }
+    return this.store.lock(() => {
+      const c = this.config(false),
+        state = this.autoState();
+      if (!c || !state.settings.enabled) return;
+      const previous = stable(state);
+      let source: string;
+      try {
+        source = this.sourceStamp();
+      } catch (error: any) {
+        state.runtime.lastAttemptAt = new Date(now).toISOString();
+        this.failed(state, error, now);
+        throw error;
+      }
+      if (source !== state.runtime.observedSource) {
+        state.runtime.observedSource = source;
+        state.runtime.changedAt = new Date(now).toISOString();
+        state.runtime.pendingPush = true;
+      }
+      const pull = state.runtime.failures
+        ? Date.parse(state.runtime.nextRunAt!)
+        : Date.parse(
+            (state.runtime.pullDueAt ||= new Date(
+              now + state.settings.pullIntervalMinutes * 60_000,
+            ).toISOString()),
+          );
+      const debounce = state.runtime.changedAt
+        ? Date.parse(state.runtime.changedAt) +
+          state.settings.debounceSeconds * 1000
+        : state.runtime.pendingPush && !c.conflicts.length
+          ? now
+          : Infinity;
+      const due = state.runtime.failures ? pull : Math.min(pull, debounce);
+      state.runtime.nextRunAt = new Date(due).toISOString();
+      if (stable(state) !== previous) this.saveAuto(state);
+      if (now >= due) return this.attempt(c, false, now < debounce);
+    });
+  }
+  private nowLocked(c: SyncConfig, push = true) {
+    this.requireRecovered();
+    this.current();
     this.store.migrate();
     this.store.commit("同步前保存本地配置");
     const local = this.head();
     const remote = this.fetch(c);
+    c.lastFetchedCommit = remote;
+    this.save(c);
     if (remote && remote !== local) {
       const r = this.read(remote),
         l = this.current();
@@ -411,7 +1012,27 @@ export class Sync {
               if (rv) merged.bundles[id] = rv.bundle!;
             }
           }
-        this.safety();
+        const changed = kinds.reduce(
+          (n, kind) =>
+            n +
+            [
+              ...new Set(
+                [...l.manifest[kind], ...merged.manifest[kind]].map(
+                  (e) => e.id,
+                ),
+              ),
+            ].filter((id) => {
+              const a = l.manifest[kind].find((e) => e.id === id),
+                b = merged.manifest[kind].find((e) => e.id === id);
+              return (
+                stable(a) !== stable(b) ||
+                (kind === "skills" &&
+                  stable(l.bundles[id]) !== stable(merged.bundles[id]))
+              );
+            }).length,
+          0,
+        );
+        const checkpoint = this.checkpoint(merged, conflicts, "merge");
         try {
           this.write(merged);
           this.git([
@@ -423,7 +1044,7 @@ export class Sync {
           ]);
           const tree = this.git(["write-tree"]);
           const sha =
-            base === local &&
+            base === checkpoint.before &&
             tree === this.git(["rev-parse", `${remote}^{tree}`])
               ? remote
               : this.git([
@@ -432,18 +1053,28 @@ export class Sync {
                   "commit-tree",
                   tree,
                   "-p",
-                  local,
+                  checkpoint.before,
                   "-p",
                   remote,
                   "-m",
-                  "合并跨设备配置",
+                  `合并跨设备配置\n\n设备：${this.store.device().name}`,
                 ]);
+          const recovery = json<any>(this.recoveryPath());
+          recovery.targetHead = sha;
+          noSymlink(this.recoveryPath());
+          writeJson(this.recoveryPath(), recovery);
           this.git(["reset", "--soft", sha]);
           c.conflicts = conflicts;
           this.save(c);
+          if (changed) {
+            const state = this.autoState();
+            state.runtime.pendingDeployment += changed;
+            this.saveAuto(state);
+          }
+          fs.rmSync(this.recoveryPath());
         } catch (e) {
-          this.write(l);
-          this.git(["reset", "--mixed", local]);
+          this.restoreFiles(checkpoint.beforeFiles);
+          this.git(["reset", "--mixed", checkpoint.before]);
           throw e;
         }
       }
@@ -454,8 +1085,14 @@ export class Sync {
       this.save(c);
       return { ...this.result(c, remote), pushBlocked: true };
     }
+    if (!push) {
+      c.lastSyncTime = new Date().toISOString();
+      this.save(c);
+      return this.result(c, remote);
+    }
     this.git(["push", "--", c.url, `HEAD:refs/heads/${c.branch}`]);
     c.lastSyncedCommit = this.head();
+    c.lastFetchedCommit = c.lastSyncedCommit;
     c.lastSyncTime = new Date().toISOString();
     this.save(c);
     return this.result(c, this.head());
@@ -469,8 +1106,7 @@ export class Sync {
       if (matches.length !== 1)
         throw new AppError("SYNC_CONFLICT", "请指定唯一待处理条目 ID");
       const conflict = matches[0],
-        library = this.current(),
-        before = structuredClone(library);
+        library = this.current();
       const remote = this.read(conflict.remoteCommit);
       const entry = remote.manifest[conflict.kind].find(
         (e) => e.id === entryId,
@@ -535,23 +1171,41 @@ export class Sync {
           if (kind === "skills") library.bundles[copy.id] = bundle;
         }
       }
-      this.safety();
+      this.checkpoint(
+        library,
+        c.conflicts.filter((x) => x !== conflict),
+        "resolve",
+      );
       try {
-        this.write(library);
+        if (keep !== "local") this.write(library);
         this.store.commit(`解决同步冲突：${keep}`);
       } catch (e) {
-        this.write(before);
-        this.git(["reset", "--mixed", "HEAD"]);
+        const checkpoint = json<any>(this.undoPath());
+        this.restoreFiles(checkpoint.beforeFiles);
+        this.git(["reset", "--mixed", checkpoint.before]);
         throw e;
       }
       c.conflicts = c.conflicts.filter((x) => x !== conflict);
       this.save(c);
+      const state = this.autoState();
+      state.runtime.pendingPush = true;
+      if (state.settings.enabled && !c.conflicts.length)
+        state.runtime.nextRunAt = new Date().toISOString();
+      this.saveAuto(state);
+      this.finishCheckpoint();
       return this.result(c);
     });
   }
   async disconnect() {
     return this.store.lock(() => {
       noSymlink(this.configPath());
+      if (exists(this.autoPath())) {
+        const state = this.autoState();
+        state.runtime.nextRunAt = undefined;
+        state.runtime.pullDueAt = undefined;
+        state.runtime.changedAt = undefined;
+        this.saveAuto(state);
+      }
       fs.rmSync(this.configPath(), { force: true });
       return this.result();
     });

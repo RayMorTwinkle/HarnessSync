@@ -219,16 +219,38 @@ export type SyncConflict = {
 export type SyncConfig = {
   url: string;
   branch: string;
+  lastFetchedCommit?: string;
   lastSyncedCommit?: string;
   lastSyncTime?: string;
   conflicts: SyncConflict[];
 };
+export type AutoSyncSettings = {
+  enabled: boolean;
+  debounceSeconds: number;
+  pullIntervalMinutes: number;
+};
+export type SyncRuntime = {
+  lastAttemptAt?: string;
+  lastSuccessAt?: string;
+  lastError?: string;
+  nextRunAt?: string;
+  pullDueAt?: string;
+  failures: number;
+  pendingDeployment: number;
+  pendingPush?: boolean;
+  observedSource?: string;
+  changedAt?: string;
+};
 export type SyncStatus = {
+  auto: AutoSyncSettings;
+  scheduler: SyncRuntime;
+  remoteRepositoryRetained: true;
   connected: boolean;
   remote?: string;
   branch?: string;
   ahead: number;
   behind: number;
+  lastFetchedCommit?: string;
   lastSyncedCommit?: string;
   lastSyncTime?: string;
   conflicts: SyncConflict[];

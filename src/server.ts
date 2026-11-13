@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { Engine, publicPlan } from "./core/engine.ts";
+import { startSyncScheduler } from "./core/sync-scheduler.ts";
 import { Sync } from "./core/sync.ts";
 import { Store } from "./core/store.ts";
 import { AppError, hash, parseSkill } from "./core/files.ts";
@@ -126,6 +127,18 @@ export async function startServer(
               })
               .parse(body),
           );
+        else if (resource === "sync" && req.method === "GET" && id === "auto")
+          result = new Sync(store).autoSettings();
+        else if (resource === "sync" && req.method === "PUT" && id === "auto")
+          result = await new Sync(store).setAuto(body);
+        else if (
+          resource === "sync" &&
+          req.method === "GET" &&
+          id === "history"
+        )
+          result = await new Sync(store).history();
+        else if (resource === "sync" && req.method === "POST" && id === "undo")
+          result = await new Sync(store).undo();
         else if (resource === "sync" && req.method === "POST" && id === "now")
           result = await new Sync(store).now();
         else if (
@@ -269,11 +282,13 @@ export async function startServer(
       resolve();
     });
   });
+  const stopSync = startSyncScheduler(new Sync(store));
   return {
     server,
     port: actualPort,
     url: `http://127.0.0.1:${actualPort}`,
     close: async () => {
+      await stopSync();
       await vite?.close();
       await new Promise<void>((resolve, reject) =>
         server.close((e) => (e ? reject(e) : resolve())),
