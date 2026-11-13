@@ -1,3 +1,4 @@
+import { lastAutoDeploy } from "./auto-deploy.ts";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -47,7 +48,8 @@ const empty = (): Library => ({
   manifest: { schemaVersion: 1, rules: [], skills: [], projects: [] },
   bundles: {},
 });
-const message = "同步仅更新源配置；请运行 hsync plan 审查后再 apply";
+const message =
+  "源配置已同步；自动部署结果见 autoDeploy，需要审查时运行 hsync plan";
 
 export class Sync {
   constructor(readonly store: Store) {}
@@ -80,10 +82,19 @@ export class Sync {
     state.runtime.pendingDeployment = 0;
     this.saveAuto(state);
   }
+  recoveryPending() {
+    return this.undoStatus()?.kind === "recovery";
+  }
+  pendingDeployment() {
+    return this.autoState().runtime.pendingDeployment;
+  }
   autoSettings() {
     return this.autoState().settings;
   }
-  async setAuto(input: Partial<AutoSyncSettings>) {
+  async setAuto(
+    input: Partial<AutoSyncSettings>,
+    options: { locked?: boolean } = {},
+  ) {
     if (
       !input ||
       typeof input !== "object" ||
@@ -101,7 +112,7 @@ export class Sync {
         "SYNC_OPTIONS",
         "自动同步参数需要布尔值及 1 至 86400 的整数间隔",
       );
-    return this.store.lock(() => {
+    const save = () => {
       const value = this.autoState();
       Object.assign(value.settings, input);
       if (input.enabled !== undefined) value.userConfigured = true;
@@ -114,7 +125,8 @@ export class Sync {
       value.runtime.pullDueAt = value.runtime.nextRunAt;
       this.saveAuto(value);
       return value.settings;
-    });
+    };
+    return options.locked ? save() : this.store.lock(save);
   }
   private sourceStamp() {
     const rows = [this.store.git(["rev-parse", "HEAD"])];
@@ -896,6 +908,7 @@ export class Sync {
         .split(/\s+/)
         .map(Number);
     return {
+      autoDeploy: lastAutoDeploy(this.store),
       auto: this.autoSettings(),
       scheduler: this.autoState().runtime,
       remoteRepositoryRetained: true,

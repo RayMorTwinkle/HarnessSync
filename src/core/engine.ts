@@ -1,3 +1,4 @@
+import { lastAutoDeploy } from "./auto-deploy.ts";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -811,7 +812,10 @@ export class Engine {
   private pending() {
     return this.deployments().filter((d) => d.status === "pending");
   }
-  async apply(expectedPlanId: string, options: { onlySkillId?: string } = {}) {
+  async apply(
+    expectedPlanId: string,
+    options: { onlySkillId?: string; validate?: (plan: Plan) => void } = {},
+  ) {
     return this.store.lock(() => {
       if (this.pending().length)
         throw new AppError(
@@ -826,6 +830,8 @@ export class Engine {
           "源配置或目标文件已变化，请重新预览",
           409,
         );
+      // Automatic deployment rechecks device-local policy under the apply lock.
+      options.validate?.(plan);
       if (
         plan.errors.length ||
         plan.changes.some((c) => c.status === "conflict")
@@ -1113,6 +1119,7 @@ export class Engine {
     const versions =
       this.store.home === process.env.HOME ? harnessVersions() : {};
     return {
+      autoDeploy: lastAutoDeploy(this.store),
       root: this.store.root,
       revision: this.store.revision(),
       manifest: this.store.manifest(),
