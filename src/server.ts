@@ -1,3 +1,11 @@
+import {
+  installGitSkills,
+  checkGitSkillUpdates,
+  updateGitSkills,
+  diffGitSkill,
+  detachGitSkill,
+  listedSkills,
+} from "./core/git-skills.ts";
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
@@ -149,13 +157,71 @@ export async function startServer(
           result = await createOnboarding(store);
         else if (req.method === "POST" && resource === "onboarding-bootstrap")
           result = await bootstrapOnboarding(store, z.string().parse(body.id));
+        else if (
+          resource === "skills" &&
+          req.method === "POST" &&
+          id === "install"
+        )
+          result = await installGitSkills(
+            store,
+            z.string().min(1).parse(body.source),
+            z
+              .object({
+                skills: z.array(z.string().min(1)).optional(),
+                all: z.boolean().optional(),
+                ref: z.string().min(1).optional(),
+                commit: z.string().optional(),
+                scope: scopeSchema.optional(),
+              })
+              .parse(body),
+          );
+        else if (
+          resource === "skills" &&
+          req.method === "POST" &&
+          id === "updates"
+        )
+          result = await checkGitSkillUpdates(
+            store,
+            z.array(z.string()).default([]).parse(body.ids),
+          );
+        else if (
+          resource === "skills" &&
+          req.method === "POST" &&
+          id === "update"
+        )
+          result = await updateGitSkills(
+            store,
+            z.array(z.string()).min(1).parse(body.ids),
+            z.boolean().default(false).parse(body.force),
+          );
+        else if (
+          resource === "skills" &&
+          req.method === "GET" &&
+          id &&
+          parts[3] === "diff"
+        )
+          result = await diffGitSkill(store, id);
+        else if (
+          resource === "skills" &&
+          req.method === "POST" &&
+          id &&
+          parts[3] === "detach"
+        )
+          result = await detachGitSkill(store, id);
+        else if (resource === "skills" && req.method === "GET" && !id)
+          result = listedSkills(store);
         else if (req.method === "GET" && resource === "skills" && id) {
           const skill = store.manifest().skills.find((s) => s.id === id);
           if (!skill) throw new AppError("NOT_FOUND", "Skill 不存在", 404);
           const { body: markdown } = parseSkill(
             fs.readFileSync(path.join(store.skillPath(id), "SKILL.md"), "utf8"),
           );
-          result = { ...skill, body: markdown };
+          result = {
+            ...skill,
+            localSource: listedSkills(store).find((s) => s.id === id)
+              ?.localSource,
+            body: markdown,
+          };
         } else if (req.method === "POST" && resource === "rules")
           result = await store.saveRule(body.value, id, body.revision);
         else if (req.method === "POST" && resource === "skills")

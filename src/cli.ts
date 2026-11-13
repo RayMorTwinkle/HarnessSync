@@ -1,3 +1,11 @@
+import {
+  installGitSkills,
+  checkGitSkillUpdates,
+  updateGitSkills,
+  diffGitSkill,
+  detachGitSkill,
+  listedSkills,
+} from "./core/git-skills.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
@@ -244,10 +252,7 @@ scopeOptions(
   ),
 );
 scopeOptions(
-  rules
-    .command("edit <id>")
-    .option("--title <title>")
-    .option("--file <file>"),
+  rules.command("edit <id>").option("--title <title>").option("--file <file>"),
 ).action(
   run(async (id, o, cmd) => {
     const s = await getStore();
@@ -273,9 +278,52 @@ rules.command("remove <id>").action(
   }),
 );
 const skills = cli.command("skills").description("管理完整 Skill 包");
+skills.command("list").action(run(async () => listedSkills(await getStore())));
+scopeOptions(
+  skills
+    .command("install <source>")
+    .description("从 Git 仓库安装技能，安装后需预览部署")
+    .option("--skill <names>", "逗号分隔的名称或仓库子路径")
+    .option("--all", "安装所有候选技能")
+    .option("--ref <ref>", "分支、标签或提交"),
+).action(
+  run(async (source, o) => {
+    const result = await installGitSkills(await getStore(), source, {
+      skills: o.skill?.split(","),
+      all: o.all,
+      ref: o.ref,
+      scope: scope(o),
+    });
+    if (result.selectionRequired) process.exitCode = 1;
+    return result;
+  }),
+);
 skills
-  .command("list")
-  .action(run(async () => (await getStore()).manifest().skills));
+  .command("updates [ids...]")
+  .description("检查 Git 上游更新，不下载内容")
+  .action(
+    run(async (ids) => {
+      const results = await checkGitSkillUpdates(await getStore(), ids);
+      if (results.some((result) => result.error)) process.exitCode = 1;
+      return results;
+    }),
+  );
+skills
+  .command("update <ids...>")
+  .option("--force", "覆盖源库中的本地修改")
+  .action(
+    run(async (ids, o) =>
+      updateGitSkills(await getStore(), ids, Boolean(o.force)),
+    ),
+  );
+skills
+  .command("diff <id>")
+  .description("比较库版本与最新 Git 上游")
+  .action(run(async (id) => diffGitSkill(await getStore(), id)));
+skills
+  .command("detach <id>")
+  .description("删除 Git 来源，保留技能内容")
+  .action(run(async (id) => detachGitSkill(await getStore(), id)));
 skills
   .command("refresh [id]")
   .description("从本机源目录刷新完整技能包，保留范围、启停和显示名")
@@ -301,7 +349,7 @@ skills.command("show <id>").action(
     const s = await getStore();
     const key = findId(s.manifest().skills, id);
     return {
-      ...s.manifest().skills.find((x) => x.id === key),
+      ...listedSkills(s).find((x) => x.id === key),
       ...parseSkill(
         fs.readFileSync(path.join(s.skillPath(key), "SKILL.md"), "utf8"),
       ),

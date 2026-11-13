@@ -247,7 +247,10 @@ export class Store {
         const local = this.device();
         let migrated = false;
         for (const skill of m.skills) {
-          if (skill.source && path.isAbsolute(skill.source)) {
+          if (
+            typeof skill.source === "string" &&
+            path.isAbsolute(skill.source)
+          ) {
             local.origins = {
               ...local.origins,
               [skill.id]: local.origins?.[skill.id] || skill.source,

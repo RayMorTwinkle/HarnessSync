@@ -49,7 +49,7 @@ export function skillSource(store: Store, id: string) {
   const legacy = store.manifest().skills.find((s) => s.id === id)?.source;
   return (
     store.device().origins?.[id] ||
-    (legacy && path.isAbsolute(legacy) ? legacy : undefined)
+    (typeof legacy === "string" && path.isAbsolute(legacy) ? legacy : undefined)
   );
 }
 
@@ -82,12 +82,16 @@ function insideSkillRoots(store: Store, p: string) {
 export function sourceStatus(store: Store) {
   return store.manifest().skills.flatMap((skill) => {
     const source = skillSource(store, skill.id);
-    if (!source || insideSkillRoots(store, resolvedSkillSource(store, skill.id)!))
+    if (
+      !source ||
+      insideSkillRoots(store, resolvedSkillSource(store, skill.id)!)
+    )
       return [];
     try {
       const changed =
-        bundleDiskHash(fs.realpathSync(resolvedSkillSource(store, skill.id)!)) !==
-        bundleDiskHash(store.skillPath(skill.id));
+        bundleDiskHash(
+          fs.realpathSync(resolvedSkillSource(store, skill.id)!),
+        ) !== bundleDiskHash(store.skillPath(skill.id));
       return [
         {
           id: skill.id,
