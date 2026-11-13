@@ -49,4 +49,8 @@ description: 管理 HarnessSync 的共享技能、全局指令、设备变量与
 
 CLI 遵守 Harness 的沙箱权限。写入被拒绝时，说明需要哪些目录权限，并使用该 Harness 可用的授权机制，不得声称操作已经成功。
 
-源配置保存后产生本地 Git 提交。跨设备使用 `sync setup --url <git-url>` 或 `sync setup --create` 连接用户私有仓库，`sync now` 同步；冲突使用 `sync resolve <entry-id> --keep local|remote|both`。同步后先审查 `plan`，不会自动部署。
+源配置保存后产生本地 Git 提交。跨设备使用 `sync setup --url <git-url>` 或 `sync setup --create` 连接用户私有仓库，`sync now` 同步；冲突使用 `sync resolve <entry-id> --keep local|remote|both`，`sync undo` 撤销最近一次处理；`sync auto on|off` 控制自动同步。同步后先审查 `plan`，不会自动部署。
+
+从 Git 仓库安装技能用 `skills install <owner/repo|Git URL> [--skill 名称,...]`；`skills updates` 检查上游，`skills diff <名称>` 查看差异，`skills update <名称>` 更新（本地改过时会拒绝，只有用户明确同意才加 `--force`），`skills detach <名称>` 脱离上游。
+
+`plan` 中同名目录内容不同的冲突用 `conflicts choose <路径或名称> --use library|native|skip` 处理：library 覆盖原生目录（原件进快照，可回滚），native 把原生版本收进技能库，skip 本次跳过。覆盖或收库前先向用户说明影响。
