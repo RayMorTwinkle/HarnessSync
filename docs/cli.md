@@ -209,3 +209,17 @@ Git 包在安装、比较上游及更新时将文件权限统一为 `0644`（普
 `FileDiff` 为 `{path,status:"added"|"removed"|"modified",binary,beforeMode?,afterMode?,diff}`。文本返回 unified diff；二进制只返回变化提示，不返回原始数据。权限变化也列入文件摘要。GUI 应保留候选查询的 `commit` 用于第二步，并用检查结果的 `commit` 确认它仍对应当前技能版本。
 
 限制：不递归获取 Git submodule，不下载 Git LFS 对象（保留仓库中的指针文件）；固定提交需要远端允许 depth-one fetch 该 SHA。临时下载不复用工作树；批量更新可能重复下载同仓库，但检查更新会按 URL 去重。检查结果是上一次观测，不代表运行中的 Harness 已加载该配置。
+
+## Harness plugins
+
+- `hsync harness list [--json]`: list built-in and local plugins, enabled state, validation errors and plugin directory.
+- `hsync harness validate <file>`: validate JSON anywhere; errors include file and JSON paths; invalid files exit 1. Does not initialize a store or run version commands.
+- `hsync harness dir`: print the device-local plugin directory (`--root` is respected).
+- `hsync harness enable <id>` / `hsync harness disable <id>`: change device-local management state. Re-plan before applying.
+- Existing `--harness <ids>` accepts registered IDs separated by commas, or `all`. Unknown CLI IDs are errors. Stored unknown IDs remain readable and produce planning warnings.
+
+Paths wanted by enabled tools remain managed, including shared copies. Only
+unwanted receipts owned by disabled or missing tools are retained unchanged.
+Re-enabling resumes management. The original four-ID scope
+means all enabled tools, including future plugins. See [plugins.md](plugins.md)
+for contributor setup, path semantics, API contracts and security boundaries.

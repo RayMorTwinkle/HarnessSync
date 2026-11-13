@@ -66,11 +66,15 @@ function insideSkillRoots(store: Store, p: string) {
     return false;
   }
   const device = store.device();
-  const roots = adapters(store.home).flatMap((h) => [
+  const roots = adapters(
+    store.home,
+    store.root,
+    store.device().disabledHarnesses,
+  ).flatMap((h) => [
     h.skills,
     ...h.sharedSkills,
     ...Object.values(device.bindings).map(
-      (dir) => projectTargets(h.id, dir).skills,
+      (dir) => projectTargets(h.id, dir, store.home, store.root).skills,
     ),
   ]);
   return roots.some((root) => {

@@ -1,14 +1,15 @@
 import { z } from "zod";
 
+import { harnessIdSchema } from "./harness-manifest.ts";
 import { harnessIds } from "./harnesses.ts";
 export { harnessIds, harnessNames } from "./harnesses.ts";
-export type HarnessId = (typeof harnessIds)[number];
+export type HarnessId = string;
 export const scopeSchema = z
   .object({
     kind: z.enum(["global", "device", "project"]).default("global"),
     target: z.string().optional(),
     harnesses: z
-      .array(z.enum(harnessIds))
+      .array(harnessIdSchema)
       .min(1)
       .default([...harnessIds]),
   })
@@ -64,6 +65,7 @@ export type Manifest = {
   projects: Project[];
 };
 export type Device = {
+  disabledHarnesses?: string[];
   id: string;
   name: string;
   home: string;
@@ -74,6 +76,11 @@ export type Device = {
   ignoredNativePaths?: string[];
 };
 export type Harness = {
+  source: "builtin" | "user";
+  enabled: boolean;
+  monogram?: string;
+  homepage?: string;
+  notes: { "zh-CN"?: string; en?: string };
   id: HarnessId;
   name: string;
   version: string | null;

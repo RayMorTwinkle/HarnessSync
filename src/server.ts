@@ -110,7 +110,21 @@ export async function startServer(
         const resource = parts[1];
         const id = parts[2];
         let result: unknown;
-        if (req.method === "GET" && resource === "snapshot") {
+        if (req.method === "GET" && resource === "harnesses" && !id) {
+          result = store.harnesses();
+        } else if (req.method === "PUT" && resource === "harnesses" && id) {
+          const input = z
+            .strictObject({
+              enabled: z.boolean(),
+              revision: z.string().optional(),
+            })
+            .parse(body);
+          result = await store.setHarnessEnabled(
+            id,
+            input.enabled,
+            input.revision,
+          );
+        } else if (req.method === "GET" && resource === "snapshot") {
           const s = engine.snapshot();
           result = {
             ...s,

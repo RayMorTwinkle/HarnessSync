@@ -1,3 +1,8 @@
+import {
+  registry,
+  selectedHarnesses,
+  listManifests,
+} from "./harness-registry.ts";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -104,7 +109,15 @@ export class Engine {
     { key: string; value: Deployment }
   >();
   private matches(scope: Scope, harness: HarnessId, projectId?: string) {
-    if (!scope.harnesses.includes(harness)) return false;
+    if (
+      !selectedHarnesses(
+        scope.harnesses,
+        this.store.home,
+        this.store.root,
+        this.store.device().disabledHarnesses,
+      ).includes(harness)
+    )
+      return false;
     if (projectId)
       return scope.kind === "project" && scope.target === projectId;
     return (
@@ -166,6 +179,26 @@ export class Engine {
     const changes: Change[] = [];
     const errors: string[] = [];
     const warnings: string[] = [];
+    const disabled = device.disabledHarnesses || [];
+    const registered = registry(this.store.home, this.store.root);
+    const manifestWarnings = new Map<string, string[]>();
+    for (const error of registered.errors)
+      manifestWarnings.set(error.file, [
+        ...(manifestWarnings.get(error.file) || []),
+        ...error.issues.map((issue) => `${issue.path}：${issue.message}`),
+      ]);
+    for (const [file, issues] of manifestWarnings)
+      warnings.push(`${file}：${issues.join("；")}`);
+    const unknownIds = new Set(
+      [...manifest.rules, ...manifest.skills]
+        .flatMap((entry) => entry.scope.harnesses)
+        .filter((id) => !registered.entries.some((e) => e.manifest.id === id)),
+    );
+    for (const id of unknownIds)
+      warnings.push(`未知 Harness ${id}：已忽略，可能未安装或已移除插件`);
+    const allHarnesses = adapters(this.store.home, this.store.root);
+    const select = (ids: string[]) =>
+      selectedHarnesses(ids, this.store.home, this.store.root, disabled);
     const wanted = new Set<string>();
     const stagingFingerprints: string[][] = [];
     if (this.pending().length)
@@ -388,7 +421,16 @@ export class Engine {
       }
       changes.push(change);
     };
-    for (const harness of adapters(this.store.home)) {
+    for (const harness of adapters(
+      this.store.home,
+      this.store.root,
+      disabled,
+    ).filter((h) => h.enabled)) {
+      const peers = sharedInstructionPeers(
+        harness.id,
+        this.store.home,
+        this.store.root,
+      ).filter((id) => !disabled.includes(id));
       const rules = manifest.rules
         .filter((r) => r.enabled && this.matches(r.scope, harness.id))
         .sort(
@@ -425,7 +467,12 @@ export class Engine {
           errors.push(`项目 ${project.name} 的目录不存在：${dir}`);
           continue;
         }
-        const targets = projectTargets(harness.id, dir);
+        const targets = projectTargets(
+          harness.id,
+          dir,
+          this.store.home,
+          this.store.root,
+        );
         try {
           if (
             manifest.rules.some(
@@ -433,18 +480,14 @@ export class Engine {
                 r.enabled &&
                 r.scope.kind === "project" &&
                 r.scope.target === project.id &&
-                sharedInstructionPeers.includes(harness.id) &&
-                sharedInstructionPeers.some((h) =>
-                  r.scope.harnesses.includes(h),
-                ) &&
-                !sharedInstructionPeers.every((h) =>
-                  r.scope.harnesses.includes(h),
-                ),
+                peers.includes(harness.id) &&
+                peers.some((h) => select(r.scope.harnesses).includes(h)) &&
+                !peers.every((h) => select(r.scope.harnesses).includes(h)),
             )
           )
             throw new AppError(
               "SHARED_PROJECT_INSTRUCTIONS",
-              "DeepSeek、OpenCode、Codex 共用项目 AGENTS.md；面向其中任一工具的项目指令需同时选择三者。Claude Code 使用独立 CLAUDE.md",
+              `共用项目 ${path.basename(targets.instructions)} 的 Harness 需同时选择：${peers.join("、")}`,
             );
           const block = this.instructions(rules, project.id);
           if (block)
@@ -472,12 +515,15 @@ export class Engine {
         const sourceHash = bundleDiskHash(sourcePath);
         parseSkill(fs.readFileSync(path.join(sourcePath, "SKILL.md"), "utf8"));
         const placement = placeSkills(
-          skill.scope.harnesses,
-          skillReaders(this.store.home, projectDir),
+          select(skill.scope.harnesses),
+          skillReaders(this.store.home, projectDir, this.store.root, disabled),
+          listManifests(this.store.home, this.store.root)
+            .filter((m) => m.skills.sameNameCopies === "collapse")
+            .map((m) => m.id),
         );
         const exposure = [
           ...new Set(placement.flatMap((d) => d.readers)),
-        ].filter((h) => !skill.scope.harnesses.includes(h));
+        ].filter((h) => !select(skill.scope.harnesses).includes(h));
         if (exposure.length)
           warnings.push(
             `${skill.name}：共享技能目录也会被 ${exposure.join("、")} 读取，不能保证仅对所选 Harness 可见`,
@@ -489,7 +535,7 @@ export class Engine {
             sourceId: skill.id,
             projectId,
             harness: entry.readers.find((h) =>
-              skill.scope.harnesses.includes(h),
+              select(skill.scope.harnesses).includes(h),
             )!,
             sourceHash,
           });
@@ -497,12 +543,28 @@ export class Engine {
         errors.push(`${skill.name}: ${e.message}`);
       }
     }
-    for (const receipt of state.receipts)
+    const retained = new Map<string, number>();
+    for (const receipt of state.receipts) {
       if (
-        (!options.onlySkillId || receipt.sourceId === options.onlySkillId) &&
-        !wanted.has(receipt.path)
+        (options.onlySkillId && receipt.sourceId !== options.onlySkillId) ||
+        wanted.has(receipt.path)
       )
-        add({ ...receipt, removing: true });
+        continue;
+      if (
+        disabled.includes(receipt.harness) ||
+        !allHarnesses.some((h) => h.id === receipt.harness)
+      ) {
+        retained.set(receipt.harness, (retained.get(receipt.harness) || 0) + 1);
+      } else add({ ...receipt, removing: true });
+    }
+    for (const [id, count] of retained) {
+      const harness = allHarnesses.find((h) => h.id === id);
+      warnings.push(
+        harness
+          ? `${harness.name} 已停用：${count} 个已管理路径保持原样，重新启用后恢复管理`
+          : `${id} 未安装：${count} 个已管理路径保持原样，重新安装后恢复管理`,
+      );
+    }
     if (!options.onlySkillId)
       for (const replacement of state.instructionReplacements || [])
         if (!wanted.has(replacement.path))
@@ -770,9 +832,14 @@ export class Engine {
       });
   }
   private staging() {
-    const dirs = new Set(skillReaders(this.store.home).map((r) => r.dir));
+    const dirs = new Set(
+      skillReaders(this.store.home, undefined, this.store.root).map(
+        (r) => r.dir,
+      ),
+    );
     for (const dir of Object.values(this.store.device().bindings))
-      for (const r of skillReaders(this.store.home, dir)) dirs.add(r.dir);
+      for (const r of skillReaders(this.store.home, dir, this.store.root))
+        dirs.add(r.dir);
     for (const r of this.store.state().receipts)
       if (r.kind === "skill") dirs.add(path.dirname(r.path));
     return [...dirs].flatMap((dir) => stagingLeftovers(dir));
@@ -1111,13 +1178,19 @@ export class Engine {
   }
   snapshot(): Snapshot {
     const versions =
-      this.store.home === process.env.HOME ? harnessVersions() : {};
+      this.store.home === process.env.HOME
+        ? harnessVersions(this.store.home, this.store.root)
+        : {};
     return {
       root: this.store.root,
       revision: this.store.revision(),
       manifest: this.store.manifest(),
       device: this.store.device(),
-      harnesses: adapters(this.store.home).map((h) => ({
+      harnesses: adapters(
+        this.store.home,
+        this.store.root,
+        this.store.device().disabledHarnesses,
+      ).map((h) => ({
         ...h,
         version: versions[h.id] || null,
         installed: h.installed || Boolean(versions[h.id]),

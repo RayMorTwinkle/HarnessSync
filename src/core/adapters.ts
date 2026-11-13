@@ -1,268 +1,180 @@
-import fs from "node:fs";
-import path from "node:path";
 import os from "node:os";
+import path from "node:path";
 import { execFileSync } from "node:child_process";
+import type { HarnessId } from "../shared/types.ts";
 import {
-  harnessIds,
-  harnessNames,
-  type Harness,
-  type HarnessId,
-} from "../shared/types.ts";
+  listManifests,
+  manifestRoot,
+  resolveTemplate,
+  resolvedHarnesses,
+} from "./harness-registry.ts";
 
-const skillReading: Record<HarnessId | "codexLegacy", HarnessId[]> = {
-  deepseek: ["deepseek"],
-  opencode: ["opencode"],
-  codex: ["codex", "deepseek", "opencode"],
-  claude: ["claude", "opencode"],
-  codexLegacy: ["codex"],
-};
-export function adapters(home = os.homedir()): Harness[] {
-  const local = home === os.homedir();
-  const conf = local
-    ? process.env.XDG_CONFIG_HOME || path.join(home, ".config")
-    : path.join(home, ".config");
-  const ds = local
-    ? process.env.DSH_HOME || path.join(home, ".dsh")
-    : path.join(home, ".dsh");
-  const agents = local
-    ? process.env.DSH_AGENTS_HOME || path.join(home, ".agents")
-    : path.join(home, ".agents");
-  const codex = local
-    ? process.env.CODEX_HOME || path.join(home, ".codex")
-    : path.join(home, ".codex");
-  const claude = local
-    ? process.env.CLAUDE_CONFIG_DIR || path.join(home, ".claude")
-    : path.join(home, ".claude");
-  const override = path.join(codex, "AGENTS.override.md");
-  const hasOverride =
-    fs.existsSync(override) &&
-    fs.statSync(override).isFile() &&
-    fs.statSync(override).size > 0;
-  const roots = {
-    deepseek: ds,
-    opencode: path.join(conf, "opencode"),
-    codex,
-    claude,
-  };
-  const instructions = {
-    deepseek: path.join(ds, "AGENTS.md"),
-    opencode: path.join(conf, "opencode/AGENTS.md"),
-    codex: hasOverride ? override : path.join(codex, "AGENTS.md"),
-    claude: path.join(claude, "CLAUDE.md"),
-  };
-  const sources: Record<HarnessId, Harness["instructionSources"]> = {
-    deepseek: [
-      { path: instructions.deepseek, kind: "main", active: true },
-      { path: path.join(agents, "AGENTS.md"), kind: "shared", active: true },
-    ],
-    opencode: [{ path: instructions.opencode, kind: "main", active: true }],
-    codex: [
-      {
-        path: path.join(codex, "AGENTS.md"),
-        kind: "main",
-        active: !hasOverride,
-      },
-      { path: override, kind: "override", active: hasOverride },
-    ],
-    claude: [{ path: instructions.claude, kind: "main", active: true }],
-  };
-  const rules = path.join(claude, "rules");
-  if (fs.existsSync(rules)) {
-    const walk = (dir: string, depth = 0) => {
-      if (depth > 6) return;
-      try {
-        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-          const p = path.join(dir, e.name);
-          if (e.isDirectory()) walk(p, depth + 1);
-          else if (e.isFile() && e.name.endsWith(".md"))
-            sources.claude.push({ path: p, kind: "rules", active: true });
+export const adapters = resolvedHarnesses;
+const versions = new Map<string, string | null>();
+export function harnessVersions(home = os.homedir(), root?: string) {
+  return Object.fromEntries(
+    listManifests(home, root).map((m) => {
+      const key = JSON.stringify(m.version);
+      if (!versions.has(key)) {
+        try {
+          versions.set(
+            key,
+            m.version
+              ? execFileSync(m.version.command, m.version.args, {
+                  encoding: "utf8",
+                  timeout: 4000,
+                  stdio: ["ignore", "pipe", "ignore"],
+                }).trim()
+              : null,
+          );
+        } catch {
+          versions.set(key, null);
         }
-      } catch {
-        /* scanner separately reports inaccessible known roots */
       }
-    };
-    walk(rules);
-  }
-  const skillDirs = {
-    deepseek: path.join(ds, "skills"),
-    opencode: path.join(roots.opencode, "skills"),
-    codex: path.join(home, ".agents/skills"),
-    claude: path.join(claude, "skills"),
-    codexLegacy: path.join(codex, "skills"),
-  };
-  return harnessIds.map((id) => ({
-    id,
-    name: harnessNames[id],
-    home: roots[id],
-    instructions: instructions[id],
-    skills:
-      id === "codex"
-        ? path.join(home, ".agents/skills")
-        : path.join(roots[id], "skills"),
-    sharedSkills: [
-      ...new Set([
-        ...Object.entries(skillDirs)
-          .filter(
-            ([key, dir]) =>
-              dir !== skillDirs[id] &&
-              (id !== "deepseek" ||
-                key !== "codex" ||
-                agents === path.join(home, ".agents")) &&
-              (id !== "opencode" ||
-                key !== "claude" ||
-                claude === path.join(home, ".claude")) &&
-              skillReading[key as keyof typeof skillReading].includes(id),
-          )
-          .map(([, dir]) => dir),
-        ...(id === "deepseek" ? [path.join(agents, "skills")] : []),
-        ...(id === "opencode" ? [path.join(home, ".claude/skills")] : []),
-      ]),
-    ],
-    instructionSources: sources[id],
-    version: null,
-    installed: fs.existsSync(roots[id]),
-    note: {
-      deepseek: "Skills 由目录监听刷新；指令在文件操作或恢复会话时刷新。",
-      opencode: "适配 OpenCode V2；原生指令在后续请求前刷新。",
-      codex:
-        "使用共享 .agents/skills；兼容旧 .codex/skills 扫描。全局 override 存在时优先。",
-      claude: "使用原生 CLAUDE.md 和 .claude/skills，兼容本机较早版本。",
-    }[id],
-  }));
+      return [m.id, versions.get(key) ?? null];
+    }),
+  );
 }
-let versions: Record<string, string | null> | null = null;
-export function harnessVersions() {
-  if (versions) return versions;
-  versions = {};
-  for (const [id, exe] of [
-    ["deepseek", "dsh"],
-    ["opencode", "opencode"],
-    ["codex", "codex"],
-    ["claude", "claude"],
-  ]) {
-    try {
-      versions[id] = execFileSync(exe, ["--version"], {
-        encoding: "utf8",
-        timeout: 4000,
-        stdio: ["ignore", "pipe", "ignore"],
-      }).trim();
-    } catch {
-      versions[id] = null;
-    }
-  }
-  return versions;
-}
-export function projectTargets(harness: HarnessId, dir: string) {
-  const folders = {
-    deepseek: ".dsh/skills",
-    opencode: ".opencode/skills",
-    codex: ".agents/skills",
-    claude: ".claude/skills",
-  };
+export function projectTargets(
+  harness: HarnessId,
+  dir: string,
+  home = os.homedir(),
+  root?: string,
+) {
+  const m = listManifests(home, root).find((m) => m.id === harness);
+  if (!m) throw new Error(`未知 Harness：${harness}`);
   return {
-    instructions: path.join(
-      dir,
-      harness === "claude" ? "CLAUDE.md" : "AGENTS.md",
-    ),
-    skills: path.join(dir, folders[harness]),
+    instructions: path.join(dir, m.instructions.project),
+    skills: path.join(dir, m.skills.project),
   };
 }
-export const sharedInstructionPeers: HarnessId[] = [
-  "deepseek",
-  "opencode",
-  "codex",
-];
-
+export function sharedInstructionPeers(
+  harness: HarnessId,
+  home = os.homedir(),
+  root?: string,
+) {
+  const manifests = listManifests(home, root);
+  const file = manifests.find((m) => m.id === harness)?.instructions.project;
+  return manifests
+    .filter((m) => m.instructions.project === file)
+    .map((m) => m.id);
+}
 export type SkillReader = {
   dir: string;
   readers: HarnessId[];
   legacy?: boolean;
 };
-// Default discovery roots; plugins/custom roots are outside placement guarantees.
-export function skillReaders(home: string, projectDir?: string): SkillReader[] {
-  const hs = adapters(home);
-  const root = (id: HarnessId) =>
-    projectDir
-      ? projectTargets(id, projectDir).skills
-      : hs.find((h) => h.id === id)!.skills;
-  const shared = projectDir
-    ? root("codex")
-    : hs.find((h) => h.id === "deepseek")!.sharedSkills.at(-1)!;
-  const entries: SkillReader[] = [
-    { dir: root("deepseek"), readers: skillReading.deepseek },
-    { dir: root("opencode"), readers: skillReading.opencode },
-    {
-      dir: root("codex"),
-      readers: skillReading.codex.filter((h) => h !== "deepseek"),
-    },
-    { dir: shared, readers: ["deepseek"] },
-    {
-      dir: root("claude"),
-      readers:
-        !projectDir && root("claude") !== path.join(home, ".claude/skills")
-          ? ["claude"]
-          : skillReading.claude,
-    },
-    {
-      dir: projectDir ? root("claude") : path.join(home, ".claude/skills"),
-      readers: ["opencode"],
-    },
-  ];
-  entries.push({
-    dir: projectDir
-      ? path.join(projectDir, ".codex/skills")
-      : hs.find((h) => h.id === "codex")!.sharedSkills[0],
-    readers: skillReading.codexLegacy,
-    legacy: true,
-  });
+export function skillReaders(
+  home: string,
+  projectDir?: string,
+  root?: string,
+  disabled: string[] = [],
+): SkillReader[] {
   const merged = new Map<string, SkillReader>();
-  for (const e of entries) {
-    const old = merged.get(e.dir);
-    merged.set(e.dir, {
-      ...e,
-      legacy: old ? Boolean(old.legacy && e.legacy) : e.legacy,
-      readers: [...new Set([...(old?.readers || []), ...e.readers])],
-    });
+  for (const m of listManifests(home, root).filter(
+    (m) => !disabled.includes(m.id),
+  )) {
+    for (const r of projectDir
+      ? m.skills.reads.project
+      : m.skills.reads.global) {
+      const dir = resolveTemplate(
+        typeof r === "string" ? r : r.path,
+        home,
+        manifestRoot(m, home),
+        projectDir,
+      );
+      const legacy = typeof r !== "string" && Boolean(r.legacy);
+      const old = merged.get(dir);
+      merged.set(dir, {
+        dir,
+        readers: [...new Set([...(old?.readers || []), m.id])],
+        legacy: old ? Boolean(old.legacy && legacy) : legacy,
+      });
+    }
+  }
+  const manifests = listManifests(home, root);
+  for (const entry of merged.values()) {
+    const owners = manifests
+      .filter(
+        (m) =>
+          resolveTemplate(
+            projectDir ? m.skills.project : m.skills.global,
+            home,
+            manifestRoot(m, home),
+            projectDir,
+          ) === entry.dir,
+      )
+      .map((m) => m.id);
+    entry.readers.sort(
+      (a, b) =>
+        Number(owners.includes(b)) - Number(owners.includes(a)) ||
+        manifests.findIndex((m) => m.id === b) -
+          manifests.findIndex((m) => m.id === a),
+    );
   }
   return [...merged.values()];
 }
-// DeepSeek keeps the highest-rank copy of a name and OpenCode keys skills by
-// directory name, so same-named copies collapse there (docs/adapters.md, v0.3).
-// Codex lists every copy; Claude is unverified and treated as listing them.
-const collapsesCopies: HarnessId[] = ["deepseek", "opencode"];
+// Monotone scores and suffix coverage prune the exact search. BigInt preserves
+// the original lowest-subset-index tie break without a 32-bit directory limit.
 export function placeSkills(
   selected: HarnessId[],
   readers: SkillReader[],
+  collapse = listManifests()
+    .filter((m) => m.skills.sameNameCopies === "collapse")
+    .map((m) => m.id),
 ): SkillReader[] {
   if (!selected.length) return [];
-  let best: SkillReader[] | undefined;
-  let bestScore: number[] = [];
-  for (let mask = 1; mask < 2 ** readers.length; mask++) {
-    const dirs = readers.filter((_, i) => mask & (2 ** i));
-    const counts = harnessIds.map(
-      (h) => dirs.filter((d) => d.readers.includes(h)).length,
-    );
-    if (selected.some((h) => !counts[harnessIds.indexOf(h)])) continue;
+  const ids = [...new Set(readers.flatMap((r) => r.readers))];
+  const counts = new Map(ids.map((id) => [id, 0]));
+  const suffix: Set<string>[] = [new Set()];
+  for (const r of readers)
+    suffix.push(new Set([...suffix.at(-1)!, ...r.readers]));
+  let best: number[] | undefined,
+    bestMask = 0n;
+  const chosen: number[] = [];
+  const compare = (a: number[], b: number[]) => {
+    const i = a.findIndex((v, i) => v !== b[i]);
+    return i < 0 ? 0 : a[i] - b[i];
+  };
+  const visit = (i: number, mask: bigint, legacy: number) => {
+    const missing = selected.filter((id) => !counts.get(id));
+    if (missing.some((id) => !suffix[i + 1].has(id))) return;
     const score = [
-      counts.reduce(
-        (sum, n, i) =>
-          sum +
-          (collapsesCopies.includes(harnessIds[i]) ? 0 : Math.max(0, n - 1)),
+      ids.reduce(
+        (n, id) =>
+          n + (collapse.includes(id) ? 0 : Math.max(0, counts.get(id)! - 1)),
         0,
       ),
-      counts.reduce(
-        (sum, n, i) => sum + (!selected.includes(harnessIds[i]) && n ? 1 : 0),
-        0,
-      ),
-      dirs.filter((d) => d.legacy).length,
-      dirs.length,
+      ids.filter((id) => !selected.includes(id) && counts.get(id)).length,
+      legacy,
+      chosen.length,
     ];
-    const different = score.findIndex((n, i) => n !== bestScore[i]);
-    if (!best || (different >= 0 && score[different] < bestScore[different])) {
-      best = dirs;
-      bestScore = score;
+    const lower = [...score];
+    lower[3] += missing.length ? 1 : 0;
+    if (best && compare(lower, best) > 0) return;
+    if (!missing.length) {
+      if (
+        !best ||
+        compare(score, best) < 0 ||
+        (compare(score, best) === 0 && mask < bestMask)
+      ) {
+        best = score;
+        bestMask = mask;
+      }
+      return;
     }
-  }
+    if (i < 0) return;
+    visit(i - 1, mask, legacy);
+    const r = readers[i];
+    if (!r.readers.some((id) => selected.includes(id) && !counts.get(id)))
+      return;
+    for (const id of r.readers) counts.set(id, counts.get(id)! + 1);
+    chosen.push(i);
+    visit(i - 1, mask | (1n << BigInt(i)), legacy + Number(Boolean(r.legacy)));
+    chosen.pop();
+    for (const id of r.readers) counts.set(id, counts.get(id)! - 1);
+  };
+  visit(readers.length - 1, 0n, 0);
   if (!best) throw new Error("技能读取目录无法覆盖所选 Harness");
-  return best;
+  return readers.filter((_, i) => bestMask & (1n << BigInt(i)));
 }

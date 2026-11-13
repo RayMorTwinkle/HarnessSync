@@ -1,0 +1,38 @@
+{
+  "$schema": "../schema/harness.schema.json",
+  "id": "claude",
+  "name": "Claude Code",
+  "root": {
+    "default": "~/.claude",
+    "env": "CLAUDE_CONFIG_DIR"
+  },
+  "detect": ["{root}"],
+  "version": {
+    "command": "claude",
+    "args": ["--version"]
+  },
+  "instructions": {
+    "global": [
+      {
+        "path": "{root}/CLAUDE.md",
+        "kind": "main"
+      }
+    ],
+    "fragments": ["{root}/rules/**/*.md"],
+    "project": "CLAUDE.md"
+  },
+  "skills": {
+    "global": "{root}/skills",
+    "project": ".claude/skills",
+    "reads": {
+      "global": ["{root}/skills"],
+      "project": [".claude/skills"]
+    },
+    "sameNameCopies": "list"
+  },
+  "notes": {
+    "zh-CN": "使用原生 CLAUDE.md 和 .claude/skills，兼容本机较早版本。",
+    "en": "Uses native CLAUDE.md and .claude/skills, compatible with earlier locally tested versions."
+  },
+  "homepage": "https://code.claude.com/docs/en/skills"
+}
