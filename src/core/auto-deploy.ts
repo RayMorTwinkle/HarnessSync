@@ -12,7 +12,7 @@ export type AutoDeployResult = {
   outcome: "applied" | "nothing" | "needs-review" | "failed" | "disabled";
   changes: { create: number; update: number; remove: number };
   deploymentId?: string;
-  blockers?: { path: string; status: string; reason: string }[];
+  blockers?: { path: string; status: string; reason: string; code?: string }[];
   error?: string;
 };
 export function lastAutoDeploy(store: Store): AutoDeployResult | null {
@@ -37,8 +37,16 @@ export function autoDeployBlockers(engine: Engine, plan: Plan) {
       status: "sync-conflict",
       reason: "跨设备同步冲突尚未解决",
     });
-  for (const reason of [...plan.errors, ...(plan.warnings || [])])
+  for (const reason of plan.errors)
     blockers.push({ path: "", status: "blocked", reason });
+  for (const notice of plan.notices)
+    if (notice.blocking)
+      blockers.push({
+        path: notice.path || "",
+        status: "blocked",
+        reason: notice.message,
+        code: notice.code,
+      });
   for (const r of state.instructionReplacements || [])
     blockers.push({
       path: r.path,

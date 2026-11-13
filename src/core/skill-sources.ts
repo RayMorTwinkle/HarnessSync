@@ -83,8 +83,16 @@ function insideSkillRoots(store: Store, p: string) {
   });
 }
 
+export type SkillSourceStatus = {
+  id: string;
+  name: string;
+  source: string;
+  changed: boolean;
+  status: "changed" | "unchanged" | "unreadable";
+  note: string;
+};
 export function sourceStatus(store: Store) {
-  return store.manifest().skills.flatMap((skill) => {
+  return store.manifest().skills.flatMap<SkillSourceStatus>((skill) => {
     const source = skillSource(store, skill.id);
     if (
       !source ||
@@ -102,6 +110,7 @@ export function sourceStatus(store: Store) {
           name: skill.name,
           source,
           changed,
+          status: changed ? "changed" : "unchanged",
           note: changed ? "源目录有更新" : "源目录与库一致",
         },
       ];
@@ -112,6 +121,7 @@ export function sourceStatus(store: Store) {
           name: skill.name,
           source,
           changed: false,
+          status: "unreadable",
           note: `源目录无法读取：${e.message}`,
         },
       ];

@@ -155,12 +155,27 @@ export type Change = {
   }[];
   files?: Record<string, { content: string; mode: number }>;
 };
+export type PlanNotice = {
+  code:
+    | "plugin-manifest-error"
+    | "unknown-harness"
+    | "retained-harness-paths"
+    | "shared-skill-exposure"
+    | "staging-leftover"
+    | "ignored-native-path"
+    | "skill-source-changed"
+    | "skill-source-unreadable";
+  message: string;
+  blocking: boolean;
+  path?: string;
+};
 export type Plan = {
   id: string;
   revision: string;
   changes: Change[];
   errors: string[];
   warnings?: string[];
+  notices: PlanNotice[];
   createdAt: string;
 };
 export type Snapshot = {
