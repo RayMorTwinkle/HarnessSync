@@ -4,14 +4,14 @@
 
 当前适配 **DeepSeek Harness、OpenCode V2、Codex 和 Claude Code**，提供本机 Web GUI 和 CLI，共用同一套核心。
 
-当前发布版本 **v0.2.2**。开发分支已加入跨设备 Git 同步：源配置逐条存储，设备数据保留本机。
+当前发布版本 **v0.3.0**：支持通过私有 GitHub 仓库跨设备同步，源配置逐条存储，设备数据保留本机。
 
 ## 安装
 
 需要 **Node.js 22.12+、npm、Git**。安装器面向 macOS 与 Linux；Windows 请在 WSL 内使用。目前真实 Harness 会话验收环境为 macOS；跨平台测试不能替代各 Harness 的实际会话验收。
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.2.2/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.3.0/install.sh | bash
 ```
 
 默认安装到 `~/.local/share/harness-sync`，命令启动器为 `~/.local/bin/hsync`。不需要 sudo，不修改 shell 配置，不自动改写已有 Harness 配置。若启动器目录不在 PATH 中，按安装器提示添加，或直接使用完整路径：
@@ -29,9 +29,9 @@ curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.2.2/in
 希望先查看脚本或指定目录时：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.2.2/install.sh -o install-harness-sync.sh
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.3.0/install.sh -o install-harness-sync.sh
 bash install-harness-sync.sh --help
-bash install-harness-sync.sh --ref v0.2.2 \
+bash install-harness-sync.sh --ref v0.3.0 \
   --install-dir "$HOME/.local/share/harness-sync" \
   --bin-dir "$HOME/.local/bin"
 ```
@@ -48,7 +48,7 @@ bash install-harness-sync.sh --ref v0.2.2 \
 可以把下面这段话交给有终端和网络权限的 AI；此方式让 AI 读取安装 Skill，不要求预先安装 HarnessSync：
 
 ```text
-请读取 https://github.com/RayMorTwinkle/HarnessSync/blob/v0.2.2/skills/harness-sync-install/SKILL.md，按其中说明在本机安装 HarnessSync，并完成扫描和管理技能部署。保留原有配置，把生成的初始化提示词交给我。
+请读取 https://github.com/RayMorTwinkle/HarnessSync/blob/v0.3.0/skills/harness-sync-install/SKILL.md，按其中说明在本机安装 HarnessSync，并完成扫描和管理技能部署。保留原有配置，把生成的初始化提示词交给我。
 ```
 
 也可把 `skills/harness-sync-install/` 完整目录放入所用 Harness 支持的用户技能目录。它不依赖仓库外的个人技能或本机固定路径。
