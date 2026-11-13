@@ -50,6 +50,12 @@
 
 CLI 暂无独立的 `skills add` 命令；新建包含 `SKILL.md` 的目录后使用 `skills import`，也可在 GUI 新建。
 
+## 同名技能冲突
+
+`conflicts list` 列出冲突和逐文件差异；`conflicts choose <路径或技能名> --use library|native|skip` 分别选择库版本覆盖、原生收库或跳过；`conflicts clear [完整路径]` 清除单个或全部本机选择。选择之后重新 plan/apply。原生变化使选择失效；多路径同名需给完整路径。doctor 的 skipped 列为待处理。
+
+`native` 会立即产生源库提交，之后仍需预览部署；`library` 的计划状态为 replace，`skip` 为 skipped。完整 API、返回结构、恢复和大小限制见 [同名冲突说明](conflicts.md)。
+
 ## 指令、项目和设备
 
 | 命令                                                 | 功能                                 |
@@ -85,14 +91,14 @@ DeepSeek、OpenCode、Codex 共用项目 `AGENTS.md`，其项目指令必须同�
 
 所有命令支持 `--json`，仅修改源库，不自动部署。请使用用户拥有的私有、专用 Git 仓库；非 GitHub URL 的私有性由用户管理。
 
-| 命令 | 功能 |
-| --- | --- |
+| 命令                                           | 功能                                                                                          |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `sync setup --url <git-url> [--branch <分支>]` | 连接远端；新机器恢复、空远端推送、双方已有数据则合并；默认使用远端 HEAD 分支，空远端使用 main |
-| `sync setup --create [name]` | 通过已登录的 gh 创建私有 GitHub 仓库，默认 harness-sync-config |
-| `sync status` | fetch 后显示 ahead/behind、远端、同步时间及待处理冲突 |
-| `sync now` | 保存本地更改、fetch、按对象三方合并并 push |
-| `sync resolve <entry-id> --keep local|remote|both` | 保留本地、采用远端或生成远端副本；之后运行 sync now 推送 |
-| `sync disconnect` | 删除本机同步设置，保留源库与 Git 历史 |
+| `sync setup --create [name]`                   | 通过已登录的 gh 创建私有 GitHub 仓库，默认 harness-sync-config                                |
+| `sync status`                                  | fetch 后显示 ahead/behind、远端、同步时间及待处理冲突                                         |
+| `sync now`                                     | 保存本地更改、fetch、按对象三方合并并 push                                                    |
+| `sync resolve <entry-id> --keep local          | remote                                                                                        | both` | 保留本地、采用远端或生成远端副本；之后运行 sync now 推送 |
+| `sync disconnect`                              | 删除本机同步设置，保留源库与 Git 历史                                                         |
 
 认证使用 Git 凭证助手或 SSH；不会保存令牌。GitHub 可运行 `gh auth login`、`gh auth setup-git`。网络调用禁用交互提示，60 秒超时；失败后修复网络或认证再运行 `sync now`。推送被其他设备抢先更新时重新运行即可。setup 连接失败后设置会保留，重试 now 或 disconnect 后更换地址。
 

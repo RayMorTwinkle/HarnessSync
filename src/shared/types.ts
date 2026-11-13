@@ -77,6 +77,7 @@ export type Harness = {
   note: string;
 };
 export type Receipt = {
+  adoptedSourceHash?: string;
   adoptedLink?: string;
   kind: "instructions" | "skill";
   harness: HarnessId;
@@ -87,6 +88,15 @@ export type Receipt = {
 };
 export type DeployState = {
   receipts: Receipt[];
+  conflictChoices?: Record<
+    string,
+    {
+      use: "library" | "native" | "skip";
+      fingerprint: string;
+      sourceId: string;
+      sourceHash?: string;
+    }
+  >;
   instructionReplacements?: { path: string; hash: string }[];
 };
 export type Change = {
@@ -95,13 +105,34 @@ export type Change = {
   harness: HarnessId;
   sourceId?: string;
   projectId?: string;
-  status: "adopt" | "create" | "update" | "remove" | "unchanged" | "conflict";
+  status:
+    | "replace"
+    | "skipped"
+    | "adopt"
+    | "create"
+    | "update"
+    | "remove"
+    | "unchanged"
+    | "conflict";
   reason: string;
   beforeHash: string;
   afterHash: string;
   before: string;
   after: string;
   diff: string;
+  conflictFingerprint?: string;
+  conflictOptions?: string[];
+  fileChanges?: {
+    path: string;
+    status: "added" | "removed" | "modified";
+    binary: boolean;
+    beforeLink?: string;
+    beforeSize: number;
+    afterSize: number;
+    beforeHash: string;
+    afterHash: string;
+    diff?: string;
+  }[];
   files?: Record<string, { content: string; mode: number }>;
 };
 export type Plan = {

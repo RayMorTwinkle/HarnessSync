@@ -139,9 +139,9 @@ export class Sync {
     }
     const read = (file: string) => this.git(["show", `${commit}:${file}`]);
     const manifest = readManifest(files, read);
-    const bundles: Record<string, Bundle> = {};
+    const bundles: Record<string, Bundle> = Object.create(null);
     for (const skill of manifest.skills) {
-      const bundle: Bundle = {};
+      const bundle: Bundle = Object.create(null);
       for (const row of tree) {
         const separator = row.indexOf("\t");
         const info = row.slice(0, separator),
