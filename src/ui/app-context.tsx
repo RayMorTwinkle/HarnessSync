@@ -10,6 +10,7 @@ export type Modal = { type: string; item?: any } | null;
 export type AppContextValue = {
   data: Snapshot;
   busy: boolean;
+  autoDeploy: boolean;
   api: typeof api;
   act: (fn: () => Promise<unknown>, message?: string) => Promise<unknown>;
   fire: (fn: () => Promise<unknown>, message?: string) => void;

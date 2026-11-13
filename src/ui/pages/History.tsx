@@ -35,7 +35,7 @@ export function HistoryPage() {
                     type: "confirm",
                     item: {
                       title: "恢复这份源配置？",
-                      text: "将产生一条新的版本记录。Harness 的文件不会立即改变，请检查后重新部署。",
+                      text: "将产生一条新的版本记录，各 AI 工具里的文件随后按新配置更新。",
                       action: () =>
                         api("restore", {
                           hash: h.hash,

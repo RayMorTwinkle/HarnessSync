@@ -11,7 +11,7 @@ export function Instructions() {
       <div className="info-strip">
         <FileText size={17} />
         <span>
-          指令以片段组合，部署到各 Harness
+          指令以片段组合，写入各 AI 工具
           的原生全局文件。已有文件的其他内容会被保留。
         </span>
         <button

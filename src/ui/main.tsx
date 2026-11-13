@@ -187,7 +187,7 @@ function App() {
           revision: data.revision,
         });
       },
-      skill.enabled ? "已停用，部署后从 Harness 撤下" : "已启用，等待部署",
+      skill.enabled ? "已停用，部署后从各 AI 工具撤下" : "已启用，等待部署",
     );
   const openPlan = () =>
     fire(async () => {
@@ -199,7 +199,7 @@ function App() {
       type: "confirm",
       item: {
         title: `移除「${item.name || item.title}」？`,
-        text: "这会修改源配置。已部署内容会在下一次部署时撤下，可通过版本历史恢复。",
+        text: "这会修改源配置，已写入各 AI 工具的副本也会随之撤下。可在版本历史中恢复。",
         action: async () =>
           api(`${type}/${item.id}`, { revision: data.revision }, "DELETE"),
       },
@@ -207,6 +207,7 @@ function App() {
   const context: AppContextValue = {
     data,
     busy,
+    autoDeploy,
     api,
     act,
     fire,
@@ -336,8 +337,8 @@ function App() {
                   {
                     {
                       overview:
-                        "把技能、指令和项目习惯，带到你使用的每一个 Harness。",
-                      skills: "一份技能源，按你的选择部署到不同 Harness。",
+                        "把技能、指令和项目习惯，带到你使用的每一个 AI 工具。",
+                      skills: "一份技能源，按你的选择写入不同的 AI 工具。",
                       instructions:
                         "组合共享规则与设备差异，让每次会话有一致的起点。",
                       projects:
@@ -444,7 +445,7 @@ function App() {
 // wrong next step when the server writes clean changes by itself.
 function deployedHint(message: string) {
   return message
-    .replace(/已停用，部署后从 Harness 撤下$/, "已停用，正在从各工具撤下")
+    .replace(/已停用，部署后从各 AI 工具撤下$/, "已停用，正在从各工具撤下")
     .replace(/[，,]\s*(请?预览后?部署|等待部署)$/, "，正在写入各工具");
 }
 

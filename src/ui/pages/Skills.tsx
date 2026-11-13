@@ -130,8 +130,8 @@ export function Skills() {
                   ))}
                   <span>
                     {s.scope.harnesses.length >= data.harnesses.length
-                      ? "全部 Harness"
-                      : `${s.scope.harnesses.length} 个 Harness`}
+                      ? "全部 AI 工具"
+                      : `${s.scope.harnesses.length} 个 AI 工具`}
                   </span>
                 </span>
                 <button

@@ -155,7 +155,7 @@ export function OnboardingPanel({
               <div className="onboarding-block-heading">
                 <span className="step-label">02</span>
                 <div>
-                  <h2>把管理入口装进 Harness</h2>
+                  <h2>把管理入口装进 AI 工具</h2>
                   <p>只部署中文管理技能，不会顺带发布其他待部署配置。</p>
                 </div>
               </div>
@@ -175,7 +175,7 @@ export function OnboardingPanel({
                 <div className="bootstrap-pending">
                   <Terminal size={23} />
                   <p>
-                    安装后，在任意一个已支持的 Harness
+                    安装后，在任意一个已支持的 AI 工具
                     中粘贴初始化提示词，即可让它通过同一 CLI 整理配置。
                   </p>
                 </div>
@@ -192,7 +192,7 @@ export function OnboardingPanel({
                 )}
                 {record.bootstrap
                   ? "更新中文管理技能"
-                  : "安装到已检测的 Harness"}
+                  : "安装到已检测的 AI 工具"}
                 <ArrowRight size={14} />
               </button>
             </section>

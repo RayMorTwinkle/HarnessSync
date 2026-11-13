@@ -136,7 +136,7 @@ export function ScopeFields({
         )}
       </div>
       <fieldset className="harness-options">
-        <legend>部署到 Harness</legend>
+        <legend>用于哪些 AI 工具</legend>
         {data.harnesses.map(({ id: h, name }) => (
           <label key={h}>
             <input

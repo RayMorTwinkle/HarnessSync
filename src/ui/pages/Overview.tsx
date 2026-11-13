@@ -64,7 +64,7 @@ export function Overview() {
             go: "instructions",
           },
           {
-            label: "已连接 Harness",
+            label: "已连接 AI 工具",
             value: data.harnesses.filter((h) => h.installed).length,
             unit: `/ ${data.harnesses.length}`,
             icon: Layers3,
@@ -103,7 +103,7 @@ export function Overview() {
       <section className="section harness-section">
         <div className="section-heading">
           <h2>
-            你的 Harness{" "}
+            你的 AI 工具{" "}
             <span className="count-badge">{data.harnesses.length}</span>
           </h2>
           <span className="muted tiny">
@@ -242,7 +242,7 @@ export function Overview() {
                   {hasError
                     ? `${hasError} 个冲突或配置错误`
                     : pending.length
-                      ? `${pending.length} 项变更等待部署到 Harness`
+                      ? `${pending.length} 项变更等待写入 AI 工具`
                       : "源配置与已管理文件保持一致"}
                 </p>
               </div>

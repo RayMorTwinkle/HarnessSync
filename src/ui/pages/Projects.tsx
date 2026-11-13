@@ -82,7 +82,7 @@ export function Projects() {
         </div>
       )}
       <p className="footnote">
-        项目技能使用各 Harness 原生目录。DeepSeek、OpenCode、Codex 共用
+        项目技能使用各 AI 工具的原生目录。DeepSeek、OpenCode、Codex 共用
         AGENTS.md，Claude 使用 CLAUDE.md；多个项目不切换全局配置。
       </p>
     </>
