@@ -15,6 +15,7 @@ import { ConflictChoice, type ConflictUse } from "./ConflictChoice.tsx";
 export function PlanDrawer({
   plan,
   home,
+  paused,
   busy,
   close,
   apply,
@@ -22,6 +23,8 @@ export function PlanDrawer({
 }: {
   plan: Plan;
   home: string;
+  // Paths automatic deployment refused to write, with the reason shown to the user.
+  paused?: { path: string; reason: string }[];
   busy: boolean;
   close: () => void;
   apply: () => Promise<void>;
@@ -114,6 +117,23 @@ export function PlanDrawer({
             <X size={21} />
           </button>
         </div>
+        {paused && paused.length > 0 && changed.length > 0 && (
+          <div className="plan-paused">
+            <strong>自动写入已暂停，这些内容需要你确认一次：</strong>
+            {paused.map((b) => (
+              <button
+                key={b.path + b.reason}
+                disabled={!b.path}
+                onClick={() => b.path && setSelectedPath(b.path)}
+              >
+                <TriangleAlert size={14} />
+                <span>{b.reason}</span>
+                {b.path && <code>{short(b.path)}</code>}
+              </button>
+            ))}
+            <small>确认后点下方「部署」，之后的同类变更会自动写入。</small>
+          </div>
+        )}
         {notices.length > 0 && (
           <div className="plan-warnings">
             {notices.map((n) => (
@@ -245,7 +265,11 @@ export function PlanDrawer({
                 ) : (
                   <pre className="diff-code">
                     {selected.diff ? (
-                      <DiffLines diff={selected.diff} />
+                      <DiffLines
+                        diff={selected.diff}
+                        from="当前文件"
+                        to="部署后"
+                      />
                     ) : (
                       <span className="muted">
                         文本未变化。Skill 的资源或执行权限也会参与完整包比较。

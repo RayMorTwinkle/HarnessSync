@@ -76,7 +76,12 @@ export function autoDeployBlockers(engine: Engine, plan: Plan) {
       blockers.push({
         path: c.path,
         status: c.status,
-        reason: c.reason || "此路径需要人工确认",
+        reason:
+          c.status === "update" && !receipt && c.kind === "instructions"
+            ? `第一次写入已有的 ${path.basename(c.path)}：会加入 HarnessSync 管理区块，原有内容保留`
+            : c.status === "update" && !receipt
+              ? "目标已存在，但不是 HarnessSync 写入的"
+              : c.reason || "此路径需要人工确认",
       });
   }
   return blockers;

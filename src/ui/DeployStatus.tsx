@@ -37,7 +37,7 @@ export function DeployStatus({ auto }: { auto: boolean }) {
           text:
             last?.outcome === "failed"
               ? "写入失败，查看详情"
-              : `${pending} 项变更等你确认`,
+              : `${last?.blockers?.length || pending} 处需要你确认`,
         }
       : pending
         ? {

@@ -408,6 +408,11 @@ function App() {
           <PlanDrawer
             plan={data.plan}
             home={data.device.home}
+            paused={
+              autoDeploy && data.autoDeploy?.outcome === "needs-review"
+                ? data.autoDeploy.blockers
+                : undefined
+            }
             busy={busy}
             close={() => setPlanOpen(false)}
             apply={async () => {

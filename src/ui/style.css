@@ -3901,3 +3901,40 @@ body {
   background: var(--warn-bg);
   border-color: var(--warn-border);
 }
+
+.plan-paused {
+  display: grid;
+  gap: 6px;
+  padding: 14px 24px;
+  background: var(--warn-bg);
+  border-bottom: 1px solid var(--warn-border);
+  color: var(--warn);
+  font-size: 12px;
+}
+.plan-paused strong {
+  font-weight: 600;
+}
+.plan-paused button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  color: var(--warn);
+  line-height: 1.7;
+}
+.plan-paused button:not(:disabled):hover span {
+  text-decoration: underline;
+}
+.plan-paused button svg {
+  flex-shrink: 0;
+}
+.plan-paused code {
+  font-size: 11px;
+  opacity: 0.8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-paused small {
+  color: var(--text-3);
+}
