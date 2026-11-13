@@ -42,6 +42,10 @@ export const gitSkillSourceSchema = z.object({
   subpath: z.string(),
   commit: z.string().regex(/^[0-9a-f]{40,64}$/),
   installedHash: z.string().min(1),
+  tree: z
+    .string()
+    .regex(/^[0-9a-f]{40,64}$/)
+    .optional(),
 });
 export type GitSkillSource = z.infer<typeof gitSkillSourceSchema>;
 export type Skill = Omit<z.infer<typeof skillInput>, "body"> & {
@@ -296,6 +300,11 @@ export type SyncStatus = {
   conflicts: SyncConflict[];
   pushBlocked?: boolean;
   message: string;
+  undo?: {
+    available: boolean;
+    kind?: "resolve" | "restore" | "recovery";
+    at?: string;
+  };
 };
 export type SyncSetup = {
   url?: string;

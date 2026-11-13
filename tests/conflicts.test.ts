@@ -110,6 +110,7 @@ test("take-native 保留 id、作用域与未知元数据，登记 adopt 后保�
   const history = store.history().length;
   await engine.chooseConflict("sample", "native");
   assert.equal(store.history().length, history + 1);
+  assert.equal(store.history()[0].message, "收进技能库：sample");
   assert.deepEqual(store.manifest().skills[0].scope, skill.scope);
   assert.equal(store.manifest().skills[0].id, skill.id);
   const parsed = parseSkill(fs.readFileSync(file, "utf8"));

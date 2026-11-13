@@ -152,15 +152,20 @@ hsync plan
   "ref": "main",
   "subpath": "skills/research",
   "commit": "<完整SHA>",
-  "installedHash": "v2:<SHA256>"
+  "installedHash": "v2:<SHA256>",
+  "tree": "<该 commit 下技能 subpath 的 Git tree SHA>"
 }
 ```
 
 Git 包在安装、比较上游及更新时将文件权限统一为 `0644`（普通文件）或 `0755`（可执行文件），再计算指纹和写入，避免不同 umask 或跨设备同步造成误判。`installedHash` 覆盖完整包的文件路径、内容和规范化权限；源库文件被用户修改权限仍会被识别为本地修改。更新时库内容偏离该值会返回 `LOCAL_SKILL_CHANGED`，`--force` 显式覆盖本地修改；下载期间源库变化会返回 `STALE_REVISION`，即使 force 也要重试。技能名发生变化时拒绝更新，应单独安装。保留启停、显示名和作用域。`detach` 后不再检查 Git 上游。原有本机开发目录 `refresh` 机制不变；`skills list/show` 和 HTTP 查询增加设备本地的 `localSource` 字段，Git 技能使用结构化 `source`，普通本地技能没有 Git 来源。
 
+安装和更新会记录可选的 `source.tree`。检查时 commit 不变则无更新；commit 前进时只比较技能目录的 tree，不会因同仓库其他技能变化而误报。仓库根技能使用根 tree。即使目录未变化，检查结果仍返回观测到的 `latestCommit`，但不改写来源记录。旧记录缺少 tree 时继续比较 commit，下次更新后补齐 tree。上游目录被删除或获取失败时返回 `error`，省略 `available`；目录删除时仍保留 `latestCommit`。
+
+安装、更新和冲突收库的源提交包含技能名，例如“从 Git 安装技能：paper-reader、commit-writer”“更新 Git 技能：paper-reader”“收进技能库：paper-reader”。批量标题最多 100 字符，过长时保留能放下的完整技能名，并以“等 N 个”标注本次操作的技能总数；部署提示不写入提交标题。
+
 旧版本已经留下的错误权限指纹不会自动改写，需先核对 `skills diff`，再用 `skills update --force` 生成规范化记录。旧版本已创建且仍带 Git 来源的改名冲突副本，可用 `skills detach` 脱离上游；新的 `sync resolve --keep both` 会自动完成脱离。
 
-下载使用 `HARNESS_SYNC_HOME/cache/git-skills`（显式 `--root` 时位于该目录），`git init` + `fetch --depth=1`，支持分支、标签和完整提交 SHA。成功或异常后删除临时目录；进程崩溃留下的目录在下次下载时按已退出 PID 清理。缓存、检查结果与设备信息均不进入源库 Git。检查结果带 `checkedAt`，保存在设备本地 `skill-updates.json`。同批及并发请求中的同一 URL 只执行一次 ls-remote，即使技能 ref 不同；全进程最多三个 Git 命令并发，单次 ls-remote 超时 15 秒，其他 Git 命令超时 60 秒。队列等待不计入命令超时。
+下载使用 `HARNESS_SYNC_HOME/cache/git-skills`（显式 `--root` 时位于该目录），`git init` + `fetch --depth=1`，支持分支、标签和完整提交 SHA。成功或异常后删除临时目录；进程崩溃留下的目录在下次下载时按已退出 PID 清理。缓存、检查结果与设备信息均不进入源库 Git。检查结果带 `checkedAt`，保存在设备本地 `skill-updates.json`。同批及并发请求中的同一 URL 只执行一次 ls-remote，即使技能 ref 不同。需要比较 tree 时，同批同仓库只执行一次 `fetch --depth=1 --filter=blob:none`，一次取回所需的不同 commit，不检出工作树；并发请求对相同 URL 和 commit 集合复用进行中的获取。远端不支持过滤时 Git 可能退回普通浅获取。全进程最多三个 Git 命令并发，检查更新中的 Git 命令超时均为 15 秒，安装和更新命令超时 60 秒。队列等待不计入命令超时。
 
 沿用 Git 凭证助手或 SSH；安装了 gh 时，GitHub HTTPS 命令临时借用 `gh auth git-credential`，不修改全局配置，也不保存令牌。拒绝带密码、HTTP 用户名、查询参数或片段的 URL。不要使用含凭证的 URL。
 
@@ -168,15 +173,15 @@ Git 包在安装、比较上游及更新时将文件权限统一为 `0644`（普
 
 沿用现有 token、Host、Origin 和 JSON 请求校验。成功统一为 `{"ok":true,"data":...}`，参数/操作错误为 `{"ok":false,"code":"...","message":"中文原因"}`。多候选是 HTTP 200 的选择状态；检查更新的单仓库失败记录在对应条目的 `error` 中，不阻止其他仓库返回结果。
 
-| 方法与端点                     | 请求                                                                                       | data 返回                                                                                      |
-| ------------------------------ | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| 方法与端点                     | 请求                                                                                       | data 返回                                                                                             |
+| ------------------------------ | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
 | `POST /api/skills/install`     | `{source, skills?: string[], all?: boolean, ref?: string, commit?: string, scope?: Scope}` | `{selectionRequired,url,ref,commit,candidates:[{name,description,subpath,error?}],installed:Skill[]}` |
-| `POST /api/skills/updates`     | `{ids?: string[]}`                                                                         | `[{id,name,checkedAt,commit,latestCommit?,available?,error?}]`                                 |
-| `POST /api/skills/update`      | `{ids:string[],force?:boolean}`                                                            | `[{id,name,commit,files:FileDiff[],note}]`                                                     |
-| `GET /api/skills/<id>/diff`    | 无                                                                                         | `{id,commit,latestCommit,files:FileDiff[]}`                                                    |
-| `POST /api/skills/<id>/detach` | `{}`                                                                                       | 删除 source 后的 Skill                                                                         |
-| `GET /api/skills`              | 无                                                                                         | 含 `source`、`localSource?` 的技能数组                                                         |
-| `GET /api/skills/<id>`         | 无                                                                                         | 含 `source`、`localSource?` 和 `body` 的技能详情                                               |
+| `POST /api/skills/updates`     | `{ids?: string[]}`                                                                         | `[{id,name,checkedAt,commit,latestCommit?,available?,error?}]`                                        |
+| `POST /api/skills/update`      | `{ids:string[],force?:boolean}`                                                            | `[{id,name,commit,files:FileDiff[],note}]`                                                            |
+| `GET /api/skills/<id>/diff`    | 无                                                                                         | `{id,commit,latestCommit,files:FileDiff[]}`                                                           |
+| `POST /api/skills/<id>/detach` | `{}`                                                                                       | 删除 source 后的 Skill                                                                                |
+| `GET /api/skills`              | 无                                                                                         | 含 `source`、`localSource?` 的技能数组                                                                |
+| `GET /api/skills/<id>`         | 无                                                                                         | 含 `source`、`localSource?` 和 `body` 的技能详情                                                      |
 
 两步安装示例（以下为 data 内容，SHA 使用占位符）：
 

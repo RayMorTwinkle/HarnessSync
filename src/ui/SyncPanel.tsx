@@ -366,6 +366,7 @@ export function SyncPanel({
         api={api}
         busy={busy}
         revision={status.lastSyncedCommit}
+        undoable={!!status.undo?.available}
         undo={() =>
           run(
             () => api<SyncStatus>("sync/undo", {}),
@@ -496,11 +497,13 @@ function SyncHistory({
   api,
   busy,
   revision,
+  undoable,
   undo,
 }: {
   api: Api;
   busy: boolean;
   revision?: string;
+  undoable: boolean;
   undo: () => void;
 }) {
   const [items, setItems] = useState<HistoryItem[] | null>(null);
@@ -549,14 +552,16 @@ function SyncHistory({
             </button>
           </span>
         ) : (
-          <button
-            className="sync-undo"
-            disabled={busy}
-            onClick={() => setConfirm(true)}
-          >
-            <Undo2 size={13} />
-            撤销上一次处理
-          </button>
+          undoable && (
+            <button
+              className="sync-undo"
+              disabled={busy}
+              onClick={() => setConfirm(true)}
+            >
+              <Undo2 size={13} />
+              撤销上一次处理
+            </button>
+          )
         )}
       </div>
       {error ? (

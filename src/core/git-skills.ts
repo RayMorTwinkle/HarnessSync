@@ -11,6 +11,7 @@ import {
 } from "../shared/types.ts";
 import { Store } from "./store.ts";
 import { skillSource } from "./skill-sources.ts";
+import { skillCommitMessage } from "./skill-messages.ts";
 import {
   AppError,
   bundleHash,
@@ -256,6 +257,28 @@ function readGitBundle(root: string) {
     file.mode = file.mode & 0o111 ? 0o755 : 0o644;
   return bundle;
 }
+async function gitTrees(
+  url: string,
+  dir: string,
+  commit: string,
+  timeout = 60_000,
+) {
+  const [root, output] = await Promise.all([
+    git(url, ["rev-parse", `${commit}^{tree}`], dir, timeout),
+    git(
+      url,
+      ["ls-tree", "-r", "-d", "-z", "--full-tree", commit],
+      dir,
+      timeout,
+    ),
+  ]);
+  const trees = new Map([["", root]]);
+  for (const row of output.split("\0")) {
+    const match = /^040000 tree ([0-9a-f]{40,64})\t([\s\S]*)$/.exec(row);
+    if (match) trees.set(match[2], match[1]);
+  }
+  return trees;
+}
 function discover(root: string, subpath: string) {
   const result: Candidate[] = [];
   const start = path.join(root, safeSubpath(subpath));
@@ -350,6 +373,7 @@ export async function installGitSkills(
               );
             return matches[0];
           });
+    const trees = await gitTrees(source.url, dir, commit);
     const bundles = selected.map((c) => {
       if (c.error)
         throw new AppError(
@@ -358,43 +382,50 @@ export async function installGitSkills(
         );
       return readGitBundle(path.join(dir, c.subpath));
     });
-    const installed = await store.mutate("从 Git 安装技能", (m) => {
-      if (
-        scope.kind === "project" &&
-        !m.projects.some((p) => p.id === scope.target)
-      )
-        throw new AppError("PROJECT_NOT_FOUND", "作用域引用的项目不存在");
-      const names = new Set(m.skills.map((s) => s.name));
-      for (const c of selected) {
-        if (names.has(c.name))
-          throw new AppError(
-            "DUPLICATE_NAME",
-            `技能库已有 ${c.name}；请使用 skills update`,
-            409,
-          );
-        names.add(c.name);
-      }
-      return selected.map((c, i) => {
-        const entry: Skill = {
-          id: crypto.randomUUID(),
-          name: c.name,
-          description: c.description,
-          enabled: true,
-          scope,
-          source: {
-            type: "git",
-            url: source.url,
-            ref: source.ref,
-            subpath: c.subpath,
-            commit,
-            installedHash: bundleHash(bundles[i]),
-          },
-        };
-        writeBundle(store.skillPath(entry.id), bundles[i]);
-        m.skills.push(entry);
-        return entry;
-      });
-    });
+    const installed = await store.mutate(
+      skillCommitMessage(
+        "从 Git 安装技能",
+        selected.map((c) => c.name),
+      ),
+      (m) => {
+        if (
+          scope.kind === "project" &&
+          !m.projects.some((p) => p.id === scope.target)
+        )
+          throw new AppError("PROJECT_NOT_FOUND", "作用域引用的项目不存在");
+        const names = new Set(m.skills.map((s) => s.name));
+        for (const c of selected) {
+          if (names.has(c.name))
+            throw new AppError(
+              "DUPLICATE_NAME",
+              `技能库已有 ${c.name}；请使用 skills update`,
+              409,
+            );
+          names.add(c.name);
+        }
+        return selected.map((c, i) => {
+          const entry: Skill = {
+            id: crypto.randomUUID(),
+            name: c.name,
+            description: c.description,
+            enabled: true,
+            scope,
+            source: {
+              type: "git",
+              url: source.url,
+              ref: source.ref,
+              subpath: c.subpath,
+              commit,
+              installedHash: bundleHash(bundles[i]),
+              tree: trees.get(c.subpath)!,
+            },
+          };
+          writeBundle(store.skillPath(entry.id), bundles[i]);
+          m.skills.push(entry);
+          return entry;
+        });
+      },
+    );
     return {
       selectionRequired: false,
       url: source.url,
@@ -456,9 +487,56 @@ async function remoteHead(store: Store, source: GitSkillSource) {
     throw new AppError("SKILL_GIT", "上游 ref 不存在", 409);
   return head[0];
 }
+const remoteTreeChecks = new Map<
+  string,
+  Promise<Map<string, Map<string, string>>>
+>();
+function remoteTrees(store: Store, url: string, commits: string[]) {
+  const key = JSON.stringify([store.root, url, commits.sort()]);
+  let pending = remoteTreeChecks.get(key);
+  if (!pending) {
+    pending = (async () => {
+      const dir = path.join(
+        cacheRoot(store),
+        `${process.pid}-${crypto.randomUUID()}`,
+      );
+      fs.mkdirSync(dir);
+      try {
+        await git(url, ["init", "--bare", "--quiet", dir], store.root, 15_000);
+        await git(
+          url,
+          [
+            "fetch",
+            "--depth=1",
+            "--filter=blob:none",
+            "--no-tags",
+            "--",
+            url,
+            ...commits,
+          ],
+          dir,
+          15_000,
+        );
+        return new Map(
+          await Promise.all(
+            commits.map(
+              async (commit) =>
+                [commit, await gitTrees(url, dir, commit, 15_000)] as const,
+            ),
+          ),
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    })();
+    remoteTreeChecks.set(key, pending);
+    void pending.finally(() => remoteTreeChecks.delete(key)).catch(() => {});
+  }
+  return pending;
+}
 export async function checkGitSkillUpdates(store: Store, ids: string[] = []) {
   const entries = gitEntries(store, ids);
-  const results: UpdateCheck[] = await Promise.all(
+  const checks: UpdateCheck[] = await Promise.all(
     entries.map(async (s) => {
       const base = {
         id: s.id,
@@ -474,6 +552,41 @@ export async function checkGitSkillUpdates(store: Store, ids: string[] = []) {
           available: latestCommit !== s.source.commit,
         };
       } catch (e: any) {
+        return { ...base, error: e.message };
+      }
+    }),
+  );
+  const repositories = new Map<string, Set<string>>();
+  for (const [i, entry] of entries.entries())
+    if (checks[i].available && entry.source.tree) {
+      const commits = repositories.get(entry.source.url) || new Set<string>();
+      commits.add(checks[i].latestCommit!);
+      repositories.set(entry.source.url, commits);
+    }
+  const trees = new Map(
+    [...repositories].map(
+      ([url, commits]) => [url, remoteTrees(store, url, [...commits])] as const,
+    ),
+  );
+  const results: UpdateCheck[] = await Promise.all(
+    checks.map(async (check, i) => {
+      const { source } = entries[i];
+      // Legacy records retain commit-based checks until their next update.
+      if (!check.available || !source.tree) return check;
+      try {
+        const commits = await trees.get(source.url)!;
+        const tree = commits
+          .get(check.latestCommit!)!
+          .get(safeSubpath(source.subpath));
+        if (!tree)
+          throw new AppError(
+            "SKILL_GIT",
+            `上游技能目录不存在：${source.subpath}`,
+            409,
+          );
+        return { ...check, available: tree !== source.tree };
+      } catch (e: any) {
+        const { available, ...base } = check;
         return { ...base, error: e.message };
       }
     }),
@@ -521,7 +634,7 @@ function bundleDiff(before: Bundle, after: Bundle) {
     });
 }
 async function upstream(store: Store, entry: GitSkill) {
-  return checkout(store, entry.source, undefined, (dir, commit) => {
+  return checkout(store, entry.source, undefined, async (dir, commit) => {
     const target = path.join(dir, safeSubpath(entry.source.subpath));
     noSymlink(target);
     const bundle = readGitBundle(target);
@@ -535,7 +648,8 @@ async function upstream(store: Store, entry: GitSkill) {
         "SOURCE_NAME_CHANGED",
         `上游技能名称已变化：${entry.name} → ${parsed.name}；请单独安装`,
       );
-    return { bundle, commit, parsed };
+    const trees = await gitTrees(entry.source.url, dir, commit);
+    return { bundle, commit, parsed, tree: trees.get(entry.source.subpath)! };
   });
 }
 export async function diffGitSkill(store: Store, id: string) {
@@ -578,7 +692,10 @@ export async function updateGitSkills(
     return r.value;
   });
   return store.mutate(
-    "更新 Git 技能，请预览部署",
+    skillCommitMessage(
+      "更新 Git 技能",
+      entries.map((entry) => entry.name),
+    ),
     (m) =>
       entries.map((entry, i) => {
         const current = m.skills.find((s) => s.id === entry.id)!;
@@ -593,6 +710,7 @@ export async function updateGitSkills(
           ...entry.source,
           commit: next.commit,
           installedHash: bundleHash(next.bundle),
+          tree: next.tree,
         };
         return {
           id: entry.id,

@@ -695,7 +695,7 @@ export class Engine {
         return choose();
       });
     return this.store.mutate(
-      "采用原生技能解决冲突",
+      `收进技能库：${this.store.manifest().skills.find((s) => s.id === selected.sourceId)!.name}`,
       (manifest) => {
         if (nativeHash(selected.path) !== selected.conflictFingerprint)
           throw new AppError("STALE_TARGET", "原生目录已变化，请重新预览", 409);

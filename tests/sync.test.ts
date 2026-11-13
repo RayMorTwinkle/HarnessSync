@@ -442,7 +442,10 @@ for (const keep of ["local", "remote", "both"] as const)
     await sa.now();
     assert.equal(a.git(["rev-parse", "HEAD"]), sha);
     assert.equal((await sa.status()).conflicts.length, 1);
+    assert.deepEqual((await sa.status()).undo, { available: false });
     await sa.resolve(rule.id, keep);
+    assert.equal((await sa.status()).undo?.kind, "resolve");
+    assert.equal((await sa.status()).undo?.available, true);
     const rules = a.manifest().rules;
     assert.equal(
       rules.find((r) => r.id === rule.id)?.body,
@@ -452,6 +455,7 @@ for (const keep of ["local", "remote", "both"] as const)
     assert.equal((await sa.status()).conflicts.length, 0);
     const resolvedHead = a.git(["rev-parse", "HEAD"]);
     await sa.undo();
+    assert.deepEqual((await sa.status()).undo, { available: false });
     assert.equal((await sa.status()).conflicts.length, 1);
     assert.equal(
       a.manifest().rules.find((r) => r.id === rule.id)?.body,
@@ -980,6 +984,32 @@ test("offline automatic attempts back off to 30 minutes, status remains availabl
   assert.equal((await sa.status()).scheduler.lastError, undefined);
 });
 
+test("status exposes restore undo availability, timestamp and legacy journal time while disconnected", async (t) => {
+  const { a, sa } = await fixture(t);
+  assert.deepEqual((await sa.status()).undo, { available: false });
+  const original = a.git(["rev-parse", "HEAD"]);
+  await a.saveRule({ title: "撤销状态", body: "保留" });
+  const started = Date.now();
+  await sa.restore(original);
+  const status = await sa.status();
+  assert.equal(status.connected, false);
+  assert.equal(status.undo?.available, true);
+  assert.equal(status.undo?.kind, "restore");
+  assert.ok(Date.parse(status.undo!.at!) >= started);
+  assert.ok(Date.parse(status.undo!.at!) <= Date.now());
+  const file = path.join(a.root, "sync-undo.json");
+  const journal = JSON.parse(fs.readFileSync(file, "utf8"));
+  assert.equal(status.undo?.at, journal.at);
+  delete journal.at;
+  fs.writeFileSync(file, JSON.stringify(journal));
+  assert.equal(
+    (await sa.status()).undo?.at,
+    fs.statSync(file).mtime.toISOString(),
+  );
+  await sa.undo();
+  assert.deepEqual((await sa.status()).undo, { available: false });
+});
+
 test("restore undo is a new commit, preserves uncommitted source and refuses subsequent external edits and symlinks", async (t) => {
   const { a, sa } = await fixture(t);
   const original = a.git(["rev-parse", "HEAD"]);
@@ -1037,6 +1067,8 @@ test("interrupted restore and interrupted undo retain journals and recover after
     `sync.write = () => { fs.rmSync(${JSON.stringify(path.join(a.repo, "entries/rules", `${r.id}.json`))}); process.exit(73); }; await sync.restore(${JSON.stringify(original)});`,
     73,
   );
+  assert.equal((await sa.status()).undo?.kind, "recovery");
+  assert.equal((await sa.status()).undo?.available, true);
   await assert.rejects(
     sa.now(),
     /请先运行 hsync sync undo|请先运行 hsync sync setup/,
@@ -1179,6 +1211,8 @@ test("periodic pull during debounce merges remote entries without pushing in-pro
 
 test("interrupted remote merge blocks automatic publication until its safety snapshot is recovered", async (t) => {
   const { a, b, sa, sb, dir } = await connected(t);
+  await sa.restore(a.git(["rev-parse", "HEAD"]));
+  const restoreUndo = (await sa.status()).undo;
   await b.saveRule({ title: "远端事务", body: "远端内容" });
   await sb.now();
   const before = a.manifest();
@@ -1207,9 +1241,12 @@ test("interrupted remote merge blocks automatic publication until its safety sna
     (error: any) => error.status === 75,
   );
   assert.ok(a.manifest().rules.some((r) => r.title === "远端事务"));
+  assert.equal((await sa.status()).undo?.kind, "recovery");
+  assert.equal((await sa.status()).undo?.available, true);
   await assert.rejects(sa.now(), /请先运行 hsync sync undo/);
   await sa.undo();
   assert.deepEqual(a.manifest(), before);
+  assert.deepEqual((await sa.status()).undo, restoreUndo);
   assert.equal(fs.existsSync(path.join(a.root, "sync-recovery.json")), false);
   await sa.now();
   assert.ok(a.manifest().rules.some((r) => r.title === "远端事务"));

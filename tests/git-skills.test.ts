@@ -94,6 +94,43 @@ function emptyCache(store: Store) {
   assert.ok(!store.git(["ls-files"]).includes("cache/"));
 }
 
+test("Git 安装和更新提交包含技能名，同步历史不含部署提示", async (t) => {
+  const f = await fixture(t, ["paper-reader", "commit-writer"]);
+  const { installed } = await installGitSkills(f.store, f.url, {
+    skills: ["paper-reader", "commit-writer"],
+  });
+  assert.equal(
+    f.store.history()[0].message,
+    "从 Git 安装技能：paper-reader、commit-writer",
+  );
+  f.push("paper-reader");
+  await updateGitSkills(f.store, [installed[0].id]);
+  const history = await new Sync(f.store).history();
+  assert.equal(history[0].message, "更新 Git 技能：paper-reader");
+});
+
+test("批量 Git 技能提交过长时保留完整技能名并标注总数", async (t) => {
+  const names = ["a", "b", "c"].map((letter) => `skill-${letter.repeat(58)}`);
+  const f = await fixture(t, names);
+  const { installed } = await installGitSkills(f.store, f.url, { all: true });
+  const assertSubject = (prefix: string) => {
+    const subject = f.store.history()[0].message;
+    assert.equal(subject, `${prefix}：${names[0]} 等 3 个`);
+    assert.ok(subject.length <= 100);
+  };
+  assertSubject("从 Git 安装技能");
+  for (const name of names) f.write(name, "updated all");
+  f.git("add", ".");
+  f.git("commit", "-m", "update all");
+  f.git("push", f.url, "main");
+  await updateGitSkills(
+    f.store,
+    installed.map((s) => s.id),
+  );
+  assertSubject("更新 Git 技能");
+  emptyCache(f.store);
+});
+
 test("安装完整单技能包，来源随源库同步，编辑保留来源；脱离后成为本地技能", async (t) => {
   const f = await fixture(t);
   const result = await installGitSkills(f.store, f.url);
@@ -207,7 +244,14 @@ test("检查、文本与二进制差异、本地修改拒绝、force 更新、�
   const head = f.push();
   const checks = await checkGitSkillUpdates(f.store);
   assert.equal(checks[0].latestCommit, head);
-  assert.ok(checks.every((c) => c.available && c.checkedAt));
+  assert.equal(checks.find((c) => c.name === "alpha")!.available, true);
+  assert.equal(checks.find((c) => c.name === "beta")!.available, false);
+  assert.ok(checks.every((c) => c.checkedAt));
+  for (const entry of result.installed)
+    assert.equal(
+      source(f.store, entry.id).tree,
+      f.git("rev-parse", `${result.commit}:packages/${entry.name}`),
+    );
   assert.ok(fs.existsSync(path.join(f.store.root, "skill-updates.json")));
   const delta = await diffGitSkill(f.store, id);
   assert.ok(
@@ -223,6 +267,10 @@ test("检查、文本与二进制差异、本地修改拒绝、force 更新、�
   assert.ok(updates[0].files.length);
   assert.notEqual(f.store.git(["rev-parse", "HEAD"]), before);
   assert.equal(source(f.store, id).commit, head);
+  assert.equal(
+    source(f.store, id).tree,
+    f.git("rev-parse", `${head}:packages/alpha`),
+  );
   assert.equal((await checkGitSkillUpdates(f.store, [id]))[0].available, false);
   assert.equal(fs.existsSync(path.join(f.home, ".claude")), false);
   emptyCache(f.store);
@@ -265,12 +313,80 @@ test("ls-remote 失败缓存错误；克隆失败、无效技能、链接均不�
   emptyCache(f.store);
 });
 
+test("旧 Git 来源无 tree 时退回 commit 比较，更新后使用目录 tree", async (t) => {
+  const f = await fixture(t, ["alpha", "beta"]);
+  const {
+    installed: [entry],
+  } = await installGitSkills(f.store, f.url, { skills: ["alpha"] });
+  await f.store.mutate("模拟旧来源", (m) => {
+    const s = m.skills[0].source;
+    if (typeof s === "object") delete s.tree;
+  });
+  assert.equal((await checkGitSkillUpdates(f.store))[0].available, false);
+  const head = f.push("beta");
+  const [legacy] = await checkGitSkillUpdates(f.store);
+  assert.equal(legacy.available, true);
+  assert.equal(legacy.latestCommit, head);
+  await updateGitSkills(f.store, [entry.id]);
+  assert.equal(
+    source(f.store, entry.id).tree,
+    f.git("rev-parse", "HEAD:packages/alpha"),
+  );
+  f.push("beta", "another beta change");
+  const revision = f.store.revision();
+  assert.equal((await checkGitSkillUpdates(f.store))[0].available, false);
+  assert.equal(f.store.revision(), revision);
+  emptyCache(f.store);
+});
+
+test("上游技能子目录删除返回 error，同仓库未变技能仍无更新", async (t) => {
+  const f = await fixture(t, ["alpha", "beta"]);
+  await installGitSkills(f.store, f.url, { all: true });
+  f.git("rm", "-r", "packages/alpha");
+  f.git("commit", "-m", "remove alpha");
+  f.git("push", f.url, "main");
+  const checks = await checkGitSkillUpdates(f.store);
+  const deleted = checks.find((c) => c.name === "alpha")!;
+  assert.match(deleted.error!, /上游技能目录不存在.*packages\/alpha/);
+  assert.equal(deleted.available, undefined);
+  assert.equal(deleted.latestCommit, f.git("rev-parse", "HEAD"));
+  assert.equal(checks.find((c) => c.name === "beta")!.available, false);
+  emptyCache(f.store);
+});
+
+test("获取远端 tree 失败返回并缓存 error，不误报更新且清理临时仓库", async (t) => {
+  const f = await fixture(t, ["alpha", "beta"]);
+  await installGitSkills(f.store, f.url, { all: true });
+  const head = f.push();
+  const bin = path.join(f.dir, "bin");
+  fs.mkdirSync(bin);
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  fs.writeFileSync(
+    path.join(bin, "git"),
+    `#!/bin/sh\ncase "$*" in\n *fetch*) echo 'fatal: simulated tree fetch failure' >&2; exit 1 ;;\nesac\nexec '${realGit}' "$@"\n`,
+    { mode: 0o755 },
+  );
+  process.env.PATH = bin + path.delimiter + process.env.PATH;
+  const checks = await checkGitSkillUpdates(f.store);
+  for (const check of checks) {
+    assert.match(check.error!, /simulated tree fetch failure/);
+    assert.equal(check.available, undefined);
+    assert.equal(check.latestCommit, head);
+  }
+  const cached = JSON.parse(
+    fs.readFileSync(path.join(f.store.root, "skill-updates.json"), "utf8"),
+  );
+  for (const check of checks) assert.deepEqual(cached[check.id], check);
+  emptyCache(f.store);
+});
+
 test("并发检查按仓库合并 ls-remote；并发安装只成功一次；下载期间外部修改使更新过期", async (t) => {
   const f = await fixture(t, ["alpha", "beta"]);
   await installGitSkills(f.store, f.url, { all: true });
-  await f.store.mutate("固定另一个技能到标签", (m) => {
-    if (typeof m.skills[1].source === "object") m.skills[1].source.ref = "v1";
+  await f.store.mutate("另一个技能使用显式分支", (m) => {
+    if (typeof m.skills[1].source === "object") m.skills[1].source.ref = "main";
   });
+  f.push("alpha", "first upstream change");
   const bin = path.join(f.dir, "bin");
   fs.mkdirSync(bin);
   const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
@@ -279,15 +395,25 @@ test("并发检查按仓库合并 ls-remote；并发安装只成功一次；下�
   const started = path.join(f.dir, "started");
   fs.writeFileSync(
     path.join(bin, "git"),
-    `#!/bin/sh\ncase "$*" in\n *ls-remote*) echo check >> '${calls}'; sleep 0.2 ;;\n *fetch*) if [ -f '${gate}' ]; then touch '${started}'; while [ -f '${gate}' ]; do sleep 0.02; done; fi ;;\nesac\nexec '${realGit}' "$@"\n`,
+    `#!/bin/sh\ncase "$*" in\n *ls-remote*) echo check >> '${calls}'; sleep 0.2 ;;\n *fetch*) echo "$*" >> '${calls}.fetch'; if [ -f '${gate}' ]; then touch '${started}'; while [ -f '${gate}' ]; do sleep 0.02; done; fi ;;\nesac\nexec '${realGit}' "$@"\n`,
     { mode: 0o755 },
   );
   process.env.PATH = bin + path.delimiter + process.env.PATH;
-  await Promise.all([
+  const checks = await Promise.all([
     checkGitSkillUpdates(f.store),
     checkGitSkillUpdates(f.store),
   ]);
   assert.equal(fs.readFileSync(calls, "utf8").trim().split("\n").length, 1);
+  const fetches = fs
+    .readFileSync(calls + ".fetch", "utf8")
+    .trim()
+    .split("\n");
+  assert.equal(fetches.length, 1);
+  assert.match(fetches[0], /--depth=1.*--filter=blob:none/);
+  for (const batch of checks) {
+    assert.equal(batch.find((c) => c.name === "alpha")!.available, true);
+    assert.equal(batch.find((c) => c.name === "beta")!.available, false);
+  }
   const fresh = await new Store(path.join(f.dir, "fresh"), f.home).init();
   const results = await Promise.allSettled([
     installGitSkills(fresh, f.url, { all: true }),
@@ -482,6 +608,10 @@ test("GitHub 简写子路径与含斜杠 tree ref 使用本地裸仓库验证，
   const root = await installGitSkills(rootStore, f.url);
   assert.equal(root.installed[0].name, "alpha");
   assert.equal(source(rootStore, root.installed[0].id).subpath, "");
+  assert.equal(
+    source(rootStore, root.installed[0].id).tree,
+    f.git("rev-parse", "HEAD^{tree}"),
+  );
   emptyCache(f.store);
   emptyCache(rootStore);
 });

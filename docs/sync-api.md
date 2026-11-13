@@ -96,12 +96,15 @@ x-harness-sync-token: <token>
     "observedSource": "<HEAD 与文件元数据指纹>"
   },
   "conflicts": [],
+  "undo": { "available": false },
   "remoteRepositoryRetained": true,
   "message": "同步仅更新源配置；请运行 hsync plan 审查后再 apply"
 }
 ```
 
 `scheduler.pendingPush` 表示还有源提交等待推送，独立于编辑指纹保存；最后一个冲突保留本机也会重新调度推送。`scheduler.lastError` 为最近错误的中文字符串；`changedAt` 为最后观测到源内容变化的 ISO 时间。nextRunAt 是调度到期时间，只有调度进程在运行时才会执行；关闭自动同步后不调度。`conflicts` 沿用 `{entryId,kind,localCommit,remoteCommit,reason,localId?}`。前端可显示“远端带来了 N 项变更，待部署”；不要据此自动 apply。
+
+同步状态追加可选的 `undo?: { available: boolean; kind?: "resolve" | "restore" | "recovery"; at?: string }`。当前后端始终返回此字段，无本机撤销/恢复日志时为 `{ "available": false }`；有日志时为 true，GUI 可据此显示撤销入口。正常日志的 kind 为 resolve 或 restore；未完成操作（包括撤销中断）和远端合并恢复日志为 recovery，优先级与 `sync undo` 一致：先处理 `sync-recovery.json`。at 使用操作开始时记录的 ISO 时间；旧日志没有 at 时使用文件修改时间。断开同步后仍可读取撤销状态。available 只表示存在入口，执行时仍会核对后续修改并可能返回 `SYNC_UNDO_CHANGED`。
 
 历史响应示例：
 

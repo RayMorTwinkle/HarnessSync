@@ -254,6 +254,7 @@ export class Sync {
     this.requireRecovered();
     const c = this.config(false);
     const record = {
+      at: new Date().toISOString(),
       beforeFiles: this.sourceFiles(),
       afterFiles: this.libraryFiles(after),
       before: this.safety(),
@@ -861,6 +862,27 @@ export class Sync {
     this.git(["fetch", "--no-tags", "--", c.url, `refs/heads/${c.branch}`]);
     return this.git(["rev-parse", "FETCH_HEAD"]);
   }
+  private undoStatus(): SyncStatus["undo"] {
+    const file = exists(this.recoveryPath())
+      ? this.recoveryPath()
+      : this.undoPath();
+    noSymlink(file);
+    if (!exists(file)) return { available: false };
+    const record = json<any>(file);
+    return {
+      available: true,
+      kind:
+        file === this.recoveryPath() || !record.head || record.undoCommit
+          ? "recovery"
+          : record.operation === "resolve" || record.operation === "restore"
+            ? record.operation
+            : "recovery",
+      at:
+        typeof record.at === "string"
+          ? record.at
+          : fs.statSync(file).mtime.toISOString(),
+    };
+  }
   private result(c?: SyncConfig, remote?: string): SyncStatus {
     let ahead = 0,
       behind = 0;
@@ -886,6 +908,7 @@ export class Sync {
       lastSyncedCommit: c?.lastSyncedCommit,
       lastSyncTime: c?.lastSyncTime,
       conflicts: c?.conflicts || [],
+      undo: this.undoStatus(),
       message: !c
         ? "本机已断开同步；远端仓库仍然保留，不会被删除"
         : c.conflicts.length
