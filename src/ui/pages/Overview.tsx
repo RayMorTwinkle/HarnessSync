@@ -160,7 +160,9 @@ export function Overview() {
                   <button onClick={openPlan}>
                     {changes.some((c) => c.status === "conflict")
                       ? "查看冲突"
-                      : changes.some((c) => c.status !== "unchanged")
+                      : changes.some(
+                            (c) => !["unchanged", "skipped"].includes(c.status),
+                          )
                         ? "等待部署"
                         : changes.length
                           ? "文件已部署"

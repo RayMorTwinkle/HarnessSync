@@ -127,7 +127,12 @@ export function SettingsPage({
   const home = data.device.home;
   const short = (p: string) =>
     p === home || p.startsWith(home + "/") ? "~" + p.slice(home.length) : p;
-  const harnesses = tools?.harnesses || data.harnesses;
+  // The registry listing has no CLI versions; the snapshot probed them.
+  const harnesses = (tools?.harnesses || data.harnesses).map((h) => ({
+    ...h,
+    version:
+      h.version || data.harnesses.find((x) => x.id === h.id)?.version || null,
+  }));
   return (
     <div className="settings-page">
       <Group icon={Zap} title="常规">

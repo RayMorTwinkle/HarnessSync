@@ -6,7 +6,7 @@ HarnessSync writes shared skills and instructions into each tool's native folder
 
 [简体中文](README.zh-CN.md)
 
-![HarnessSync settings page](docs/images/overview.png)
+![HarnessSync overview: skills, instructions and the tools they are written to](docs/images/overview.png)
 
 The GUI, CLI messages, and bundled skills are currently in Simplified Chinese. Contributions to internationalization are welcome.
 
@@ -44,7 +44,7 @@ Project skills use `.dsh/skills`, `.opencode/skills`, `.agents/skills`, and `.cl
 Requires Node.js **22.12+**, npm, and Git. The installer supports macOS and Linux. Use **WSL on Windows**; native Windows is not supported. Recorded real-session verification covers macOS only; see the [acceptance record](docs/local-acceptance.md) and [adapter evidence](docs/adapters.md).
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.4.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.5.0/install.sh | bash
 ```
 
 The installer uses `~/.local/share/harness-sync` and creates `~/.local/bin/hsync`. It needs no sudo, leaves shell configuration alone, and only installs the application. Add the launcher directory to PATH as directed, or use `~/.local/bin/hsync` directly. Re-run the installer for an upgrade; restart a running service to use the new build. Your library in `~/.harness-sync` is separate from the installation.
@@ -52,7 +52,7 @@ The installer uses `~/.local/share/harness-sync` and creates `~/.local/bin/hsync
 To inspect the installer first:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.4.0/install.sh -o install-harness-sync.sh
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.5.0/install.sh -o install-harness-sync.sh
 bash install-harness-sync.sh --help
 ```
 
@@ -139,6 +139,10 @@ Replace the repository and skill name. Background checks report available update
 ## Adding a tool
 
 Add a JSON manifest in the directory printed by `hsync harness dir`, validate it with `hsync harness validate /absolute/tool.json`, then inspect a deployment plan. Built-in contributions go in `harnesses/`. Follow the [plugin guide](docs/plugins.md) for fields, discovery evidence, testing, and shared-directory behavior.
+
+Each device can turn tools on or off in Settings. A disabled tool keeps its files as they are.
+
+![HarnessSync settings: automatic deployment, login startup and per-device tools](docs/images/settings.png)
 
 ## Safety model
 

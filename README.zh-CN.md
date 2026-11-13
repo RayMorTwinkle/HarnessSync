@@ -6,7 +6,7 @@ HarnessSync 把共享技能和指令写入各工具的原生目录。源配置�
 
 [English](README.md)
 
-![HarnessSync settings page](docs/images/overview.png)
+![HarnessSync 工作台：技能、指令及其写入的 AI 工具](docs/images/overview.png)
 
 GUI、CLI 提示和内置技能目前使用简体中文，欢迎参与国际化。
 
@@ -44,7 +44,7 @@ GUI、CLI 提示和内置技能目前使用简体中文，欢迎参与国际化�
 需要 Node.js **22.12+**、npm、Git。安装器支持 macOS 和 Linux；**Windows 请使用 WSL**，不支持原生 Windows。目前有记录的真实会话验收仅覆盖 macOS，见[本机验收](docs/local-acceptance.md)和[适配证据](docs/adapters.md)。
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.4.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.5.0/install.sh | bash
 ```
 
 默认安装到 `~/.local/share/harness-sync`，启动器为 `~/.local/bin/hsync`。无需 sudo，不修改 shell 配置，只安装程序。按提示把启动器目录加入 PATH，或直接运行 `~/.local/bin/hsync`。升级时重新运行安装器；已有服务需重启才能使用新构建。配置库 `~/.harness-sync` 与程序安装目录分开保存。
@@ -52,7 +52,7 @@ curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.4.0/in
 也可以先查看脚本：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.4.0/install.sh -o install-harness-sync.sh
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.5.0/install.sh -o install-harness-sync.sh
 bash install-harness-sync.sh --help
 ```
 
@@ -139,6 +139,10 @@ hsync skills detach research
 ## 添加工具
 
 在 `hsync harness dir` 打印的目录中放入 JSON 清单，用 `hsync harness validate /absolute/tool.json` 校验，再检查部署计划。内置工具贡献放入 `harnesses/`。字段、发现证据、测试和共享目录行为见[插件指南](docs/plugins.md)。
+
+每台设备都可以在「设置」里单独开关工具。停用的工具已有文件保持原样。
+
+![HarnessSync 设置：自动写入、登录后运行与按设备开关工具](docs/images/settings.png)
 
 ## 安全模型
 
