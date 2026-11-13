@@ -97,6 +97,7 @@ export type Harness = {
   note: string;
 };
 export type Receipt = {
+  globalPaths?: { home: string; skills: string; instructions: string };
   adoptedSourceHash?: string;
   adoptedLink?: string;
   kind: "instructions" | "skill";
@@ -157,6 +158,7 @@ export type Change = {
 };
 export type PlanNotice = {
   code:
+    | "harness-root-changed"
     | "plugin-manifest-error"
     | "unknown-harness"
     | "retained-harness-paths"

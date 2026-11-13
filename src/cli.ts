@@ -153,7 +153,11 @@ harness
   .action(() => console.log(pluginDirectory(undefined, cli.opts().root)));
 harness.command("validate <file>").action(
   run((file: string) => {
-    const result = validateHarnessFile(path.resolve(file));
+    const result = validateHarnessFile(
+      path.resolve(file),
+      undefined,
+      cli.opts().root,
+    );
     if (result.error) {
       process.exitCode = 1;
       return result.error;

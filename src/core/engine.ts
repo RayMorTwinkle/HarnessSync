@@ -217,6 +217,35 @@ export class Engine {
     const allHarnesses = adapters(this.store.home, this.store.root);
     const select = (ids: string[]) =>
       selectedHarnesses(ids, this.store.home, this.store.root, disabled);
+    for (const receipt of state.receipts.filter((r) => !r.projectId)) {
+      const harness = allHarnesses.find((h) => h.id === receipt.harness);
+      if (!harness || disabled.includes(harness.id)) continue;
+      const old = receipt.globalPaths;
+      const differences = old
+        ? (["home", "skills", "instructions"] as const)
+            .filter((key) => old[key] !== harness[key])
+            .map((key) => `${old[key]} → ${harness[key]}`)
+        : receipt.kind === "instructions"
+          ? receipt.path !== harness.instructions
+            ? [`${receipt.path} → ${harness.instructions}`]
+            : []
+          : ![harness.skills, ...harness.sharedSkills].includes(
+                path.dirname(receipt.path),
+              )
+            ? [`${path.dirname(receipt.path)} → ${harness.skills}`]
+            : [];
+      if (differences.length)
+        notice(
+          "harness-root-changed",
+          `${harness.name} 全局部署路径已变化：${differences.join("；")}。自动部署已暂停，旧路径及收据保持原样；请预览并手动应用以确认迁移。`,
+          true,
+          receipt.path,
+        );
+    }
+    const instructionRenderings = new Map<
+      string,
+      { block: string | null | undefined; harness: string }
+    >();
     const wanted = new Set<string>();
     const stagingFingerprints: string[][] = [];
     if (this.pending().length)
@@ -231,6 +260,19 @@ export class Engine {
       sourceHash?: string;
       removing?: boolean;
     }) => {
+      spec.path = path.resolve(spec.path);
+      if (spec.kind === "instructions" && !spec.removing) {
+        const previous = instructionRenderings.get(spec.path);
+        if (previous && previous.block !== spec.block)
+          errors.push(
+            `指令目标 ${spec.path} 的内容冲突：${previous.harness} 与 ${spec.harness} 渲染了不同内容`,
+          );
+        else
+          instructionRenderings.set(spec.path, {
+            block: spec.block,
+            harness: spec.harness,
+          });
+      }
       if (wanted.has(spec.path)) return;
       wanted.add(spec.path);
       const receipt = state.receipts.find((r) => r.path === spec.path);
@@ -485,13 +527,13 @@ export class Engine {
           errors.push(`项目 ${project.name} 的目录不存在：${dir}`);
           continue;
         }
-        const targets = projectTargets(
-          harness.id,
-          dir,
-          this.store.home,
-          this.store.root,
-        );
         try {
+          const targets = projectTargets(
+            harness.id,
+            dir,
+            this.store.home,
+            this.store.root,
+          );
           if (
             manifest.rules.some(
               (r) =>
@@ -951,7 +993,38 @@ export class Engine {
         (c) => !["unchanged", "skipped"].includes(c.status),
       );
       for (const stage of this.staging()) cleanStaging(stage);
+      const confirmGlobalPaths = (receipts: Receipt[]) => {
+        const harnesses = adapters(
+          this.store.home,
+          this.store.root,
+          this.store.device().disabledHarnesses,
+        );
+        return receipts.map((receipt) => {
+          const h = harnesses.find(
+            (h) => h.id === receipt.harness && h.enabled,
+          );
+          if (
+            !h ||
+            receipt.projectId ||
+            (options.onlySkillId && receipt.sourceId !== options.onlySkillId)
+          )
+            return receipt;
+          return {
+            ...receipt,
+            globalPaths: {
+              home: h.home,
+              skills: h.skills,
+              instructions: h.instructions,
+            },
+          };
+        });
+      };
       if (!changed.length) {
+        const state = this.store.state();
+        writeJson(path.join(this.store.root, "state.json"), {
+          ...state,
+          receipts: confirmGlobalPaths(state.receipts),
+        });
         if (!options.onlySkillId) new Sync(this.store).acknowledgeDeployment();
         return { id: null, changes: 0 };
       }
@@ -1081,7 +1154,7 @@ export class Engine {
           });
         writeJson(path.join(this.store.root, "state.json"), {
           ...state,
-          receipts,
+          receipts: confirmGlobalPaths(receipts),
           instructionReplacements: state.instructionReplacements?.filter(
             (r) => !changed.some((c) => c.path === r.path),
           ),
@@ -1224,7 +1297,11 @@ export class Engine {
   snapshot(): Snapshot {
     const versions =
       this.store.home === process.env.HOME
-        ? harnessVersions(this.store.home, this.store.root)
+        ? harnessVersions(
+            this.store.home,
+            this.store.root,
+            this.store.device().disabledHarnesses,
+          )
         : {};
     return {
       autoDeploy: lastAutoDeploy(this.store),

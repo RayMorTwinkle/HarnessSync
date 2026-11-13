@@ -4,16 +4,23 @@ import { execFileSync } from "node:child_process";
 import type { HarnessId } from "../shared/types.ts";
 import {
   listManifests,
+  registry,
   manifestRoot,
   resolveTemplate,
+  resolveProjectPath,
   resolvedHarnesses,
 } from "./harness-registry.ts";
 
 export const adapters = resolvedHarnesses;
 const versions = new Map<string, string | null>();
-export function harnessVersions(home = os.homedir(), root?: string) {
+export function harnessVersions(
+  home = os.homedir(),
+  root?: string,
+  disabled: string[] = [],
+) {
   return Object.fromEntries(
-    listManifests(home, root).map((m) => {
+    registry(home, root).entries.map(({ manifest: m, source }) => {
+      if (source !== "builtin" || disabled.includes(m.id)) return [m.id, null];
       const key = JSON.stringify(m.version);
       if (!versions.has(key)) {
         try {
@@ -44,8 +51,20 @@ export function projectTargets(
   const m = listManifests(home, root).find((m) => m.id === harness);
   if (!m) throw new Error(`未知 Harness：${harness}`);
   return {
-    instructions: path.join(dir, m.instructions.project),
-    skills: path.join(dir, m.skills.project),
+    instructions: resolveProjectPath(
+      m.instructions.project,
+      dir,
+      home,
+      root,
+      "$.instructions.project",
+    ),
+    skills: resolveProjectPath(
+      m.skills.project,
+      dir,
+      home,
+      root,
+      "$.skills.project",
+    ),
   };
 }
 export function sharedInstructionPeers(
@@ -56,7 +75,11 @@ export function sharedInstructionPeers(
   const manifests = listManifests(home, root);
   const file = manifests.find((m) => m.id === harness)?.instructions.project;
   return manifests
-    .filter((m) => m.instructions.project === file)
+    .filter(
+      (m) =>
+        file &&
+        path.resolve(home, m.instructions.project) === path.resolve(home, file),
+    )
     .map((m) => m.id);
 }
 export type SkillReader = {
@@ -77,12 +100,20 @@ export function skillReaders(
     for (const r of projectDir
       ? m.skills.reads.project
       : m.skills.reads.global) {
-      const dir = resolveTemplate(
-        typeof r === "string" ? r : r.path,
-        home,
-        manifestRoot(m, home),
-        projectDir,
-      );
+      const dir = projectDir
+        ? resolveProjectPath(
+            typeof r === "string" ? r : r.path,
+            projectDir,
+            home,
+            root,
+            "$.skills.reads.project",
+          )
+        : resolveTemplate(
+            typeof r === "string" ? r : r.path,
+            home,
+            manifestRoot(m, home),
+            projectDir,
+          );
       const legacy = typeof r !== "string" && Boolean(r.legacy);
       const old = merged.get(dir);
       merged.set(dir, {

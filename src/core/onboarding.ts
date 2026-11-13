@@ -69,7 +69,11 @@ export async function bootstrapOnboarding(store: Store, id: string) {
   const record = getOnboarding(store, id)!;
   const versions =
     store.home === process.env.HOME
-      ? harnessVersions(store.home, store.root)
+      ? harnessVersions(
+          store.home,
+          store.root,
+          store.device().disabledHarnesses,
+        )
       : {};
   const targets = adapters(
     store.home,
