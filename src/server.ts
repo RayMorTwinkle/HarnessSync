@@ -351,6 +351,7 @@ export async function startServer(
             "restore",
             "conflicts",
           ].includes(resource) ||
+            (resource === "harnesses" && body.enabled === true) ||
             (resource === "skills" &&
               id !== "updates" &&
               !(result as { selectionRequired?: boolean })

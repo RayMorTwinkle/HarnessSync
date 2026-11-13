@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import {
+  Info,
   CheckCircle2,
   ChevronRight,
   Loader2,
@@ -45,6 +46,13 @@ export function PlanDrawer({
   const [error, setError] = useState("");
   const [status, setStatus] = useState<Change["status"] | "all">("all");
   const conflicts = plan.changes.filter((c) => c.status === "conflict");
+  // Blocking notices first: they are why automatic deployment stopped.
+  const notices = (
+    plan.notices ||
+    (plan.warnings || []).map((message) => ({ message, blocking: true }))
+  )
+    .slice()
+    .sort((a, b) => Number(b.blocking) - Number(a.blocking));
   const short = (p: string) =>
     p === home || p.startsWith(home + "/") ? "~" + p.slice(home.length) : p;
   const order: Change["status"][] = [
@@ -106,12 +114,12 @@ export function PlanDrawer({
             <X size={21} />
           </button>
         </div>
-        {(plan.warnings || []).length > 0 && (
+        {notices.length > 0 && (
           <div className="plan-warnings">
-            {plan.warnings!.map((w) => (
-              <p key={w}>
-                <TriangleAlert size={15} />
-                {w}
+            {notices.map((n) => (
+              <p key={n.message} className={n.blocking ? "blocking" : ""}>
+                {n.blocking ? <TriangleAlert size={15} /> : <Info size={15} />}
+                {n.message}
               </p>
             ))}
           </div>

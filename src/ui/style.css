@@ -2890,6 +2890,9 @@ nav button {
 .plan-warnings svg {
   margin-top: 3px;
 }
+.plan-warnings p.blocking {
+  color: var(--warn);
+}
 @media (max-width: 1100px) {
   .onboarding-columns {
     grid-template-columns: 1fr;
