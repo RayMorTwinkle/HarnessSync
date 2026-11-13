@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { AppearanceMenu } from "./Appearance";
 import {
   Activity,
   ArrowDownToLine,
@@ -351,6 +352,7 @@ function App() {
             >
               <RefreshCw size={16} className={busy ? "spin" : ""} />
             </button>
+            <AppearanceMenu />
             <span className="top-avatar">R</span>
           </div>
         </header>
