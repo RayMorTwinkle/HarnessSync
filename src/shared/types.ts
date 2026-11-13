@@ -164,6 +164,7 @@ export type Plan = {
   createdAt: string;
 };
 export type Snapshot = {
+  autoDeploy?: import("../core/auto-deploy.ts").AutoDeployResult | null;
   revision: string;
   manifest: Manifest;
   device: Device;
@@ -293,6 +294,7 @@ export type SyncRuntime = {
   changedAt?: string;
 };
 export type SyncStatus = {
+  autoDeploy?: import("../core/auto-deploy.ts").AutoDeployResult | null;
   auto: AutoSyncSettings;
   scheduler: SyncRuntime;
   remoteRepositoryRetained: true;

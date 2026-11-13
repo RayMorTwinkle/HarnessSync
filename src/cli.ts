@@ -5,7 +5,6 @@ import {
 } from "./core/harness-registry.ts";
 import {
   installGitSkills,
-  checkGitSkillUpdates,
   updateGitSkills,
   diffGitSkill,
   detachGitSkill,
@@ -14,7 +13,11 @@ import {
 import fs from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
-import { startSyncScheduler } from "./core/sync-scheduler.ts";
+import { UpdateChecker } from "./core/update-checks.ts";
+import { Settings } from "./core/settings.ts";
+import { LoginService, rotateServiceLog } from "./core/service.ts";
+import { autoDeploy, lastAutoDeploy } from "./core/auto-deploy.ts";
+import { startBackgroundScheduler } from "./core/sync-scheduler.ts";
 import { Sync } from "./core/sync.ts";
 import {
   ignoreNativePaths,
@@ -51,7 +54,40 @@ const output = (data: unknown) =>
 const run =
   (fn: (...args: any[]) => Promise<unknown> | unknown) =>
   async (...args: any[]) => {
-    const value = await fn(...args);
+    let value = await fn(...args);
+    const cmd =
+      args.at(-1) instanceof Command ? (args.at(-1) as Command) : undefined;
+    const group = cmd?.parent?.name(),
+      name = cmd?.name();
+    const mutates =
+      group &&
+      name &&
+      ((["rules", "skills", "projects", "device"].includes(group) &&
+        !["list", "show", "updates", "diff"].includes(name)) ||
+        (group === "conflicts" && ["choose", "clear"].includes(name)) ||
+        (group === "sync" &&
+          ["setup", "now", "resolve", "undo"].includes(name)) ||
+        (group === "hsync" && ["restore", "self-skill"].includes(name)) ||
+        (group === "onboard" &&
+          ["ignore", "unstage-instructions"].includes(name)) ||
+        (group === "config" &&
+          name === "set" &&
+          args[0] === "deploy.auto" &&
+          args[1] === "true"));
+    if (
+      mutates &&
+      store &&
+      !(value as { selectionRequired?: boolean })?.selectionRequired
+    ) {
+      const result = await autoDeploy(
+        new Engine(store),
+        `cli:${group}/${name}`,
+      );
+      if (group === "sync")
+        value = { ...(value as object), ...(await new Sync(store).status()) };
+      if (!Array.isArray(value))
+        value = { ...(value as object), autoDeploy: result };
+    }
     if (value !== undefined) output(value);
   };
 const scopeOptions = (c: Command) =>
@@ -198,6 +234,7 @@ cli
       if (!healthy) process.exitCode = 1;
       return {
         healthy,
+        autoDeploy: lastAutoDeploy(engine.store),
         sourceUpdates: sourceStatus(await getStore()).filter(
           (s) => s.changed || s.note.startsWith("源目录无法读取"),
         ),
@@ -227,7 +264,7 @@ cli
   );
 cli
   .command("restore <commit>")
-  .description("恢复源配置版本（之后需重新部署）")
+  .description("恢复源配置版本（自动部署开启时写入干净计划）")
   .action(run(async (sha) => (await getStore()).restoreSource(sha)));
 cli
   .command("rollback <deployment>")
@@ -235,7 +272,7 @@ cli
   .action(run(async (id) => new Engine(await getStore()).rollback(id)));
 cli
   .command("self-skill")
-  .description("将 AI 管理 Skill 安装到源配置库，之后预览部署")
+  .description("将 AI 管理 Skill 安装到源配置库，按自动部署设置写入各工具")
   .action(run(async () => installSelfSkill(await getStore())));
 const onboard = cli
   .command("onboard")
@@ -319,7 +356,8 @@ sync
   .command("watch")
   .description("前台自动同步，按 Ctrl+C 退出")
   .action(async () => {
-    const stop = startSyncScheduler(new Sync(await getStore()));
+    const background = await startBackgroundScheduler(await getStore());
+    const stop = () => background.close();
     output({
       message: "自动同步调度器已启动，按 Ctrl+C 退出；设置关闭时等待开启",
     });
@@ -395,7 +433,7 @@ skills.command("list").action(run(async () => listedSkills(await getStore())));
 scopeOptions(
   skills
     .command("install <source>")
-    .description("从 Git 仓库安装技能，安装后需预览部署")
+    .description("从 Git 仓库安装技能，安装后按自动部署设置写入各工具")
     .option("--skill <names>", "逗号分隔的名称或仓库子路径")
     .option("--all", "安装所有候选技能")
     .option("--ref <ref>", "分支、标签或提交"),
@@ -416,7 +454,7 @@ skills
   .description("检查 Git 上游更新，不下载内容")
   .action(
     run(async (ids) => {
-      const results = await checkGitSkillUpdates(await getStore(), ids);
+      const results = await new UpdateChecker(await getStore()).now(ids);
       if (results.some((result) => result.error)) process.exitCode = 1;
       return results;
     }),
@@ -621,15 +659,46 @@ cli
   .command("serve")
   .description("启动本机 GUI")
   .option("--port <number>", "监听端口", "47821")
+  .option("--background", "安静运行后台服务，不打开浏览器")
   .option("--dev", "启用前端热更新")
   .action(async (o) => {
     const port = parsePort(o.port);
-    const server = await startServer(await getStore(), { port, dev: o.dev });
-    console.log(
-      `HarnessSync → ${server.url}\n配置库 → ${store.root}\n按 Ctrl+C 退出`,
-    );
+    const s = await getStore();
+    if (o.background) rotateServiceLog(s);
+    const server = await startServer(s, {
+      port,
+      dev: o.dev,
+      background: o.background,
+    });
+    if (!o.background)
+      console.log(
+        `HarnessSync → ${server.url}\n配置库 → ${store.root}\n按 Ctrl+C 退出`,
+      );
     keepRunning(server);
   });
+// Device-local configuration and login startup use the same core as HTTP.
+const config = cli.command("config").description("本机设置（不跨设备同步）");
+config
+  .command("list")
+  .action(run(async () => new Settings(await getStore()).get()));
+config
+  .command("get <key>")
+  .action(run(async (key) => new Settings(await getStore()).read(key)));
+config
+  .command("set <key> <value>")
+  .action(
+    run(async (key, value) => new Settings(await getStore()).set(key, value)),
+  );
+const service = cli.command("service").description("管理登录启动服务");
+for (const action of ["install", "uninstall", "status"] as const)
+  service.command(action).action(
+    run(async () => {
+      const s = await getStore();
+      return action === "status"
+        ? new LoginService(s).status()
+        : s.lock(() => new LoginService(s)[action]());
+    }),
+  );
 try {
   await cli.parseAsync();
 } catch (e: any) {

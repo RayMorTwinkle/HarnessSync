@@ -1,10 +1,10 @@
-# 自动同步与撤销（v0.4）
+# 自动同步与撤销（v0.5）
 
-自动同步只修改源配置，绝不自动部署。使用 `hsync plan` 审阅，再 `hsync apply --plan <id>`。
+同步先修改源配置。`deploy.auto` 默认开启，服务/CLI 会接着尝试自动部署干净计划；需要审查时保留 pendingDeployment，再 `hsync plan` / `hsync apply --plan <id>`。设置门面、自动部署精确定义和登录服务见 [本机设置](settings.md)。
 
 ## 运行与设置
 
-成功 setup 后默认开启自动同步：停止编辑 120 秒后同步，每 10 分钟拉取一次。仅在 `serve`、`open` 新启动的服务或 `sync watch` 运行期间调度；关闭进程后停止，不安装系统后台服务。
+成功 setup 后默认开启自动同步：停止编辑 120 秒后同步，每 10 分钟拉取一次。仅在 `serve`、`open` 新启动的服务或 `sync watch` 运行期间调度；关闭进程后停止；可用 `hsync service install` 安装登录启动服务。
 
 ```sh
 hsync sync auto on
@@ -18,7 +18,7 @@ hsync sync undo
 
 间隔均为 1–86400 的整数，set 支持只改其中一个参数。`sync-auto.json` 保存本机设置与运行记录，`sync-undo.json` 保存最近一次可撤销操作，`sync-recovery.json` 记录进行中的远端合并；都位于配置根目录，Git 外。不要把整个配置根目录上传到远端，Git 源库仍是其 `repo/` 子目录。
 
-调度器每 5 秒在锁外检查 HEAD 与文件的 inode、mtime、ctime、size 和 mode，不读取技能正文或资源。空闲轮询不等待源库写锁；发现变更时短暂加锁保存调度状态，到期同步时再持有跨进程锁。这样既能识别外部编辑器的原子替换，也能识别同一未提交文件的连续编辑。编辑会重新计算 debounce；周期拉取遇到 debounce 未到期的本机编辑时只拉取合并，稍后推送。所有同步、设置和撤销共用跨进程 Store 锁。多个服务/watch 同时运行也会重新检查共享到期时间；没有独立的常驻进程租约。
+调度器每 5 秒在锁外检查 HEAD 与文件的 inode、mtime、ctime、size 和 mode，不读取技能正文或资源。空闲轮询不等待源库写锁；发现变更时短暂加锁保存调度状态，到期同步时再持有跨进程锁。这样既能识别外部编辑器的原子替换，也能识别同一未提交文件的连续编辑。编辑会重新计算 debounce；周期拉取遇到 debounce 未到期的本机编辑时只拉取合并，稍后推送。所有同步、设置和撤销共用跨进程 Store 锁。服务/watch 通过 scheduler-owner.json 做同库独占；其他进程仍可运行手动 CLI。
 
 失败时从 30 秒开始指数退避，最多 30 分钟；新编辑不会跳过退避。退避期间仍观测编辑时间；重试可以拉取，推送仍须等最后一次编辑的 debounce 到期。成功后清除 lastError 和失败次数。手动 `sync now` 可立即重试。错误保存在状态中，后台不反复打印。Git 调用沿用同步子进程与 60 秒超时，网络操作期间服务请求可能等待；这版没有把 Git 移到独立 worker。
 
@@ -28,7 +28,7 @@ hsync sync undo
 
 ## 恢复与撤销
 
-resolve 和 restore 前先提交包括未提交编辑在内的源配置，并写入 `refs/hsync/safety/<UUID>`，再保存本机恢复日志。`sync undo` 撤销最近一次 resolve/restore，同时恢复当时的冲突记录，以新的子提交留存，不重写已有历史。撤销不自动部署，也不立即推送。目录交换中断时，恢复前会核对所有权标记、旧目录备份及新暂存包是否与事务快照相符；不匹配或有符号链接时拒绝覆盖。失败回滚按快照恢复原始字节和权限，并回到快照提交，不重新序列化源配置。只保留一个直接撤销入口；更早的恢复点仍由 Git 引用保留。
+resolve 和 restore 前先提交包括未提交编辑在内的源配置，并写入 `refs/hsync/safety/<UUID>`，再保存本机恢复日志。`sync undo` 撤销最近一次 resolve/restore，同时恢复当时的冲突记录，以新的子提交留存，不重写已有历史。CLI/API 撤销后按 deploy.auto 尝试部署干净计划，不立即推送。目录交换中断时，恢复前会核对所有权标记、旧目录备份及新暂存包是否与事务快照相符；不匹配或有符号链接时拒绝覆盖。失败回滚按快照恢复原始字节和权限，并回到快照提交，不重新序列化源配置。只保留一个直接撤销入口；更早的恢复点仍由 Git 引用保留。
 
 操作后源内容、Git HEAD、远端连接或冲突被进一步修改时，undo 拒绝覆盖；可从 history 选择完整 SHA 显式 restore，再预览部署。远端合并也有独立的进行中日志，不会覆盖最近一次 resolve/restore 的撤销入口。中途退出会保留日志；未完成的源操作阻止后续同步/恢复/解决冲突，先运行 `sync undo`（优先恢复未完成的远端合并）。恢复检查当前文件是否仍属于操作前后版本；出现无法识别的外部编辑或符号链接时拒绝覆盖。部署和设备绑定不参与源撤销。
 
@@ -98,11 +98,12 @@ x-harness-sync-token: <token>
   "conflicts": [],
   "undo": { "available": false },
   "remoteRepositoryRetained": true,
-  "message": "同步仅更新源配置；请运行 hsync plan 审查后再 apply"
+  "autoDeploy": null,
+  "message": "源配置已同步；自动部署结果见 autoDeploy，需要审查时运行 hsync plan"
 }
 ```
 
-`scheduler.pendingPush` 表示还有源提交等待推送，独立于编辑指纹保存；最后一个冲突保留本机也会重新调度推送。`scheduler.lastError` 为最近错误的中文字符串；`changedAt` 为最后观测到源内容变化的 ISO 时间。nextRunAt 是调度到期时间，只有调度进程在运行时才会执行；关闭自动同步后不调度。`conflicts` 沿用 `{entryId,kind,localCommit,remoteCommit,reason,localId?}`。前端可显示“远端带来了 N 项变更，待部署”；不要据此自动 apply。
+`scheduler.pendingPush` 表示还有源提交等待推送，独立于编辑指纹保存；最后一个冲突保留本机也会重新调度推送。`scheduler.lastError` 为最近错误的中文字符串；`changedAt` 为最后观测到源内容变化的 ISO 时间。nextRunAt 是调度到期时间，只有调度进程在运行时才会执行；关闭自动同步后不调度。`conflicts` 沿用 `{entryId,kind,localCommit,remoteCommit,reason,localId?}`。前端可显示“远端带来了 N 项变更，待部署”；后台会尝试自动部署，成功后清零。读取 autoDeploy 查看最终结果，前端不自行调用 apply。
 
 同步状态追加可选的 `undo?: { available: boolean; kind?: "resolve" | "restore" | "recovery"; at?: string }`。当前后端始终返回此字段，无本机撤销/恢复日志时为 `{ "available": false }`；有日志时为 true，GUI 可据此显示撤销入口。正常日志的 kind 为 resolve 或 restore；未完成操作（包括撤销中断）和远端合并恢复日志为 recovery，优先级与 `sync undo` 一致：先处理 `sync-recovery.json`。at 使用操作开始时记录的 ISO 时间；旧日志没有 at 时使用文件修改时间。断开同步后仍可读取撤销状态。available 只表示存在入口，执行时仍会核对后续修改并可能返回 `SYNC_UNDO_CHANGED`。
 
@@ -131,3 +132,5 @@ x-harness-sync-token: <token>
 ```
 
 撤销请求 `POST /api/sync/undo`、请求体 `{}`，返回上面的状态结构。没有恢复点返回 `SYNC_UNDO`；有后续修改返回 `SYNC_UNDO_CHANGED`；未完成操作阻止其他源操作时返回 `SYNC_RECOVERY`。设置类型或范围不正确返回 `SYNC_OPTIONS`。
+
+设置门面 `GET/PUT /api/settings` 与现有 `/api/sync/auto` 双向兼容；sync 映射为 `{auto,pushDelaySeconds,pullIntervalMinutes}`。相关写接口外壳追加 `autoDeployQueued`，data 原形不变。`GET /api/sync/status` 追加 `autoDeploy`（未运行时 null）；详细结构见 [本机设置](settings.md)。
