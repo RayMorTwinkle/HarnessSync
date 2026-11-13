@@ -1,0 +1,52 @@
+name: Bug report
+description: Report a reproducible problem with HarnessSync.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For security issues, use [private vulnerability reporting](https://github.com/RayMorTwinkle/HarnessSync/security/advisories/new). If unavailable, ask a maintainer for a private contact without disclosing details.
+        Reproduce with a temporary HOME and HARNESS_SYNC_HOME when possible. Do not attach credentials, .env files, personal configuration, tokens, or full deployment snapshots.
+  - type: input
+    id: version
+    attributes:
+      label: HarnessSync version or commit
+      description: Output of hsync --version, or the source commit if developing.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS/version, Node.js version, installation method, CLI or GUI, and affected tool versions. State whether Windows is running through WSL.
+      placeholder: "macOS / Linux / WSL; Node.js version; installer or source checkout; tool and version"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Give commands or GUI actions, minimal fake fixtures, and whether you used a temporary HOME and store. Include scope and auto-deploy setting if relevant.
+      placeholder: |
+        1. Create an isolated home and store.
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include error codes and sanitized output. Distinguish native files being written from a tool session actually loading them.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs or screenshots
+      description: Optional sanitized evidence. For deployment issues, relevant plan/doctor fields and autoDeploy blockers help. Review output before posting; it can contain private paths and instructions.

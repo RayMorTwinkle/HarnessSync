@@ -1,0 +1,66 @@
+name: Tool support request or proposal
+description: Request a tool or propose a declarative harness plugin.
+title: "[Tool] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read the [plugin guide](https://github.com/RayMorTwinkle/HarnessSync/blob/main/docs/plugins.md). Requests may leave unknown behavior explicit; plugin proposals need evidence for discovery paths.
+        Use isolated probes. Do not post credentials, personal configuration, or unredacted session transcripts.
+  - type: dropdown
+    id: proposal_type
+    attributes:
+      label: Request type
+      options:
+        - Request support
+        - Propose a plugin with evidence
+    validations:
+      required: true
+  - type: input
+    id: tool
+    attributes:
+      label: Tool name and version
+      description: Include a proposed stable plugin ID if you have one.
+    validations:
+      required: true
+  - type: textarea
+    id: documentation
+    attributes:
+      label: Official documentation or source links
+      description: Link the tool and its skill/instruction discovery documentation or implementation. State if documentation is missing.
+    validations:
+      required: true
+  - type: textarea
+    id: global_paths
+    attributes:
+      label: Global skill directories and instruction files
+      description: List native and compatibility readers, main/override files, precedence, and rule fragments. Mark unknowns explicitly.
+    validations:
+      required: true
+  - type: textarea
+    id: project_paths
+    attributes:
+      label: Per-project skill directories and instruction files
+      description: Give paths relative to a project and any upward discovery rules. Note shared paths with other tools. Mark unknowns explicitly.
+    validations:
+      required: true
+  - type: textarea
+    id: environment_variables
+    attributes:
+      label: Environment variables and default paths
+      description: List root overrides and how they affect each reader path. Write none or unknown if appropriate; do not paste environment values or secrets.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and remaining uncertainties
+      description: Include platform/version, documentation or source references, isolated reproduction steps/results, duplicate-name behavior (list or collapse), and refresh behavior. Distinguish filesystem deployment from session loading. Requests may state what still needs research.
+    validations:
+      required: true
+  - type: textarea
+    id: manifest
+    attributes:
+      label: Draft manifest and verification
+      description: Optional JSON manifest, validation result, and isolated plan/apply/rollback results. Check for absolute personal paths before sharing.
+      render: json

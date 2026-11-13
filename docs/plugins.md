@@ -1,5 +1,13 @@
 # Declarative harness plugins
 
+## TL;DR
+
+1. Describe verified instruction and skill discovery paths in a JSON manifest.
+2. Use a temporary HOME and HARNESS_SYNC_HOME; clear inherited tool-root overrides.
+3. Run `hsync harness validate /absolute/tool.json`, then put it in `hsync harness dir`'s directory.
+4. Inspect a fresh plan, apply its ID, verify files, and test rollback and enable/disable.
+5. For a built-in PR, add `harnesses/<id>.json`, discovery evidence, and isolated integration tests.
+
 A harness plugin is a JSON description of where a tool reads instructions and
 skills. It contains no JavaScript, installation hooks, or deployment scripts.
 The same registry drives the CLI, HTTP API, scanner and deployment engine.

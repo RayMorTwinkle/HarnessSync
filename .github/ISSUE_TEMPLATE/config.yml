@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Contributing and testing safely
+    url: https://github.com/RayMorTwinkle/HarnessSync/blob/main/CONTRIBUTING.md
+    about: Development setup, isolated testing, and project invariants.
+  - name: Report a security issue privately
+    url: https://github.com/RayMorTwinkle/HarnessSync/security/advisories/new
+    about: If private reporting is unavailable, ask a maintainer for a private contact without posting vulnerability details.
