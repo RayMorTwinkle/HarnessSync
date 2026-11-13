@@ -36,7 +36,9 @@ hsync serve --background
 - `create` 且目标不存在。目标位置由正常 Engine 作用域和路径校验产生，成功后登记所有权。
 - 有匹配类型收据的 `update/remove`，并通过 Engine 的外部修改校验。
 
-任意计划 error/warning、`conflict/adopt/replace`、未托管的已有指令更新、链接接管、初始化指令完整替换登记、未完成部署、未恢复的源操作或未解决同步冲突，都会停止整次自动部署。对 warning 采用保守策略：包括共享可见性提示、原生暂存残留、源目录变化等，均要求人工审查。不会自动解决冲突或自动确认接管/覆盖。外部同名目录即使内容相同，也需要手动预览并应用接管计划。
+任意计划 error 或 `notices[].blocking=true`、`conflict/adopt/replace`、未托管的已有指令更新、链接接管、初始化指令完整替换登记、未完成部署、未恢复的源操作或未解决同步冲突，都会停止整次自动部署。插件清单错误、未知 Harness、停用/缺失工具的路径保留、共享目录可见性和显式外部保留均是信息提示，不阻断其余干净路径。暂存残留、本机源目录有更新或无法读取仍要求人工审查。Harness notes 只在元数据展示，不构成部署障碍。不会自动解决冲突或自动确认接管/覆盖。外部同名目录即使内容相同，也需要手动预览并应用接管计划。
+
+计划新增 `notices: {code,message,blocking,path?}[]`，每个通知生成点必须显式选择 code 和 blocking；原有 `warnings: string[]` 从通知消息派生，保留显示兼容。自动部署只检查 blocking，不匹配 code 或中文文案；阻断项携带可选 code 与对应路径。通知分类和内容参与计划 ID，策略变化也使旧计划失效。逐类依据见 [通知分类报告](v0.5-notices-report.md)。
 
 应用持锁后再次核对开关、同步冲突和上述条件。过期计划不强制执行，记录 `needs-review`，调度器稍后重试过期类错误；其他审查项等待用户处理。自动部署与手动 apply 使用同一 Store 锁。无需改文件的正常完整 apply 也会清除同步的 pendingDeployment；需要审查/失败/关闭时保留待部署提示。
 
@@ -49,7 +51,7 @@ type AutoDeploy = {
   outcome: "applied" | "nothing" | "needs-review" | "failed" | "disabled";
   changes: { create: number; update: number; remove: number };
   deploymentId?: string;
-  blockers?: { path: string; status: string; reason: string }[];
+  blockers?: { path: string; status: string; reason: string; code?: string }[];
   error?: string;
 };
 ```

@@ -2,13 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
   autoDeploy,
   lastAutoDeploy,
   createAutoDeployer,
+  autoDeployBlockers,
 } from "../src/core/auto-deploy.ts";
-import { Engine } from "../src/core/engine.ts";
+import { Engine, publicPlan } from "../src/core/engine.ts";
+import { ignoreNativePaths } from "../src/core/skill-sources.ts";
 import { Store } from "../src/core/store.ts";
 import { Sync } from "../src/core/sync.ts";
 import { startBackgroundScheduler } from "../src/core/sync-scheduler.ts";
@@ -307,7 +310,7 @@ test("HTTP mutation queue envelope, snapshot/status, background reuse and server
   assert.equal(engine.deployments().length, 1);
 });
 
-test("symlink targets, plan errors/warnings and adopted links are never applied automatically", async (t) => {
+test("symlink targets and plan errors are never applied automatically", async (t) => {
   const { store, engine, root } = await fixture(t);
   const rule = await store.saveRule({ title: "rule", body: "text" });
   const p = engine.plan().changes[0].path;
@@ -404,5 +407,242 @@ test("source-directory warnings stop automatic deployment of an outdated library
   const result = await autoDeploy(engine, "source-warning");
   assert.equal(result.outcome, "needs-review");
   assert.ok(result.blockers?.some((b) => b.status === "blocked"));
+  assert.ok(
+    result.blockers?.some(
+      (b) => b.code === "skill-source-changed" && b.path === incoming,
+    ),
+  );
   assert.equal(engine.deployments().length, 0);
+});
+
+test("informational plugin, retained-path, scope, exposure and external-preservation notices still auto-apply", async (t) => {
+  const { store, engine, home } = await fixture(t);
+  const retained = await store.saveRule({
+    title: "retained",
+    body: "original",
+    scope: { harnesses: ["codex"] },
+  });
+  assert.equal((await autoDeploy(engine, "initial")).outcome, "applied");
+  const receipt = store.state().receipts.find((r) => r.harness === "codex")!;
+  const original = fs.readFileSync(receipt.path);
+  await store.setHarnessEnabled("codex", false);
+  await store.saveRule({ ...retained, body: "keep frozen" }, retained.id);
+  await store.saveRule({
+    title: "unknown",
+    body: "ignored",
+    scope: { harnesses: ["unknown-tool"] },
+  });
+  const skill = await store.saveSkill({
+    name: "subset",
+    description: "test",
+    body: "new skill",
+    scope: { harnesses: ["claude"] },
+  });
+  const pluginDir = path.join(store.root, "harnesses");
+  fs.mkdirSync(pluginDir);
+  const invalid = path.join(pluginDir, "invalid.json");
+  writeJson(invalid, { id: "invalid-user-plugin", name: "" });
+  const external = path.join(home, ".claude/skills/external");
+  fs.mkdirSync(external, { recursive: true });
+  const externalFile = path.join(external, "SKILL.md");
+  fs.writeFileSync(
+    externalFile,
+    skillMarkdown("external", "test", "keep external"),
+  );
+  await ignoreNativePaths(store, [external]);
+  await store.saveSkill({
+    name: "external",
+    description: "test",
+    body: "library copy",
+    scope: { harnesses: ["claude"] },
+  });
+
+  const plan = engine.plan();
+  assert.deepEqual(plan.errors, []);
+  assert.deepEqual(
+    new Set(plan.notices.map((n) => n.code)),
+    new Set([
+      "plugin-manifest-error",
+      "unknown-harness",
+      "retained-harness-paths",
+      "shared-skill-exposure",
+      "ignored-native-path",
+    ]),
+  );
+  assert.ok(plan.notices.every((n) => n.blocking === false));
+  assert.deepEqual(plan.warnings, [
+    ...new Set(plan.notices.map((n) => n.message)),
+  ]);
+  assert.deepEqual(publicPlan(plan).notices, plan.notices);
+  assert.deepEqual(autoDeployBlockers(engine, plan), []);
+  assert.ok(engine.snapshot().harnesses.every((h) => h.note));
+  const result = await autoDeploy(engine, "informational");
+  assert.equal(result.outcome, "applied");
+  assert.equal(result.blockers, undefined);
+  assert.equal(engine.deployments().length, 2);
+  assert.deepEqual(fs.readFileSync(receipt.path), original);
+  assert.deepEqual(
+    store.state().receipts.find((r) => r.path === receipt.path),
+    receipt,
+  );
+  assert.match(fs.readFileSync(externalFile, "utf8"), /keep external/);
+  assert.ok(!store.state().receipts.some((r) => r.path === external));
+  const target = store.state().receipts.find((r) => r.sourceId === skill.id)!;
+  assert.match(
+    fs.readFileSync(path.join(target.path, "SKILL.md"), "utf8"),
+    /new skill/,
+  );
+  assert.ok(fs.existsSync(invalid));
+});
+
+test("missing plugin retains its owned paths without blocking other harness deployments", async (t) => {
+  const { store, engine, home } = await fixture(t);
+  const plugin = JSON.parse(
+    fs.readFileSync(
+      new URL("fixtures/harnesses/acme.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const file = path.join(store.root, "harnesses/acme.json");
+  fs.mkdirSync(path.dirname(file));
+  writeJson(file, plugin);
+  await store.saveRule({
+    title: "plugin rule",
+    body: "frozen",
+    scope: { harnesses: ["acme"] },
+  });
+  assert.equal((await autoDeploy(engine, "plugin-first")).outcome, "applied");
+  const target = path.join(home, ".acme/ACME.md");
+  const before = fs.readFileSync(target);
+  fs.unlinkSync(file);
+  await store.saveRule({
+    title: "active",
+    body: "active",
+    scope: { harnesses: ["claude"] },
+  });
+  const plan = engine.plan();
+  assert.ok(
+    plan.notices.some(
+      (n) => n.code === "retained-harness-paths" && !n.blocking,
+    ),
+  );
+  assert.equal((await autoDeploy(engine, "missing-plugin")).outcome, "applied");
+  assert.deepEqual(fs.readFileSync(target), before);
+  assert.ok(store.state().receipts.some((r) => r.path === target));
+});
+
+test("owned staging leftovers require review and rename backups remain blocking plan errors", async (t) => {
+  const { store, engine, home } = await fixture(t);
+  await store.saveRule({ title: "new", body: "text" });
+  const stage = path.join(
+    home,
+    ".agents/skills",
+    `.hsync-staging-${crypto.randomUUID()}`,
+  );
+  fs.mkdirSync(stage, { recursive: true });
+  fs.writeFileSync(path.join(stage, "SKILL.md"), "partial package");
+  writeJson(`${stage}.json`, {
+    format: "harness-sync-staging-v1",
+    target: "partial",
+  });
+  const plan = engine.plan();
+  const notice = plan.notices.find((n) => n.code === "staging-leftover")!;
+  assert.equal(notice.blocking, true);
+  const result = await autoDeploy(engine, "staging");
+  assert.equal(result.outcome, "needs-review");
+  assert.ok(
+    result.blockers?.some(
+      (b) =>
+        b.code === notice.code &&
+        b.path === stage &&
+        b.reason === notice.message,
+    ),
+  );
+  assert.equal(engine.deployments().length, 0);
+  assert.ok(fs.existsSync(stage));
+  assert.ok(fs.existsSync(`${stage}.json`));
+  fs.mkdirSync(`${stage}-old`);
+  fs.writeFileSync(path.join(`${stage}-old`, "SKILL.md"), "original package");
+  const recovery = engine.plan();
+  assert.ok(recovery.errors.length);
+  assert.deepEqual(recovery.notices, []);
+  const blocked = await autoDeploy(engine, "backup");
+  assert.equal(blocked.outcome, "needs-review");
+  assert.ok(blocked.blockers?.some((b) => b.reason === recovery.errors[0]));
+  assert.equal(
+    fs.readFileSync(path.join(`${stage}-old`, "SKILL.md"), "utf8"),
+    "original package",
+  );
+});
+
+test("unreadable local source produces a blocking notice with its source path", async (t) => {
+  const { store, engine, root } = await fixture(t);
+  const incoming = path.join(root, "unreadable");
+  fs.mkdirSync(incoming);
+  fs.writeFileSync(
+    path.join(incoming, "SKILL.md"),
+    skillMarkdown("unreadable", "test", "text"),
+  );
+  await store.importSkill(incoming, { kind: "global", harnesses: ["claude"] });
+  fs.rmSync(incoming, { recursive: true });
+  const plan = engine.plan();
+  const notice = plan.notices.find(
+    (n) => n.code === "skill-source-unreadable",
+  )!;
+  assert.equal(notice.blocking, true);
+  const result = await autoDeploy(engine, "source-unreadable");
+  assert.equal(result.outcome, "needs-review");
+  assert.ok(
+    result.blockers?.some(
+      (b) =>
+        b.code === notice.code &&
+        b.path === incoming &&
+        b.reason === notice.message,
+    ),
+  );
+  assert.equal(engine.deployments().length, 0);
+});
+
+test("notice blocking flags decide policy independently of codes, translated messages and legacy warnings", async (t) => {
+  const { engine, store, root } = await fixture(t);
+  await store.saveRule({ title: "clean", body: "text" });
+  const plan = engine.plan();
+  const informational = {
+    code: "shared-skill-exposure" as const,
+    message: "源目录无法读取，需人工确认（仅测试显示文案）",
+    blocking: false,
+  };
+  assert.deepEqual(
+    autoDeployBlockers(engine, {
+      ...plan,
+      notices: [informational],
+      warnings: ["这段显示文案不参与策略"],
+    }),
+    [],
+  );
+  const blocking = {
+    code: "skill-source-changed" as const,
+    message: "提示",
+    blocking: true,
+    path: root,
+  };
+  assert.deepEqual(
+    autoDeployBlockers(engine, { ...plan, notices: [blocking], warnings: [] }),
+    [
+      {
+        path: root,
+        status: "blocked",
+        reason: "提示",
+        code: "skill-source-changed",
+      },
+    ],
+  );
+  assert.deepEqual(
+    autoDeployBlockers(engine, {
+      ...plan,
+      notices: [informational],
+      errors: ["计划错误"],
+    }),
+    [{ path: "", status: "blocked", reason: "计划错误" }],
+  );
 });

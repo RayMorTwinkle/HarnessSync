@@ -32,7 +32,7 @@ description: 管理 HarnessSync 的共享技能、全局指令、设备变量与
 
 `service status --json` 查看真实服务状态；`service install` / `service uninstall` 安装或卸载登录启动，等同于修改 `startup.login`。只支持 macOS 和 Linux；使用安装后的 dist/cli.js，tsx 源码入口不能安装。`serve --background` 安静运行、不开浏览器；`open` 复用同库后台服务。同库只能有一个调度器，关闭服务会清除同步、部署与更新检查计时器。
 
-自动部署仍调用正常 plan → apply，保留收据、快照与回滚。冲突、接管、覆盖、外部修改、初始化完整指令替换、计划警告或同步冲突都需要人工审查；不会自动确认这些事项。有效的显式 skip 可让其余干净路径继续部署。API 编辑返回外壳 autoDeployQueued，只表示排队；最终状态看 status.autoDeploy。回滚后不会立即重新部署源配置。
+自动部署仍调用正常 plan → apply，保留收据、快照与回滚。冲突、接管、覆盖、外部修改、初始化完整指令替换、计划错误、阻断通知（notices 中 blocking=true）或同步冲突都需要人工审查；不会自动确认这些事项。插件清单错误、未知/停用工具提示、共享目录可见性和外部保留不会阻断其余干净路径；暂存残留和本机源目录变化/无法读取仍需审查。不要通过 warnings 的文字猜测能否自动部署。有效的显式 skip 可让其余干净路径继续部署。API 编辑返回外壳 autoDeployQueued，只表示排队；最终状态看 status.autoDeploy。回滚后不会立即重新部署源配置。
 
 ## 技能与指令
 

@@ -53,6 +53,7 @@ import type {
   HarnessId,
   Inspection,
   Plan,
+  PlanNotice,
   Receipt,
   Rule,
   Scope,
@@ -179,7 +180,14 @@ export class Engine {
     const device = this.store.device();
     const changes: Change[] = [];
     const errors: string[] = [];
-    const warnings: string[] = [];
+    const notices: PlanNotice[] = [];
+    // Every producer explicitly chooses policy; legacy warnings are derived below.
+    const notice = (
+      code: PlanNotice["code"],
+      message: string,
+      blocking: boolean,
+      path?: string,
+    ) => notices.push({ code, message, blocking, ...(path ? { path } : {}) });
     const disabled = device.disabledHarnesses || [];
     const registered = registry(this.store.home, this.store.root);
     const manifestWarnings = new Map<string, string[]>();
@@ -189,14 +197,23 @@ export class Engine {
         ...error.issues.map((issue) => `${issue.path}：${issue.message}`),
       ]);
     for (const [file, issues] of manifestWarnings)
-      warnings.push(`${file}：${issues.join("；")}`);
+      notice(
+        "plugin-manifest-error",
+        `${file}：${issues.join("；")}`,
+        false,
+        file,
+      );
     const unknownIds = new Set(
       [...manifest.rules, ...manifest.skills]
         .flatMap((entry) => entry.scope.harnesses)
         .filter((id) => !registered.entries.some((e) => e.manifest.id === id)),
     );
     for (const id of unknownIds)
-      warnings.push(`未知 Harness ${id}：已忽略，可能未安装或已移除插件`);
+      notice(
+        "unknown-harness",
+        `未知 Harness ${id}：已忽略，可能未安装或已移除插件`,
+        false,
+      );
     const allHarnesses = adapters(this.store.home, this.store.root);
     const select = (ids: string[]) =>
       selectedHarnesses(ids, this.store.home, this.store.root, disabled);
@@ -526,8 +543,10 @@ export class Engine {
           ...new Set(placement.flatMap((d) => d.readers)),
         ].filter((h) => !select(skill.scope.harnesses).includes(h));
         if (exposure.length)
-          warnings.push(
+          notice(
+            "shared-skill-exposure",
             `${skill.name}：共享技能目录也会被 ${exposure.join("、")} 读取，不能保证仅对所选 Harness 可见`,
+            false,
           );
         for (const entry of placement)
           add({
@@ -560,10 +579,12 @@ export class Engine {
     }
     for (const [id, count] of retained) {
       const harness = allHarnesses.find((h) => h.id === id);
-      warnings.push(
+      notice(
+        "retained-harness-paths",
         harness
           ? `${harness.name} 已停用：${count} 个已管理路径保持原样，重新启用后恢复管理`
           : `${id} 未安装：${count} 个已管理路径保持原样，重新安装后恢复管理`,
+        false,
       );
     }
     if (!options.onlySkillId)
@@ -580,18 +601,34 @@ export class Engine {
         if (exists(`${stage}-old`))
           errors.push(`暂存目录含原件备份，需先恢复未完成部署并检查：${stage}`);
         else
-          warnings.push(`发现 HarnessSync 暂存残留，应用计划时清理：${stage}`);
+          notice(
+            "staging-leftover",
+            `发现 HarnessSync 暂存残留，应用计划时清理：${stage}`,
+            true,
+            stage,
+          );
       }
     } catch (e: any) {
       errors.push(e.message);
     }
     if (!options.onlySkillId) {
       for (const p of device.ignoredNativePaths || [])
-        warnings.push(`外部保留：${p}`);
+        notice("ignored-native-path", `外部保留：${p}`, false, p);
       for (const s of sourceStatus(this.store))
-        if (s.changed || s.note.startsWith("源目录无法读取"))
-          warnings.push(`${s.name}：${s.note}`);
+        if (s.status !== "unchanged")
+          notice(
+            s.status === "changed"
+              ? "skill-source-changed"
+              : "skill-source-unreadable",
+            `${s.name}：${s.note}`,
+            true,
+            s.source,
+          );
     }
+    const uniqueNotices = [
+      ...new Map(notices.map((n) => [JSON.stringify(n), n])).values(),
+    ];
+    const warnings = [...new Set(uniqueNotices.map((n) => n.message))];
     const revision = this.store.revision();
     const id = hash(
       JSON.stringify({
@@ -606,6 +643,7 @@ export class Engine {
         ]),
         errors,
         warnings,
+        notices: uniqueNotices,
       }),
     );
     return {
@@ -613,7 +651,8 @@ export class Engine {
       revision,
       changes,
       errors: [...new Set(errors)],
-      warnings: [...new Set(warnings)],
+      warnings,
+      notices: uniqueNotices,
       createdAt: new Date().toISOString(),
     };
   }
