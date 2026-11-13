@@ -4,7 +4,6 @@ import {
   Box,
   CheckCircle2,
   Cloud,
-  ChevronDown,
   ChevronRight,
   FileText,
   Folder,
@@ -214,16 +213,6 @@ function App() {
               <span className="brand-caption">ONE CONFIG. EVERY AGENT.</span>
             </span>
           </a>
-          <button
-            className="workspace-switch"
-            onClick={() => setPage("device")}
-          >
-            <span className="workspace-avatar">R</span>
-            <span>
-              个人工作空间<small>本地配置库</small>
-            </span>
-            <ChevronDown size={14} />
-          </button>
           <div className="nav-label">工作空间</div>
           <nav>
             {navigation.slice(0, 4).map((n) => (
@@ -290,7 +279,6 @@ function App() {
                 <RefreshCw size={16} className={busy ? "spin" : ""} />
               </button>
               <AppearanceMenu />
-              <span className="top-avatar">R</span>
             </div>
           </header>
           <main>

@@ -68,7 +68,7 @@ export function Overview() {
             value: data.harnesses.filter((h) => h.installed).length,
             unit: `/ ${data.harnesses.length}`,
             icon: Layers3,
-            sub: "DeepSeek · OpenCode · Codex · Claude",
+            sub: data.harnesses.map((h) => h.name.split(" ")[0]).join(" · "),
             go: "overview",
           },
           {

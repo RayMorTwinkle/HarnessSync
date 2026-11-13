@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useContext } from "react";
 import { Box, Globe2 } from "lucide-react";
 import type { Snapshot, Scope } from "../shared/types.ts";
 import { allHarnessIds } from "./lib.ts";
+import { AppContext } from "./app-context.tsx";
 export const ScopeLabel = ({
   scope,
   data,
@@ -19,31 +20,41 @@ export const ScopeLabel = ({
           "项目"}
   </span>
 );
-export const HarnessIcon = ({
+const builtinGlyphs: Record<string, React.ReactNode> = {
+  deepseek: <span className="whale">D</span>,
+  opencode: (
+    <span className="oc-symbol">
+      o<span>c</span>
+    </span>
+  ),
+  codex: <span className="oc-symbol">C</span>,
+  claude: <span className="oc-symbol">✳</span>,
+};
+// Plugin harnesses have no bundled artwork; they show their manifest monogram.
+export function HarnessIcon({
   id,
   small = false,
 }: {
   id: string;
   small?: boolean;
-}) => (
-  <span className={`harness-icon ${id} ${small ? "small" : ""}`}>
-    {id === "deepseek" ? (
-      <span className="whale">D</span>
-    ) : (
-      <span className="oc-symbol">
-        {id === "codex" ? (
-          "C"
-        ) : id === "claude" ? (
-          "✳"
-        ) : (
-          <>
-            o<span>c</span>
-          </>
-        )}
-      </span>
-    )}
-  </span>
-);
+}) {
+  const harness = useContext(AppContext)?.data.harnesses.find(
+    (h) => h.id === id,
+  ) as { monogram?: string; name?: string } | undefined;
+  const glyph = builtinGlyphs[id];
+  return (
+    <span
+      className={`harness-icon ${glyph ? id : "plugin"} ${small ? "small" : ""}`}
+      title={harness?.name}
+    >
+      {glyph || (
+        <span className="monogram">
+          {harness?.monogram || id.slice(0, 1).toUpperCase()}
+        </span>
+      )}
+    </span>
+  );
+}
 export function Empty({
   icon: Icon,
   title,

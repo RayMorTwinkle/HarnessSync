@@ -2902,6 +2902,18 @@ nav button {
 .harness-icon.small.claude .oc-symbol {
   font-size: 13.5px;
 }
+.harness-icon.plugin {
+  background: var(--violet-bg);
+  color: var(--violet);
+}
+.monogram {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.harness-icon.small .monogram {
+  font-size: 9.5px;
+}
 .plan-warnings {
   padding: 13px 24px;
   background: var(--surface-3);
