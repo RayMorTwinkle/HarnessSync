@@ -1,4 +1,9 @@
 import {
+  registry,
+  pluginDirectory,
+  validateHarnessFile,
+} from "./core/harness-registry.ts";
+import {
   installGitSkills,
   checkGitSkillUpdates,
   updateGitSkills,
@@ -53,12 +58,27 @@ const scopeOptions = (c: Command) =>
   c
     .option("--scope <kind>", "global / device / project", "global")
     .option("--target <id>", "设备或项目 ID")
-    .option("--harness <ids>", harnessIds.join(","), harnessIds.join(","));
+    .option(
+      "--harness <ids>",
+      "已注册 ID（逗号分隔）或 all",
+      harnessIds.join(","),
+    );
+const validateHarnessIds = (ids: string[]) => {
+  if (ids.length === 1 && ids[0] === "all") return [...harnessIds];
+  const known = registry(
+    store?.home,
+    store?.root || cli.opts().root,
+  ).entries.map((e) => e.manifest.id);
+  for (const id of ids)
+    if (!known.includes(id))
+      throw new AppError("UNKNOWN_HARNESS", `未知 Harness：${id}`);
+  return ids;
+};
 const scope = (o: any) =>
   scopeSchema.parse({
     kind: o.scope,
     target: o.target,
-    harnesses: o.harness.split(","),
+    harnesses: validateHarnessIds(o.harness.split(",")),
   });
 // Edits keep the stored scope; only options given on the command line override it.
 const editScope = (o: any, cmd: Command, current: Scope) => {
@@ -71,7 +91,9 @@ const editScope = (o: any, cmd: Command, current: Scope) => {
       : kind === current.kind
         ? current.target
         : undefined,
-    harnesses: given("harness") ? o.harness.split(",") : current.harnesses,
+    harnesses: given("harness")
+      ? validateHarnessIds(o.harness.split(","))
+      : current.harnesses,
   });
 };
 const findId = (
@@ -85,6 +107,32 @@ const findId = (
     throw new AppError("NOT_FOUND", "未找到唯一条目，请使用完整 ID");
   return matches[0].id;
 };
+const harness = cli.command("harness").description("管理声明式 Harness 插件");
+harness
+  .command("list")
+  .option("--json", "JSON 输出")
+  .action(run(async () => (await getStore()).harnesses()));
+harness
+  .command("dir")
+  .action(() => console.log(pluginDirectory(undefined, cli.opts().root)));
+harness.command("validate <file>").action(
+  run((file: string) => {
+    const result = validateHarnessFile(path.resolve(file));
+    if (result.error) {
+      process.exitCode = 1;
+      return result.error;
+    }
+    return { valid: true, id: result.manifest!.id };
+  }),
+);
+for (const action of ["enable", "disable"])
+  harness
+    .command(`${action} <id>`)
+    .action(
+      run(async (id: string) =>
+        (await getStore()).setHarnessEnabled(id, action === "enable"),
+      ),
+    );
 cli
   .command("init")
   .description("初始化本地配置库")

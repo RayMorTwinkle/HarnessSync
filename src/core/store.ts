@@ -1,3 +1,4 @@
+import { registry, selectedHarnesses } from "./harness-registry.ts";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -28,6 +29,7 @@ import {
   skillReaders,
 } from "./adapters.ts";
 import {
+  harnessIds,
   ruleInput,
   skillInput,
   projectInput,
@@ -132,6 +134,7 @@ export class Store {
         m,
         d: this.device(),
         s: this.state(),
+        harnesses: registry(this.home, this.root).stamp,
         skills: m.skills.map((s) => bundleDiskHash(this.skillPath(s.id))),
       }),
     );
@@ -220,6 +223,18 @@ export class Store {
       );
   }
   private validateScope(scope: Scope, m: Manifest) {
+    const ids = registry(this.home, this.root).entries.map(
+      (e) => e.manifest.id,
+    );
+    if (
+      !(
+        scope.harnesses.length === harnessIds.length &&
+        harnessIds.every((id) => scope.harnesses.includes(id))
+      ) &&
+      ids.length === scope.harnesses.length &&
+      ids.every((id) => scope.harnesses.includes(id))
+    )
+      scope.harnesses = [...harnessIds];
     if (
       scope.kind === "project" &&
       !m.projects.some((p) => p.id === scope.target)
@@ -388,7 +403,7 @@ export class Store {
           source: "local-import",
         };
         const d = this.device();
-        const native = adapters(this.home)
+        const native = adapters(this.home, this.root)
           .flatMap((h) => [
             {
               h: h.id,
@@ -400,7 +415,8 @@ export class Store {
               .map((p) => ({
                 h: h.id,
                 p: path.join(
-                  projectTargets(h.id, d.bindings[p.id]).skills,
+                  projectTargets(h.id, d.bindings[p.id], this.home, this.root)
+                    .skills,
                   parsed.name,
                 ),
                 projectId: p.id,
@@ -422,7 +438,12 @@ export class Store {
                 "该目录已由 HarnessSync 管理",
               );
             if (
-              !entry.scope.harnesses.includes(target.h) ||
+              !selectedHarnesses(
+                entry.scope.harnesses,
+                this.home,
+                this.root,
+                d.disabledHarnesses,
+              ).includes(target.h) ||
               (target.projectId
                 ? entry.scope.kind !== "project" ||
                   entry.scope.target !== target.projectId
@@ -444,11 +465,23 @@ export class Store {
             if (
               adoptedLink !== undefined &&
               !placeSkills(
-                entry.scope.harnesses,
+                selectedHarnesses(
+                  entry.scope.harnesses,
+                  this.home,
+                  this.root,
+                  d.disabledHarnesses,
+                ),
                 skillReaders(
                   this.home,
                   target.projectId ? d.bindings[target.projectId] : undefined,
+                  this.root,
+                  d.disabledHarnesses,
                 ),
+                registry(this.home, this.root)
+                  .entries.filter(
+                    (e) => e.manifest.skills.sameNameCopies === "collapse",
+                  )
+                  .map((e) => e.manifest.id),
               ).some(
                 (placement) =>
                   path.join(placement.dir, entry.name) === target.p,
@@ -574,6 +607,36 @@ export class Store {
       },
       revision,
     );
+  }
+  harnesses() {
+    const { errors, pluginDir } = registry(this.home, this.root);
+    return {
+      harnesses: adapters(
+        this.home,
+        this.root,
+        this.device().disabledHarnesses,
+      ),
+      errors,
+      pluginDir,
+    };
+  }
+  async setHarnessEnabled(id: string, enabled: boolean, revision?: string) {
+    return this.lock(() => {
+      this.checkRevision(revision);
+      if (
+        !registry(this.home, this.root).entries.some(
+          (e) => e.manifest.id === id,
+        )
+      )
+        throw new AppError("UNKNOWN_HARNESS", `未知 Harness：${id}`);
+      const d = this.device();
+      const disabled = new Set(d.disabledHarnesses || []);
+      if (enabled) disabled.delete(id);
+      else disabled.add(id);
+      d.disabledHarnesses = [...disabled].sort();
+      writeJson(path.join(this.root, "device.json"), d);
+      return this.harnesses();
+    });
   }
   async saveDevice(input: unknown, revision?: string) {
     const value = z

@@ -1,0 +1,42 @@
+{
+  "$schema": "../schema/harness.schema.json",
+  "id": "deepseek",
+  "name": "DeepSeek Harness",
+  "root": {
+    "default": "~/.dsh",
+    "env": "DSH_HOME"
+  },
+  "detect": ["{root}"],
+  "version": {
+    "command": "dsh",
+    "args": ["--version"]
+  },
+  "instructions": {
+    "global": [
+      {
+        "path": "{root}/AGENTS.md",
+        "kind": "main"
+      },
+      {
+        "path": "{env:DSH_AGENTS_HOME|~/.agents}/AGENTS.md",
+        "kind": "shared"
+      }
+    ],
+    "fragments": [],
+    "project": "AGENTS.md"
+  },
+  "skills": {
+    "global": "{root}/skills",
+    "project": ".dsh/skills",
+    "reads": {
+      "global": ["{root}/skills", "{env:DSH_AGENTS_HOME|~/.agents}/skills"],
+      "project": [".dsh/skills", ".agents/skills"]
+    },
+    "sameNameCopies": "collapse"
+  },
+  "notes": {
+    "zh-CN": "Skills 由目录监听刷新；指令在文件操作或恢复会话时刷新。",
+    "en": "Skills refresh through directory watching; instructions refresh on file operations or session resume."
+  },
+  "homepage": "https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/skill/skill-filesystem/README.md"
+}

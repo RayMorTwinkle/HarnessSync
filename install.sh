@@ -91,6 +91,7 @@ printf '正在安装依赖并构建 CLI 与 GUI…\n'
   node dist/cli.js --version
   node dist/cli.js --help >/dev/null
   [ -f dist/ui/index.html ] || die '构建未生成 GUI。'
+  [ -f harnesses/codex.json ] && [ -f schema/harness.schema.json ] || die '缺少 Harness 清单或 JSON Schema。'
 )
 commit="$(git -C "$stage" rev-parse HEAD)"
 release="${commit}-$(date +%Y%m%d%H%M%S)-$$"

@@ -1,0 +1,268 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,31}$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40
+    },
+    "homepage": {
+      "type": "string",
+      "format": "uri"
+    },
+    "monogram": {
+      "type": "string",
+      "pattern": "^[^\\s\\p{C}]{1,2}$"
+    },
+    "root": {
+      "type": "object",
+      "properties": {
+        "env": {
+          "type": "string",
+          "pattern": "^[A-Z_][A-Z0-9_]*$"
+        },
+        "default": {
+          "type": "string",
+          "minLength": 1,
+          "allOf": [
+            {
+              "pattern": "^(?:[^{}\\x00-\\x1f]|\\{root\\}|\\{env:[A-Z_][A-Z0-9_]*\\|[^{}\\x00-\\x1f]+\\})+$"
+            },
+            {
+              "pattern": "^(?!.*\\{root\\}).*$"
+            }
+          ]
+        }
+      },
+      "required": [
+        "default"
+      ],
+      "additionalProperties": false
+    },
+    "detect": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^(?:[^{}\\x00-\\x1f]|\\{root\\}|\\{env:[A-Z_][A-Z0-9_]*\\|[^{}\\x00-\\x1f]+\\})+$"
+      }
+    },
+    "version": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "args": {
+          "minItems": 1,
+          "maxItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "--version",
+              "-v",
+              "-V",
+              "version"
+            ]
+          }
+        }
+      },
+      "required": [
+        "command",
+        "args"
+      ],
+      "additionalProperties": false
+    },
+    "instructions": {
+      "type": "object",
+      "properties": {
+        "global": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(?:[^{}\\x00-\\x1f]|\\{root\\}|\\{env:[A-Z_][A-Z0-9_]*\\|[^{}\\x00-\\x1f]+\\})+$"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "main",
+                  "override",
+                  "shared",
+                  "rules"
+                ]
+              },
+              "when": {
+                "type": "string",
+                "const": "non-empty"
+              }
+            },
+            "required": [
+              "path",
+              "kind"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "fragments": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "allOf": [
+              {
+                "pattern": "^(?:[^{}\\x00-\\x1f]|\\{root\\}|\\{env:[A-Z_][A-Z0-9_]*\\|[^{}\\x00-\\x1f]+\\})+$"
+              },
+              {
+                "pattern": "\\/\\*\\*\\/\\*\\.md$"
+              }
+            ]
+          }
+        },
+        "project": {
+          "type": "string",
+          "pattern": "^(?!\\/)(?!.*(?:^|\\/)\\.\\.(?:\\/|$))(?!.*[{}~\\\\\\x00-\\x1f]).+$"
+        }
+      },
+      "required": [
+        "global",
+        "fragments",
+        "project"
+      ],
+      "additionalProperties": false
+    },
+    "skills": {
+      "type": "object",
+      "properties": {
+        "global": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?:[^{}\\x00-\\x1f]|\\{root\\}|\\{env:[A-Z_][A-Z0-9_]*\\|[^{}\\x00-\\x1f]+\\})+$"
+        },
+        "project": {
+          "type": "string",
+          "pattern": "^(?!\\/)(?!.*(?:^|\\/)\\.\\.(?:\\/|$))(?!.*[{}~\\\\\\x00-\\x1f]).+$"
+        },
+        "reads": {
+          "type": "object",
+          "properties": {
+            "global": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^(?:[^{}\\x00-\\x1f]|\\{root\\}|\\{env:[A-Z_][A-Z0-9_]*\\|[^{}\\x00-\\x1f]+\\})+$"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^(?:[^{}\\x00-\\x1f]|\\{root\\}|\\{env:[A-Z_][A-Z0-9_]*\\|[^{}\\x00-\\x1f]+\\})+$"
+                      },
+                      "legacy": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "project": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^(?!\\/)(?!.*(?:^|\\/)\\.\\.(?:\\/|$))(?!.*[{}~\\\\\\x00-\\x1f]).+$"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "pattern": "^(?!\\/)(?!.*(?:^|\\/)\\.\\.(?:\\/|$))(?!.*[{}~\\\\\\x00-\\x1f]).+$"
+                      },
+                      "legacy": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          },
+          "required": [
+            "global",
+            "project"
+          ],
+          "additionalProperties": false
+        },
+        "sameNameCopies": {
+          "type": "string",
+          "enum": [
+            "collapse",
+            "list"
+          ]
+        }
+      },
+      "required": [
+        "global",
+        "project",
+        "reads",
+        "sameNameCopies"
+      ],
+      "additionalProperties": false
+    },
+    "notes": {
+      "type": "object",
+      "properties": {
+        "zh-CN": {
+          "type": "string"
+        },
+        "en": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "root",
+    "detect",
+    "instructions",
+    "skills",
+    "notes"
+  ],
+  "additionalProperties": false
+}

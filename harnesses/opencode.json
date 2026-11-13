@@ -1,0 +1,37 @@
+{
+  "$schema": "../schema/harness.schema.json",
+  "id": "opencode",
+  "name": "OpenCode",
+  "root": {
+    "default": "{env:XDG_CONFIG_HOME|~/.config}/opencode"
+  },
+  "detect": ["{root}"],
+  "version": {
+    "command": "opencode",
+    "args": ["--version"]
+  },
+  "instructions": {
+    "global": [
+      {
+        "path": "{root}/AGENTS.md",
+        "kind": "main"
+      }
+    ],
+    "fragments": [],
+    "project": "AGENTS.md"
+  },
+  "skills": {
+    "global": "{root}/skills",
+    "project": ".opencode/skills",
+    "reads": {
+      "global": ["{root}/skills", "~/.agents/skills", "~/.claude/skills"],
+      "project": [".opencode/skills", ".agents/skills", ".claude/skills"]
+    },
+    "sameNameCopies": "collapse"
+  },
+  "notes": {
+    "zh-CN": "适配 OpenCode V2；原生指令在后续请求前刷新。",
+    "en": "Supports OpenCode V2; native instructions refresh before subsequent requests."
+  },
+  "homepage": "https://opencode.ai/docs/skills/"
+}

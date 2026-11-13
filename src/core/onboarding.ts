@@ -15,11 +15,7 @@ import {
   writeJson,
 } from "./files.ts";
 import { cliCommand, installSelfSkill } from "./self-skill.ts";
-import {
-  harnessIds,
-  type HarnessId,
-  type Onboarding,
-} from "../shared/types.ts";
+import { type HarnessId, type Onboarding } from "../shared/types.ts";
 
 function sessionDir(store: Store, id: string) {
   if (!/^[a-f0-9-]{36}$/.test(id))
@@ -71,9 +67,16 @@ export async function createOnboarding(store: Store): Promise<Onboarding> {
 }
 export async function bootstrapOnboarding(store: Store, id: string) {
   const record = getOnboarding(store, id)!;
-  const versions = store.home === process.env.HOME ? harnessVersions() : {};
-  const targets = adapters(store.home)
-    .filter((h) => h.installed || Boolean(versions[h.id]))
+  const versions =
+    store.home === process.env.HOME
+      ? harnessVersions(store.home, store.root)
+      : {};
+  const targets = adapters(
+    store.home,
+    store.root,
+    store.device().disabledHarnesses,
+  )
+    .filter((h) => h.enabled && (h.installed || Boolean(versions[h.id])))
     .map((h) => h.id);
   if (!targets.length)
     throw new AppError(
@@ -111,7 +114,11 @@ export async function stageInstructions(
     throw new AppError("INVALID_KEYS", "请选择不重复的全局指令 key");
   return store.lock(() => {
     const state = store.state();
-    const allowed = new Set(adapters(store.home).map((h) => h.instructions));
+    const allowed = new Set(
+      adapters(store.home, store.root, store.device().disabledHarnesses).map(
+        (h) => h.instructions,
+      ),
+    );
     const replacements = keys.map((key) => {
       const item = record.inventory.instructions.find((i) => i.key === key);
       if (!item?.exists || !item.hash || item.error || !allowed.has(item.path))

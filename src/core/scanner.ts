@@ -31,14 +31,23 @@ export function scanMachine(store: Store): Inspection {
         exists: exists(p),
       });
   };
-  const harnesses = adapters(store.home);
+  const harnesses = adapters(
+    store.home,
+    store.root,
+    store.device().disabledHarnesses,
+  );
   const detectOrigin = originDetector(harnesses, warnings);
   for (const h of harnesses) {
     for (const p of [h.skills, ...h.sharedSkills]) addRoot(p, h.id);
     for (const project of store.manifest().projects)
       if (device.bindings[project.id])
         addRoot(
-          projectTargets(h.id, device.bindings[project.id]).skills,
+          projectTargets(
+            h.id,
+            device.bindings[project.id],
+            store.home,
+            store.root,
+          ).skills,
           h.id,
           project.id,
         );

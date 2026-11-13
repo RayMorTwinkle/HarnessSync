@@ -18,6 +18,12 @@ function fixture(t: test.TestContext) {
   const bin = path.join(root, "command's directory");
   fs.mkdirSync(repo);
   fs.mkdirSync(tools);
+  for (const name of ["harnesses", "schema"])
+    fs.cpSync(
+      fileURLToPath(new URL(`../${name}`, import.meta.url)),
+      path.join(repo, name),
+      { recursive: true },
+    );
   const git = (...args: string[]) =>
     execFileSync("git", args, { cwd: repo, stdio: "pipe" });
   git("init", "-b", "main");
@@ -90,6 +96,12 @@ test("installer preserves quoted paths and arguments, upgrades and retains previ
   assert.equal(second.status, 0, second.stderr + second.stdout);
   assert.notEqual(fs.readlinkSync(path.join(x.install, "current")), current);
   assert.ok(fs.existsSync(path.join(x.install, current, "dist/cli.js")));
+  assert.ok(
+    fs.existsSync(path.join(x.install, current, "harnesses/codex.json")),
+  );
+  assert.ok(
+    fs.existsSync(path.join(x.install, current, "schema/harness.schema.json")),
+  );
   assert.equal(
     JSON.parse(execFileSync(cli, [], { encoding: "utf8" })).version,
     "two",

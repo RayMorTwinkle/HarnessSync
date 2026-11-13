@@ -54,3 +54,16 @@ CLI 遵守 Harness 的沙箱权限。写入被拒绝时，说明需要哪些目�
 从 Git 仓库安装技能用 `skills install <owner/repo|Git URL> [--skill 名称,...]`；`skills updates` 检查上游，`skills diff <名称>` 查看差异，`skills update <名称>` 更新（本地改过时会拒绝，只有用户明确同意才加 `--force`），`skills detach <名称>` 脱离上游。
 
 `plan` 中同名目录内容不同的冲突用 `conflicts choose <路径或名称> --use library|native|skip` 处理：library 覆盖原生目录（原件进快照，可回滚），native 把原生版本收进技能库，skip 本次跳过。覆盖或收库前先向用户说明影响。
+
+## 声明式 Harness 插件
+
+用 `__HSYNC_CLI__ harness list --json` 查看工具、启停状态、插件错误与目录。
+`harness dir` 打印本机插件目录；`harness validate <file>` 校验任意 JSON 清单，
+错误包含文件与 JSON 路径，无效时退出码为 1。插件只声明路径，不包含可执行代码。
+
+`harness disable <id>` / `harness enable <id>` 只修改本机管理状态，随后重新 plan。
+启用工具仍需要的路径照常管理，共享副本正常更新；只有不再被启用工具需要、且收据属于
+禁用或缺失工具的路径才保留原样，不更新、不撤下。
+重新启用后恢复管理。禁用不阻止工具读取共享目录中新添加的技能，不是隔离边界。
+`--harness all` 与原始四个工具 ID 的完整集合表示所有已启用工具（包括新增插件）。
+未知源配置 ID 在 status/doctor 提示，不应擅自删掉其收据或原生文件。
