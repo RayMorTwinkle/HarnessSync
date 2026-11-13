@@ -1141,6 +1141,8 @@ export class Sync {
               )
                 n++;
               copy.name = `${stem}-${n}`;
+              // A renamed conflict copy is local; its frontmatter no longer matches upstream.
+              if (copy.source?.type === "git") delete copy.source;
               bundle = structuredClone(bundle);
               const parsed = parseSkill(
                 Buffer.from(bundle["SKILL.md"].content, "base64").toString(),

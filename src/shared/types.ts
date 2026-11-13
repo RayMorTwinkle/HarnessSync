@@ -35,9 +35,18 @@ export const skillInput = z.object({
   enabled: z.boolean().default(true),
   scope: scopeSchema.default({ kind: "global", harnesses: [...harnessIds] }),
 });
+export const gitSkillSourceSchema = z.object({
+  type: z.literal("git"),
+  url: z.string().min(1),
+  ref: z.string().min(1),
+  subpath: z.string(),
+  commit: z.string().regex(/^[0-9a-f]{40,64}$/),
+  installedHash: z.string().min(1),
+});
+export type GitSkillSource = z.infer<typeof gitSkillSourceSchema>;
 export type Skill = Omit<z.infer<typeof skillInput>, "body"> & {
   id: string;
-  source?: string;
+  source?: string | GitSkillSource;
 };
 export const projectInput = z.object({
   name: z.string().trim().min(1).max(100),

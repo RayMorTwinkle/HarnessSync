@@ -107,10 +107,100 @@ DeepSeek、OpenCode、Codex 共用项目 `AGENTS.md`，其项目指令必须同�
 
 认证使用 Git 凭证助手或 SSH；不会保存令牌。GitHub 可运行 `gh auth login`、`gh auth setup-git`。网络调用禁用交互提示，60 秒超时；失败后修复网络或认证再运行 `sync now`。推送被其他设备抢先更新时重新运行即可。setup 连接失败后设置会保留，重试 now 或 disconnect 后更换地址。
 
-不同条目的单方变更自动合并；同条目双方不同修改、删除对编辑、不同 ID 的同名技能记录冲突并保留本地，其余内容仍拉取合并；有冲突时暂停全部推送。冲突的远端版本由所记录的提交 SHA 固定，后续同步不会静默替换该选择。`both` 创建新 ID，技能包 frontmatter 名称同步改为唯一数字后缀；删除冲突不能选择 both。
+不同条目的单方变更自动合并；同条目双方不同修改、删除对编辑、不同 ID 的同名技能记录冲突并保留本地，其余内容仍拉取合并；有冲突时暂停全部推送。冲突的远端版本由所记录的提交 SHA 固定，后续同步不会静默替换该选择。`both` 创建新 ID，技能包 frontmatter 名称同步改为唯一数字后缀；Git 技能的改名副本会删除 Git 来源，成为普通本地技能，原条目的 Git 来源保留。删除冲突不能选择 both。
 
 `history` 中的合并前提交可通过 `restore <SHA>` 恢复源库；原生目录只在显式 plan/apply 后变化。旧版 manifest 在首次源修改或同步时自动迁移，单纯打开、查询不会写入。
 
 GUI 接口：`GET /api/sync/status`（也支持 `/api/sync`），`POST /api/sync/setup`（`{url?,create?,branch?}`）、`POST /api/sync/now`、`POST /api/sync/resolve`（`{entryId,keep}`）、`POST /api/sync/disconnect`；沿用会话 token、Host 和 Origin 校验。
 
 自动同步在 setup 成功后默认开启（120 秒 debounce、10 分钟拉取），仅在 serve/open 服务或 sync watch 运行时执行。状态查询不访问网络。失败指数退避至最多 30 分钟；不自动部署。完整协议、恢复规则、请求/响应示例和限制见 [自动同步与撤销](sync-api.md)。
+
+## Git 技能与上游（v0.4）
+
+只更新源库，不自动部署；安装或更新后仍需 `plan` → `apply --plan <id>`。
+
+| 命令                                                               | 功能                                             |
+| ------------------------------------------------------------------ | ------------------------------------------------ |
+| `skills install <来源> [--skill <名称,...>] [--all] [--ref <ref>]` | 安装完整技能包；也接受 import 的作用域参数       |
+| `skills updates [id...]`                                           | 用 ls-remote 检查上游；省略 ID 检查所有 Git 技能 |
+| `skills update <id...> [--force]`                                  | 更新源库并保存源库 Git 提交；返回逐文件差异      |
+| `skills diff <id>`                                                 | 比较当前源库内容与上游最新内容                   |
+| `skills detach <id>`                                               | 删除 Git 来源记录，保留技能包                    |
+
+来源接受 `owner/repo`、`owner/repo/子路径`、`https://github.com/owner/repo/tree/ref/子路径`、HTTPS/SSH Git URL、`file://` 和已存在的本地仓库路径。GitHub tree URL 自动按最长匹配的分支或标签识别含 `/` 的 ref，也可显式指定 `--ref`。默认 ref 是远端 HEAD；完整提交 SHA 固定版本，不跟随分支更新。标签检查支持 annotated tag 的 peeled commit。
+
+```sh
+hsync skills install owner/repo --skill research,writer --ref main
+hsync skills install owner/repo/skills/research
+hsync skills install file:///tmp/skills.git --all
+hsync skills updates
+hsync skills diff research
+hsync skills update research
+hsync plan
+```
+
+仓库或选定子路径下递归查找含 `SKILL.md` 的目录，跳过 `.git`、`node_modules` 和目录链接。只有一个候选时直接安装；多个候选未选择时，返回 `selectionRequired: true` 与候选列表，CLI 退出码为 1。`--skill` 也可用候选的仓库相对子路径消除同名歧义；`--all` 与 `--skill` 互斥。同名技能一律拒绝安装，提示使用 update；多选安装作为一次事务，任一包校验失败不导入其他包。
+
+发现阶段会在无效候选上返回 `error`，不会让未选中的模板阻止安装合法技能。无效候选的 `name` 仅使用目录名作显示标签，不参与按技能名匹配，可通过 `subpath` 定位；选择无效候选或使用 `--all` 时仍会整体失败。
+
+技能的 `source` 现在兼容旧字符串与以下 Git 记录，写入 `entries/skills/<id>.json`，随源库同步：
+
+```json
+{
+  "type": "git",
+  "url": "https://github.com/owner/repo.git",
+  "ref": "main",
+  "subpath": "skills/research",
+  "commit": "<完整SHA>",
+  "installedHash": "v2:<SHA256>"
+}
+```
+
+Git 包在安装、比较上游及更新时将文件权限统一为 `0644`（普通文件）或 `0755`（可执行文件），再计算指纹和写入，避免不同 umask 或跨设备同步造成误判。`installedHash` 覆盖完整包的文件路径、内容和规范化权限；源库文件被用户修改权限仍会被识别为本地修改。更新时库内容偏离该值会返回 `LOCAL_SKILL_CHANGED`，`--force` 显式覆盖本地修改；下载期间源库变化会返回 `STALE_REVISION`，即使 force 也要重试。技能名发生变化时拒绝更新，应单独安装。保留启停、显示名和作用域。`detach` 后不再检查 Git 上游。原有本机开发目录 `refresh` 机制不变；`skills list/show` 和 HTTP 查询增加设备本地的 `localSource` 字段，Git 技能使用结构化 `source`，普通本地技能没有 Git 来源。
+
+旧版本已经留下的错误权限指纹不会自动改写，需先核对 `skills diff`，再用 `skills update --force` 生成规范化记录。旧版本已创建且仍带 Git 来源的改名冲突副本，可用 `skills detach` 脱离上游；新的 `sync resolve --keep both` 会自动完成脱离。
+
+下载使用 `HARNESS_SYNC_HOME/cache/git-skills`（显式 `--root` 时位于该目录），`git init` + `fetch --depth=1`，支持分支、标签和完整提交 SHA。成功或异常后删除临时目录；进程崩溃留下的目录在下次下载时按已退出 PID 清理。缓存、检查结果与设备信息均不进入源库 Git。检查结果带 `checkedAt`，保存在设备本地 `skill-updates.json`。同批及并发请求中的同一 URL 只执行一次 ls-remote，即使技能 ref 不同；全进程最多三个 Git 命令并发，单次 ls-remote 超时 15 秒，其他 Git 命令超时 60 秒。队列等待不计入命令超时。
+
+沿用 Git 凭证助手或 SSH；安装了 gh 时，GitHub HTTPS 命令临时借用 `gh auth git-credential`，不修改全局配置，也不保存令牌。拒绝带密码、HTTP 用户名、查询参数或片段的 URL。不要使用含凭证的 URL。
+
+### HTTP API
+
+沿用现有 token、Host、Origin 和 JSON 请求校验。成功统一为 `{"ok":true,"data":...}`，参数/操作错误为 `{"ok":false,"code":"...","message":"中文原因"}`。多候选是 HTTP 200 的选择状态；检查更新的单仓库失败记录在对应条目的 `error` 中，不阻止其他仓库返回结果。
+
+| 方法与端点                     | 请求                                                                                       | data 返回                                                                                      |
+| ------------------------------ | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `POST /api/skills/install`     | `{source, skills?: string[], all?: boolean, ref?: string, commit?: string, scope?: Scope}` | `{selectionRequired,url,ref,commit,candidates:[{name,description,subpath,error?}],installed:Skill[]}` |
+| `POST /api/skills/updates`     | `{ids?: string[]}`                                                                         | `[{id,name,checkedAt,commit,latestCommit?,available?,error?}]`                                 |
+| `POST /api/skills/update`      | `{ids:string[],force?:boolean}`                                                            | `[{id,name,commit,files:FileDiff[],note}]`                                                     |
+| `GET /api/skills/<id>/diff`    | 无                                                                                         | `{id,commit,latestCommit,files:FileDiff[]}`                                                    |
+| `POST /api/skills/<id>/detach` | `{}`                                                                                       | 删除 source 后的 Skill                                                                         |
+| `GET /api/skills`              | 无                                                                                         | 含 `source`、`localSource?` 的技能数组                                                         |
+| `GET /api/skills/<id>`         | 无                                                                                         | 含 `source`、`localSource?` 和 `body` 的技能详情                                               |
+
+两步安装示例（以下为 data 内容，SHA 使用占位符）：
+
+```json
+// 第一步：POST /api/skills/install
+{"source":"owner/repo"}
+// 返回
+{"selectionRequired":true,"url":"https://github.com/owner/repo.git","ref":"HEAD","commit":"<完整SHA>","candidates":[{"name":"research","description":"研究技能","subpath":"skills/research"},{"name":"writer","description":"写作技能","subpath":"skills/writer"}],"installed":[]}
+// 第二步：带回上一步的 commit，锁定用户看到的候选版本
+{"source":"owner/repo","commit":"<上一步完整SHA>","skills":["research"]}
+// 返回 selectionRequired:false，installed 为新建 Skill（含结构化 source）
+```
+
+```json
+// POST /api/skills/updates
+{"ids":["<id>"]}
+// 返回 data
+[{"id":"<id>","name":"research","checkedAt":"2026-11-13T00:00:00.000Z","commit":"<已安装SHA>","latestCommit":"<上游SHA>","available":true}]
+// POST /api/skills/update
+{"ids":["<id>"],"force":false}
+// 返回 data
+[{"id":"<id>","name":"research","commit":"<上游SHA>","files":[{"path":"SKILL.md","status":"modified","binary":false,"beforeMode":420,"afterMode":420,"diff":"--- 库/SKILL.md\n+++ 上游/SKILL.md\n..."}],"note":"已更新源库，请预览部署"}]
+```
+
+`FileDiff` 为 `{path,status:"added"|"removed"|"modified",binary,beforeMode?,afterMode?,diff}`。文本返回 unified diff；二进制只返回变化提示，不返回原始数据。权限变化也列入文件摘要。GUI 应保留候选查询的 `commit` 用于第二步，并用检查结果的 `commit` 确认它仍对应当前技能版本。
+
+限制：不递归获取 Git submodule，不下载 Git LFS 对象（保留仓库中的指针文件）；固定提交需要远端允许 depth-one fetch 该 SHA。临时下载不复用工作树；批量更新可能重复下载同仓库，但检查更新会按 URL 去重。检查结果是上一次观测，不代表运行中的 Harness 已加载该配置。

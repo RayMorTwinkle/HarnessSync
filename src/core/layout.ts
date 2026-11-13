@@ -1,19 +1,22 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { ruleInput, skillInput, type Manifest } from "../shared/types.ts";
+import {
+  ruleInput,
+  skillInput,
+  gitSkillSourceSchema,
+  type Manifest,
+} from "../shared/types.ts";
 import { AppError, atomicWrite, exists, noSymlink } from "./files.ts";
 
 export const manifestSchema = z.object({
   schemaVersion: z.literal(1),
   rules: z.array(ruleInput.extend({ id: z.string().regex(/^[a-zA-Z0-9-]+$/) })),
   skills: z.array(
-    skillInput
-      .omit({ body: true })
-      .extend({
-        id: z.string().regex(/^[a-zA-Z0-9-]+$/),
-        source: z.string().optional(),
-      }),
+    skillInput.omit({ body: true }).extend({
+      id: z.string().regex(/^[a-zA-Z0-9-]+$/),
+      source: z.union([z.string(), gitSkillSourceSchema]).optional(),
+    }),
   ),
   projects: z.array(
     z.object({
