@@ -165,6 +165,33 @@ export function registry(home = os.homedir(), root?: string) {
 }
 export const listManifests = (home = os.homedir(), root?: string) =>
   registry(home, root).entries.map((e) => e.manifest);
+// Only variables used to resolve native paths belong in a login service.
+export function harnessEnvironmentVariables(home: string, root: string) {
+  const names = new Set([
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "DSH_HOME",
+    "DSH_AGENTS_HOME",
+    "XDG_CONFIG_HOME",
+  ]);
+  for (const m of listManifests(home, root)) {
+    if (m.root.env) names.add(m.root.env);
+    const templates = [
+      m.root.default,
+      ...m.detect,
+      ...m.instructions.global.map((e) => e.path),
+      ...m.instructions.fragments,
+      m.skills.global,
+      ...m.skills.reads.global.map((r) => (typeof r === "string" ? r : r.path)),
+    ];
+    for (const template of templates)
+      for (const match of template.matchAll(
+        /\{env:([A-Z_][A-Z0-9_]*)\|[^{}]+\}/g,
+      ))
+        names.add(match[1]);
+  }
+  return [...names].sort();
+}
 export function resolveTemplate(
   template: string,
   home: string,

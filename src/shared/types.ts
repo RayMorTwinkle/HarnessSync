@@ -97,6 +97,7 @@ export type Harness = {
   note: string;
 };
 export type Receipt = {
+  instructionCreated?: boolean;
   adoptedSourceHash?: string;
   adoptedLink?: string;
   kind: "instructions" | "skill";
@@ -108,6 +109,7 @@ export type Receipt = {
 };
 export type DeployState = {
   receipts: Receipt[];
+  instructionConsents?: { path: string; outsideHash: string }[];
   conflictChoices?: Record<
     string,
     {

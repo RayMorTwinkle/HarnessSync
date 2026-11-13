@@ -9,6 +9,7 @@ import {
 } from "../src/core/service.ts";
 import { Settings } from "../src/core/settings.ts";
 import { fixture, fakeRunner } from "./settings-helpers.ts";
+import { harnessEnvironmentVariables } from "../src/core/harness-registry.ts";
 
 async function serviceFixture(
   t: Parameters<typeof fixture>[0],
@@ -151,3 +152,238 @@ test("size-based log rotation stays in the temporary store and refuses links", a
   fs.symlinkSync(path.join(root, "unrelated"), log);
   assert.throws(() => rotateServiceLog(store), { code: "SYMLINK_TARGET" });
 });
+
+for (const platform of ["darwin", "linux"]) {
+  test(`${platform} service captures only set native-path overrides, round trips escaping and detects shell drift`, async (t) => {
+    const f = await serviceFixture(t, platform);
+    const plugin = JSON.parse(
+      fs.readFileSync("tests/fixtures/harnesses/acme.json", "utf8"),
+    );
+    plugin.root.default = "{env:ACME_BASE|~/.acme}";
+    plugin.detect.push("{env:ACME_DETECT|~/.acme}");
+    plugin.instructions.global[0].path =
+      "{env:ACME_INSTRUCTIONS|~/.acme}/ACME.md";
+    plugin.instructions.fragments = ["{env:ACME_FRAGMENTS|~/.acme}/**/*.md"];
+    plugin.skills.global = "{env:ACME_SKILLS|~/.acme}/skills";
+    plugin.skills.reads.global = [
+      plugin.skills.global,
+      { path: "{env:ACME_READS|~/.shared}/skills" },
+    ];
+    const dir = path.join(f.store.root, "harnesses");
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, "acme.json"), JSON.stringify(plugin));
+    const names = harnessEnvironmentVariables(f.home, f.store.root);
+    for (const name of [
+      "CLAUDE_CONFIG_DIR",
+      "CODEX_HOME",
+      "DSH_HOME",
+      "DSH_AGENTS_HOME",
+      "XDG_CONFIG_HOME",
+      "ACME_HOME",
+      "ACME_BASE",
+      "ACME_DETECT",
+      "ACME_INSTRUCTIONS",
+      "ACME_FRAGMENTS",
+      "ACME_SKILLS",
+      "ACME_READS",
+    ])
+      assert.ok(names.includes(name), name);
+    const environment = Object.fromEntries(
+      [...names, "HSYNC_UNRELATED_TEST"].map((name) => [
+        name,
+        process.env[name],
+      ]),
+    );
+    t.after(() => {
+      for (const name of [...names, "HSYNC_UNRELATED_TEST"]) {
+        if (environment[name] === undefined) delete process.env[name];
+        else process.env[name] = environment[name];
+      }
+    });
+    const value = `${f.root}/space & < > " ' \\ %n $HOME\nnext\tline\r`;
+    for (const name of names) process.env[name] = value;
+    process.env.ACME_READS = "";
+    delete process.env.ACME_DETECT;
+    process.env.HSYNC_UNRELATED_TEST = "unrelated-test-value";
+    const status = await f.service.install();
+    assert.ok("environment" in status);
+    for (const name of names)
+      assert.equal(status.environment![name], process.env[name], name);
+    assert.equal(Object.hasOwn(status.environment!, "ACME_READS"), true);
+    assert.equal(Object.hasOwn(status.environment!, "ACME_DETECT"), false);
+    assert.ok(
+      !fs.readFileSync(f.service.file, "utf8").includes("unrelated-test-value"),
+    );
+    assert.deepEqual(status.overrideDifferences, []);
+    process.env.ACME_HOME = "changed";
+    delete process.env.CODEX_HOME;
+    process.env.ACME_DETECT = "newly-set";
+    const changed = await f.service.status();
+    assert.deepEqual(changed.overrideDifferences?.sort(), [
+      "ACME_DETECT",
+      "ACME_HOME",
+      "CODEX_HOME",
+    ]);
+    assert.match(changed.warnings!.join(""), /重新安装/);
+    assert.equal((await f.service.install()).warnings!.length, 0);
+  });
+
+  for (const operation of ["install", "uninstall"] as const) {
+    for (const moment of ["status", "stop"] as const) {
+      test(`${platform} ${operation} preserves owned-content replacement during ${moment}`, async (t) => {
+        const f = await serviceFixture(t, platform);
+        await f.service.install();
+        const replacement =
+          fs.readFileSync(f.service.file, "utf8") + "\n# another writer\n";
+        let replaced = false;
+        const service = new LoginService(f.store, {
+          ...f.service.options,
+          envPath: "/changed",
+          runner: async (command, args) => {
+            const trigger =
+              moment === "status"
+                ? args.includes(platform === "darwin" ? "print" : "is-enabled")
+                : args.includes(
+                    platform === "darwin"
+                      ? "bootout"
+                      : operation === "install"
+                        ? "stop"
+                        : "disable",
+                  );
+            if (!replaced && trigger) {
+              replaced = true;
+              fs.writeFileSync(f.service.file, replacement);
+            }
+            return f.runner(command, args);
+          },
+        });
+        if (
+          platform === "darwin" &&
+          operation === "uninstall" &&
+          moment === "stop"
+        )
+          await service.uninstall();
+        else
+          await assert.rejects(service[operation](), {
+            code: "SERVICE_CHANGED",
+          });
+        assert.equal(replaced, true);
+        assert.equal(fs.readFileSync(service.file, "utf8"), replacement);
+      });
+    }
+    test(`${platform} failed ${operation} recovery preserves another writer's replacement`, async (t) => {
+      const f = await serviceFixture(t, platform);
+      await f.service.install();
+      const replacement =
+        fs.readFileSync(f.service.file, "utf8") + "\n# replacement\n";
+      const service = new LoginService(f.store, {
+        ...f.service.options,
+        envPath: "/changed",
+        runner: async (command, args) => {
+          if (
+            args.includes(
+              operation === "install"
+                ? platform === "darwin"
+                  ? "bootstrap"
+                  : "enable"
+                : platform === "darwin"
+                  ? "bootout"
+                  : "stop",
+            )
+          ) {
+            fs.writeFileSync(f.service.file, replacement);
+            return { code: 5, stdout: "failure" };
+          }
+          return f.runner(command, args);
+        },
+      });
+      await assert.rejects(service[operation](), { code: "SERVICE_COMMAND" });
+      assert.equal(fs.readFileSync(service.file, "utf8"), replacement);
+    });
+  }
+  test(`${platform} recovery rejects replaced symlink ancestry`, async (t) => {
+    const f = await serviceFixture(t, platform);
+    const dir = path.dirname(f.service.file);
+    const external = path.join(f.root, "external-service-dir");
+    fs.mkdirSync(external);
+    const target = path.join(external, path.basename(f.service.file));
+    fs.writeFileSync(target, "external");
+    const service = new LoginService(f.store, {
+      ...f.service.options,
+      runner: async (command, args) => {
+        if (args.includes(platform === "darwin" ? "bootstrap" : "enable")) {
+          fs.renameSync(dir, dir + ".saved");
+          fs.symlinkSync(external, dir);
+          return { code: 5, stdout: "failure" };
+        }
+        return f.runner(command, args);
+      },
+    });
+    await assert.rejects(service.install(), { code: "SERVICE_COMMAND" });
+    assert.equal(fs.readFileSync(target, "utf8"), "external");
+  });
+  test(`${platform} install refuses symlink ancestry introduced while stopping`, async (t) => {
+    const f = await serviceFixture(t, platform);
+    await f.service.install();
+    const dir = path.dirname(f.service.file);
+    const external = path.join(f.root, "external-before-write");
+    fs.mkdirSync(external);
+    const target = path.join(external, path.basename(f.service.file));
+    fs.copyFileSync(f.service.file, target);
+    const original = fs.readFileSync(target, "utf8");
+    const service = new LoginService(f.store, {
+      ...f.service.options,
+      envPath: "/changed",
+      runner: async (command, args) => {
+        if (args.includes(platform === "darwin" ? "bootout" : "stop")) {
+          fs.renameSync(dir, dir + ".saved");
+          fs.symlinkSync(external, dir);
+        }
+        return f.runner(command, args);
+      },
+    });
+    await assert.rejects(service.install(), { code: "SYMLINK_TARGET" });
+    assert.equal(fs.readFileSync(target, "utf8"), original);
+  });
+  test(`${platform} recovery does not touch an identical replacement inode`, async (t) => {
+    const f = await serviceFixture(t, platform);
+    await f.service.install();
+    const service = new LoginService(f.store, {
+      ...f.service.options,
+      envPath: "/changed",
+      runner: async (command, args) => {
+        if (args.includes(platform === "darwin" ? "bootstrap" : "enable")) {
+          fs.copyFileSync(f.service.file, f.service.file + ".replacement");
+          fs.renameSync(f.service.file + ".replacement", f.service.file);
+          return { code: 5, stdout: "failure" };
+        }
+        return f.runner(command, args);
+      },
+    });
+    await assert.rejects(service.install(), { code: "SERVICE_COMMAND" });
+    assert.ok(fs.readFileSync(service.file, "utf8").includes("/changed"));
+  });
+  test(`${platform} failed update restores an unchanged previous service`, async (t) => {
+    const f = await serviceFixture(t, platform);
+    await f.service.install();
+    const original = fs.readFileSync(f.service.file, "utf8");
+    let failed = false;
+    const service = new LoginService(f.store, {
+      ...f.service.options,
+      envPath: "/changed",
+      runner: async (command, args) => {
+        if (
+          !failed &&
+          args.includes(platform === "darwin" ? "bootstrap" : "enable")
+        ) {
+          failed = true;
+          return { code: 5, stdout: "failure" };
+        }
+        return f.runner(command, args);
+      },
+    });
+    await assert.rejects(service.install(), { code: "SERVICE_COMMAND" });
+    assert.equal(fs.readFileSync(service.file, "utf8"), original);
+    assert.equal((await f.service.status()).login, true);
+  });
+}
