@@ -582,7 +582,11 @@ test("disabled scan-only readers do not block shared instruction updates or remo
   assert.match(fs.readFileSync(target, "utf8"), /changed/);
   await store.saveRule({ ...rule, enabled: false }, rule.id);
   await engine.apply(engine.plan().id);
-  assert.doesNotMatch(fs.readFileSync(target, "utf8"), /original|changed/);
+  // A file HarnessSync created is removed with its last managed block.
+  assert.ok(
+    !fs.existsSync(target) ||
+      !/original|changed/.test(fs.readFileSync(target, "utf8")),
+  );
 });
 
 test("enabled instruction owner can replace a disabled owner's shared receipt", async (t) => {
@@ -610,7 +614,11 @@ test("enabled instruction owner can replace a disabled owner's shared receipt", 
   );
   await store.saveRule({ ...rule, enabled: false }, rule.id);
   await engine.apply(engine.plan().id);
-  assert.doesNotMatch(fs.readFileSync(target, "utf8"), /before|after/);
+  // A file HarnessSync created is removed with its last managed block.
+  assert.ok(
+    !fs.existsSync(target) ||
+      !/before|after/.test(fs.readFileSync(target, "utf8")),
+  );
 });
 
 test("plan warnings aggregate retained paths per owner, unknown IDs and invalid files", async (t) => {
