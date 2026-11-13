@@ -8,7 +8,7 @@ export type Page =
   | "onboarding"
   | "sync"
   | "history"
-  | "device";
+  | "settings";
 
 export async function api<T>(
   route: string,
@@ -44,3 +44,30 @@ export const allHarnessIds = (data: Snapshot) =>
   data.harnesses.map((h) => h.id);
 export const harnessName = (data: Snapshot, id: string) =>
   data.harnesses.find((h) => h.id === id)?.name || id;
+
+export type SettingsData = {
+  settings: {
+    deploy: { auto: boolean };
+    sync: {
+      auto: boolean;
+      pushDelaySeconds: number;
+      pullIntervalMinutes: number;
+    };
+    updates: { check: boolean; intervalHours: number };
+    startup: { login: boolean };
+  };
+  meta: {
+    path: string;
+    revision: string;
+    allowed: Record<string, any>;
+    service: {
+      supported: boolean;
+      installed: boolean;
+      loaded: boolean;
+      login: boolean;
+      file: string;
+    };
+  };
+};
+type DeepPartial<T> = { [K in keyof T]?: DeepPartial<T[K]> };
+export type SettingsPatch = DeepPartial<SettingsData["settings"]>;

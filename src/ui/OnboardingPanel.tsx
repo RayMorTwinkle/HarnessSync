@@ -280,7 +280,10 @@ export function OnboardingPanel({
                     <div>
                       <strong>{i.path}</strong>
                       <span>
-                        {i.harnesses.map((h) => harnessName(data, h)).join(" / ")} ·{" "}
+                        {i.harnesses
+                          .map((h) => harnessName(data, h))
+                          .join(" / ")}{" "}
+                        ·{" "}
                         {
                           {
                             main: "主全局文件",

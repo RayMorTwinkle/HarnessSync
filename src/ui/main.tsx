@@ -29,13 +29,19 @@ import {
   type AppContextValue,
   type Modal,
 } from "./app-context.tsx";
-import { api, type Page } from "./lib.ts";
+import {
+  api,
+  type Page,
+  type SettingsData,
+  type SettingsPatch,
+} from "./lib.ts";
 import { Modals } from "./Modals.tsx";
 import { OnboardingPanel } from "./OnboardingPanel.tsx";
 import { PlanDrawer } from "./PlanDrawer.tsx";
 import { gitSource, type UpdateCheck } from "./SkillSources.tsx";
 import { SyncPanel } from "./SyncPanel.tsx";
-import { DeviceSettings } from "./pages/Device.tsx";
+import { DeployStatus } from "./DeployStatus.tsx";
+import { SettingsPage } from "./pages/Settings.tsx";
 import { HistoryPage } from "./pages/History.tsx";
 import { Instructions } from "./pages/Instructions.tsx";
 import { Overview } from "./pages/Overview.tsx";
@@ -50,7 +56,7 @@ const navigation: { id: Page; title: string; icon: typeof Box }[] = [
   { id: "onboarding", title: "首次初始化", icon: Sparkles },
   { id: "sync", title: "跨设备同步", icon: Cloud },
   { id: "history", title: "版本与部署", icon: History },
-  { id: "device", title: "设备与变量", icon: Settings2 },
+  { id: "settings", title: "设置", icon: Settings2 },
 ];
 function App() {
   const [data, setData] = useState<Snapshot | null>(null);
@@ -63,13 +69,27 @@ function App() {
   const [scan, setScan] = useState<Inspection | null>(null);
   const [updates, setUpdates] = useState<Record<string, UpdateCheck>>({});
   const [updatesChecked, setUpdatesChecked] = useState(false);
+  const [settings, setSettings] = useState<SettingsData | null>(null);
+  const autoDeploy = !!settings?.settings.deploy.auto;
   const refresh = async () => {
     const x = await api<Snapshot>("snapshot");
     setData(x);
     return x;
   };
+  const saveSettings = async (patch: SettingsPatch) => {
+    setError("");
+    try {
+      setSettings(await api<SettingsData>("settings", patch, "PUT"));
+      await refresh();
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
   useEffect(() => {
     void refresh().catch((e) => setError(e.message));
+    void api<SettingsData>("settings")
+      .then(setSettings)
+      .catch(() => {});
     const t = setInterval(() => {
       if (document.visibilityState === "visible")
         void refresh().catch(() => {});
@@ -85,10 +105,10 @@ function App() {
   const gitSkillCount =
     data?.manifest.skills.filter((s) => gitSource(s)).length || 0;
   useEffect(() => {
-    // Checking runs git ls-remote per repository; once per session is enough.
+    // The server checks upstreams on a schedule; this only reads its cache.
     if (page !== "skills" || !gitSkillCount || updatesChecked) return;
     setUpdatesChecked(true);
-    api<UpdateCheck[]>("skills/updates", {})
+    api<UpdateCheck[]>("skills/updates")
       .then((list) =>
         setUpdates(Object.fromEntries(list.map((u) => [u.id, u]))),
       )
@@ -110,7 +130,7 @@ function App() {
     try {
       const result = await fn();
       await refresh();
-      if (message) setToast(message);
+      if (message) setToast(autoDeploy ? deployedHint(message) : message);
       return result;
     } catch (e: any) {
       setError(e.message);
@@ -119,6 +139,18 @@ function App() {
       setBusy(false);
     }
   };
+  // While automatic deployment is on, keep the header status current until the
+  // server has written the pending changes (or stopped for review).
+  const pendingCount = data
+    ? data.plan.changes.filter(
+        (c) => !["unchanged", "conflict", "skipped"].includes(c.status),
+      ).length
+    : 0;
+  useEffect(() => {
+    if (!autoDeploy || !pendingCount) return;
+    const t = setTimeout(() => void refresh().catch(() => {}), 2500);
+    return () => clearTimeout(t);
+  }, [autoDeploy, pendingCount, data]);
   const fire = (fn: () => Promise<unknown>, message?: string) => {
     void act(fn, message).catch(() => {});
   };
@@ -131,9 +163,6 @@ function App() {
       </div>
     );
   const { manifest, device } = data;
-  const pending = data.plan.changes.filter(
-    (c) => !["unchanged", "conflict", "skipped"].includes(c.status),
-  );
   const scopeText = (scope: Scope) =>
     scope.kind === "global"
       ? "所有设备与项目"
@@ -248,7 +277,7 @@ function App() {
               <span>本地服务运行中</span>
               <span className="version">v{__APP_VERSION__}</span>
             </div>
-            <button className="device-mini" onClick={() => setPage("device")}>
+            <button className="device-mini" onClick={() => setPage("settings")}>
               <span className="device-avatar">
                 <Monitor size={17} />
               </span>
@@ -314,7 +343,7 @@ function App() {
                       projects:
                         "用项目身份关联配置，目录只是它在这台设备上的位置。",
                       history: "源配置由 Git 留存，原生文件部署可以独立回滚。",
-                      device: "设备变量与本地目录绑定保存在这台计算机。",
+                      settings: "这些偏好只属于这台设备，不会同步到其他设备。",
                       onboarding:
                         "先建立清单与管理入口，再让你常用的 AI 协助整理。",
                       sync: "用你自己的私有 Git 仓库，在多台设备间保持同一套配置。",
@@ -322,17 +351,7 @@ function App() {
                   }
                 </p>
               </div>
-              <button
-                className="button primary"
-                disabled={busy}
-                onClick={openPlan}
-              >
-                <Zap size={15} />
-                预览并部署
-                {pending.length > 0 && (
-                  <span className="button-count">{pending.length}</span>
-                )}
-              </button>
+              <DeployStatus auto={autoDeploy} />
             </div>
             {page === "onboarding" && (
               <OnboardingPanel
@@ -356,17 +375,8 @@ function App() {
               />
             )}
             {page === "history" && <HistoryPage />}
-            {page === "device" && (
-              <DeviceSettings
-                data={data}
-                busy={busy}
-                save={async (value) => {
-                  await act(
-                    () => api("device", { value, revision: data.revision }),
-                    "设备设置已保存",
-                  );
-                }}
-              />
+            {page === "settings" && (
+              <SettingsPage settings={settings} save={saveSettings} />
             )}
             <footer className="page-footer">
               <span>
@@ -428,6 +438,14 @@ function App() {
       </div>
     </AppContext.Provider>
   );
+}
+
+// Save messages written for manual deployment ("…，预览后部署") describe the
+// wrong next step when the server writes clean changes by itself.
+function deployedHint(message: string) {
+  return message
+    .replace(/已停用，部署后从 Harness 撤下$/, "已停用，正在从各工具撤下")
+    .replace(/[，,]\s*(请?预览后?部署|等待部署)$/, "，正在写入各工具");
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
