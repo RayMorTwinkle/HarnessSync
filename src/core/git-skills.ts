@@ -454,24 +454,41 @@ function gitEntries(store: Store, ids: string[] = []) {
   ) as GitSkill[];
 }
 type RefRequests = Map<string, Promise<string[][]>>;
-// Skills from one repository share a single ls-remote within one check. A new
-// check never reuses a request that started earlier, which could predate a push.
+const remoteChecks = new Map<
+  string,
+  { started: number; pending: Promise<string[][]> }
+>();
+// Checks that start together share one ls-remote per repository. A check never
+// joins a request that started earlier than that, which could predate a push.
+const joinWindowMs = 50;
 function remoteRefs(
   store: Store,
   url: string,
   shared: RefRequests = new Map(),
 ) {
-  let pending = shared.get(url);
-  if (!pending) {
-    pending = git(url, ["ls-remote", "--", url], store.root, 15_000).then(
-      (output) =>
-        output
-          .split("\n")
-          .filter(Boolean)
-          .map((line) => line.split(/\s+/)),
-    );
-    shared.set(url, pending);
+  const local = shared.get(url);
+  if (local) return local;
+  const key = JSON.stringify([store.root, url]);
+  const running = remoteChecks.get(key);
+  if (running && performance.now() - running.started < joinWindowMs) {
+    shared.set(url, running.pending);
+    return running.pending;
   }
+  const pending = git(url, ["ls-remote", "--", url], store.root, 15_000).then(
+    (output) =>
+      output
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => line.split(/\s+/)),
+  );
+  const entry = { started: performance.now(), pending };
+  remoteChecks.set(key, entry);
+  void pending
+    .finally(() => {
+      if (remoteChecks.get(key) === entry) remoteChecks.delete(key);
+    })
+    .catch(() => {});
+  shared.set(url, pending);
   return pending;
 }
 async function remoteHead(
