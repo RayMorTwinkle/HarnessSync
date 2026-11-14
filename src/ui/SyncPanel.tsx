@@ -21,6 +21,7 @@ import type {
   SyncStatus,
 } from "../shared/types.ts";
 import { useApp } from "./app-context.tsx";
+import { SyncCheck } from "./SyncCheck.tsx";
 import { SyncConflicts } from "./SyncConflicts.tsx";
 
 type HistoryItem = {
@@ -179,9 +180,7 @@ export function SyncPanel({
                   />
                 </label>
                 <p className="hint">
-                  使用本机 GitHub CLI
-                  的登录状态创建，仓库默认私有。未登录时先在终端运行{" "}
-                  <code>gh auth login</code>。
+                  使用本机 GitHub CLI 的登录状态创建，仓库默认私有。
                 </p>
               </>
             ) : (
@@ -209,6 +208,7 @@ export function SyncPanel({
                 </p>
               </>
             )}
+            <SyncCheck api={api} mode={mode} name={name} url={url} />
             <div className="sync-actions">
               <button className="button primary" disabled={busy}>
                 {busy ? (

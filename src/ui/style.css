@@ -4055,3 +4055,82 @@ body {
 .plan-paused small {
   color: var(--text-3);
 }
+
+.sync-check {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.sync-check-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.sync-check-head strong {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.sync-check-head .text-button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+}
+.sync-check ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sync-check li {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.sync-check li > svg {
+  flex: none;
+  margin-top: 2px;
+}
+.sync-check li.ok > svg {
+  color: var(--accent-text);
+}
+.sync-check li.warn > svg {
+  color: var(--warn);
+}
+.sync-check li.fail > svg {
+  color: var(--danger);
+}
+.sync-check li span {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+.sync-check li small {
+  color: var(--text-4);
+  font-size: 11.5px;
+}
+.sync-check li p {
+  margin: 3px 0 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+.sync-check-note,
+.sync-check-error {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-4);
+}
+.sync-check-error {
+  color: var(--danger);
+}
