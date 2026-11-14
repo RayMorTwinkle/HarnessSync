@@ -1,6 +1,10 @@
 import { Backups } from "./core/backup.ts";
 import { Uninstaller } from "./core/uninstall.ts";
 import {
+  instructionCompositions,
+  skillComposition,
+} from "./core/composition.ts";
+import {
   installGitSkills,
   updateGitSkills,
   diffGitSkill,
@@ -134,7 +138,21 @@ export async function startServer(
         const resource = parts[1];
         const id = parts[2];
         let result: unknown;
-        if (resource === "backups" && req.method === "GET" && !id)
+        if (
+          resource === "composition" &&
+          req.method === "GET" &&
+          id === "instructions" &&
+          parts.length === 3
+        )
+          result = { outputs: instructionCompositions(store) };
+        else if (
+          resource === "composition" &&
+          req.method === "GET" &&
+          id === "skills" &&
+          parts.length === 4
+        )
+          result = skillComposition(store, decodeURIComponent(parts[3]));
+        else if (resource === "backups" && req.method === "GET" && !id)
           result = new Backups(store).list();
         else if (resource === "backups" && req.method === "POST" && !id)
           result = await new Backups(store).create(

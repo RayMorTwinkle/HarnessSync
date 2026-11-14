@@ -1,6 +1,11 @@
 import { Backups } from "./core/backup.ts";
 import { Uninstaller } from "./core/uninstall.ts";
 import {
+  compositionBar,
+  instructionCompositions,
+  skillComposition,
+} from "./core/composition.ts";
+import {
   registry,
   pluginDirectory,
   validateHarnessFile,
@@ -159,6 +164,34 @@ const findId = (
     throw new AppError("NOT_FOUND", "未找到唯一条目，请使用完整 ID");
   return matches[0].id;
 };
+const compose = cli.command("compose").description("查看部署内容组成（只读）");
+compose
+  .command("instructions")
+  .option("--json", "JSON 输出")
+  .action(
+    run(async (_options: unknown, command: Command) => {
+      const outputs = instructionCompositions(await getStore());
+      if (command.optsWithGlobals().json) return { outputs };
+      console.log(
+        outputs
+          .map(
+            (o) =>
+              `${o.path}${o.pending ? "（待部署）" : ""}\n${compositionBar(o.totals)}${o.error ? `\n错误：${o.error}` : ""}`,
+          )
+          .join("\n\n"),
+      );
+    }),
+  );
+compose
+  .command("skill <id>")
+  .option("--json", "JSON 输出")
+  .action(
+    run(async (id: string, _options: unknown, command: Command) => {
+      const result = skillComposition(await getStore(), id);
+      if (command.optsWithGlobals().json) return result;
+      console.log(`${result.name}\n${compositionBar(result.totals)}`);
+    }),
+  );
 const harness = cli.command("harness").description("管理声明式 Harness 插件");
 harness
   .command("list")

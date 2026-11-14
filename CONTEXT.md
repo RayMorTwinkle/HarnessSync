@@ -13,7 +13,8 @@
 ## 结构
 
 - `src/core/store.ts`：持久化、输入校验、锁、乐观版本检查、项目、设备、Git。
-- `src/core/engine.ts`：指令合成、变量、原生差异、冲突、事务部署、回滚、只读扫描。
+- `src/core/engine.ts`：原生差异、冲突、事务部署、回滚、只读扫描。
+- `src/core/rendering.ts`：指令分段、变量渲染及部署技能包；`composition.ts`：只读组成、字节统计和字符条。
 - `src/core/files.ts`：原子文件写入、完整技能包、权限、链接检查、frontmatter。
 - `src/core/scanner.ts`：真实目录去重、完整包指纹、指令来源与异常清单。
 - `src/core/onboarding.ts`：扫描快照、仅管理技能引导部署、中文交接提示词、主指令替换登记。
@@ -30,7 +31,9 @@
 
 GUI 不直接操作文件；CLI 和 HTTP 调用同一个 core。
 
-指令只替换 HarnessSync 管理区块；区块外内容保持。Skill 按完整目录复制，保留未知 frontmatter、二进制资源和执行位。
+指令只替换 HarnessSync 管理区块；区块外内容保持。Skill 按完整目录复制，保留未知 frontmatter、二进制资源和执行位。只有顶层 SKILL.md 渲染已知设备/自定义变量及项目范围内的项目变量，其他模板语法和资源原样保留。源身份和同步按模板比较，部署、接管、收据及漂移按渲染包比较。缺变量逐技能 skipped + blocking notice，保留已有副本与收据，手动应用继续其他干净路径；自动部署整次暂停。
+
+组成查询与引擎复用同一套规则排序、渲染和分段。原生、共享、工具、设备、项目、框架按最终输出顺序返回，变量字节从类别中扣除单列。技能组成除顶层 SKILL.md 外只 stat，包括凭证；syncIgnored 暂恒为 false。组成查询不调用完整 plan（避免读取技能资源/凭证），不写文件，不证明会话已加载。
 
 指令收据的 `instructionCreated` 记录该文件最初是否由 HarnessSync 新建；撤下区块后若只剩空白，仅对此类文件删除目标，删除同样进入部署快照并支持失败恢复和回滚。旧收据缺少此字段时保守保留文件。
 

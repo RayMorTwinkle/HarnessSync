@@ -150,7 +150,10 @@ export function skillPackageHash(bundle: Bundle) {
     ),
   );
 }
-export function bundleDiskHash(root: string) {
+export function bundleDiskHash(
+  root: string,
+  rendered: Record<string, Buffer> = {},
+) {
   noSymlink(root);
   if (!fs.statSync(root).isDirectory())
     throw new AppError("INVALID_SKILL", "Skill 路径必须是目录");
@@ -165,16 +168,22 @@ export function bundleDiskHash(root: string) {
       if (entry.isDirectory()) walk(file);
       else if (entry.isFile()) {
         const stat = fs.statSync(file);
-        size += stat.size;
+        const relative = path.relative(root, file).split(path.sep).join("/");
+        const content = Object.hasOwn(rendered, relative)
+          ? rendered[relative]
+          : undefined;
+        size += content ? content.length : stat.size;
         if (size > 16 * 1024 * 1024 || entries.length >= 1000)
           throw new AppError(
             "SKILL_TOO_LARGE",
             "单个 Skill 限制为 16 MB、1000 个文件",
           );
         entries.push([
-          path.relative(root, file).split(path.sep).join("/"),
+          relative,
           stat.mode & 0o777,
-          fileHash(file, stat),
+          content
+            ? crypto.createHash("sha256").update(content).digest("hex")
+            : fileHash(file, stat),
         ]);
       } else throw new AppError("SPECIAL_FILE", `不支持特殊文件：${file}`);
     }
