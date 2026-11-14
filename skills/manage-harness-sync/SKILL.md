@@ -104,3 +104,11 @@ differs 要集中说明关键差异并给建议：`skills import <目录> --use-
 先读两边完整内容，用通俗语言解释关键差异，提出用本机、用远端、都保留或合成一份的具体建议。**用户明确同意具体方案之前，不得写入 merged/，不得运行任何 resolve 命令。** 同意后才操作：完整技能包放 merged/；规则放 rule.md 和 meta.json；项目放 project.json。运行 `sync resolve <entry-id> --keep merged`，也可用 `--from <目录>` 指定结果。技能沿用远端范围、启停与显示名，SKILL.md 提供名称和描述；需要改变范围等字段时另行征得具体方案同意并使用 skills 命令。不要写入凭证。
 
 解决会保留远端 ID、删除工作区并等待推送；`sync undo` 可恢复源和冲突，但不恢复 merged 草稿。全部处理后运行 `sync now`、`sync status`，确认冲突清零且推送恢复，再检查自动部署结果。不要把源同步成功说成所有运行中的 Harness 已加载。
+
+## 初始化前备份、恢复与卸载
+
+在初始化提示词第 0 步前，先告诉用户 `onboard scan` 返回的 `backupDir`。首次扫描或部署自动保存基线；超过 500 MB 时须解释大小，用户明确同意后才能 `backup create --confirm-large`。
+
+`backup list` 查位置，`backup verify <目录>` 校验。恢复先 `backup restore [目录]` 展示差异，再按用户确认的计划执行 `backup restore --plan <id>`；冲突默认保留，只有明确选择的路径才能使用 `--overwrite`。恢复前副本在备份下的 `恢复前/`，恢复后自动部署关闭。
+
+卸载必须先预览 `uninstall --restore`（推荐）或 `uninstall --keep-files`，确认具体结果后 `uninstall --plan <id>`。默认保留本机配置库；删除必须在预览时明确加 `--delete-library`。备份内 `library/` 保存可读配置，远端仓库保留。遇到冲突或过期计划不要绕过检查。

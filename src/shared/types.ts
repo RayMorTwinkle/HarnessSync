@@ -100,6 +100,7 @@ export type Harness = {
   note: string;
 };
 export type Receipt = {
+  fullNativeHash?: string;
   globalPaths?: { home: string; skills: string; instructions: string };
   instructionCreated?: boolean;
   adoptedSourceHash?: string;
@@ -278,6 +279,7 @@ export type Inspection = {
 };
 
 export type Onboarding = {
+  backupDir?: string;
   id: string;
   createdAt: string;
   inventory: Inspection;

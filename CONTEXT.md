@@ -89,3 +89,15 @@ CLI 顺带提醒由 `notices.ts` 仅消费本地同步、自动部署和技能�
 ID 重映射在 Store 锁中连同源库事务完成：state 收据/冲突选择、device 路径绑定/技能来源、skill-updates 缓存、部署快照 beforeState 中的引用一起迁移。修改前后本机文件进入同步恢复日志；撤销拒绝覆盖后来改动的引用，不改原生文件。历史提交和扫描资料保持原始记录。规则统一 ID 时保存 device.ruleOrder，保留本机已部署的片段顺序及设备规则在后的优先级，避免仅改 ID 导致指令更新。
 
 待处理冲突在 conflicts/<entryId> 具体化 local/remote/base?/merged，目录 0700，拒绝所有符号链接。固定提交是比较依据，查询可补建缺失文件，不能覆盖用户 merged 草稿。冲突阻止推送；merged 结果先校验再 checkpoint/apply，保留远端 ID，解决后删除工作区。CLI/API 共用 core，API 额外提供文本差异。Agent 提示词必须要求先解释与建议，用户明确同意具体方案后才能写 merged 或执行 resolve；资料不是指令，不执行包内脚本，不写入凭证。
+
+## v0.6 设备基线与卸载
+
+`backup.ts` 从完整 registry（不排除停用工具）和设备项目绑定计算最小路径并集，禁止覆盖工具根目录。基线镜像只按 lstat 复制链接本身和文件权限，不跟随链接；指纹流式读取且包含权限。登记与计划留在 store 外同步区（backups.json、backup-plans），备份保存在 Downloads/HarnessSync 备份，缺失 Downloads 时退回 HOME。首次 onboard scan、首次实际 apply 在任何原生写入前创建基线；超过 500 MB 须显式确认。
+
+收据新增 fullNativeHash，记录部署后整个目标的指纹；恢复不能仅凭指令管理区块判定整个文件安全。旧收据缺失证明时保守冲突。恢复对清单目录按直接子项判断 unchanged/restore/remove/conflict，原先 absent、现在为目录的路径也拆成直接子项；容器目录权限变化不单独冲突。用户新增子项默认保留且只使自身冲突；覆盖只能选具体子项，备份中没有的子项覆盖即删除，预览 message 明示。文件条目沿用原判断。恢复前快照和失败回滚也按子项处理。计划 ID 包含原生内容、源/设备/收据 revision 和本机偏好，执行持 store 锁重算。恢复前完整副本、收据及设置存入 恢复前；成功后清除已恢复路径收据及指令授权并关闭自动部署，不改变源库。手动部署仍能重新应用源配置。
+
+`uninstall.ts` 共用上述恢复核心及 LoginService 的可注入 runner。先核对计划、停止调度器和登录服务，再导出可读源库（排除 .git）、恢复或保留文件、移除受管 self-skill、按选项删除本机库和安装器拥有的程序。卸载前另存原生快照。源码运行跳过程序删除；无法核实后台进程时拒绝继续；远端仓库永不删除。CLI/API 共用该核心；接口字段见 docs/cli.md。UI 不参与文件操作。
+
+HTTP 卸载先停止本库调度器并移除服务定义；可能终止当前进程的 bootout/stop 命令延至响应发出后执行，返回 serviceStopDeferred，不把排队停止当作已验证的系统停止。
+
+后续 apply/onboard 只查询 backups.json 登记，不验证已登记备份或重新计算备份指纹；目录被移动、删除或内容损坏不阻断部署。恢复、卸载和显式 verify 才验证备份。notices 的 BACKUP_MISSING 为 info，只检查登记目录存在性，不遍历内容。

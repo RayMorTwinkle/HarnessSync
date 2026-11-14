@@ -297,3 +297,52 @@ CLI 提醒放在对象输出的 `reminders` 字段，和 `plan` 自带的部署�
 
 `--name` 创建独立副本，不把旧名称目录记录为可刷新源，避免产生虚假的“源目录有更新”。
 原生旧目录保持原样；如与共享库旧名称版本冲突，仍需在 plan 中明确选择如何处理。
+
+## 备份、恢复与卸载（v0.6）
+
+首次 `onboard scan` 或实际部署前会自动建立本机基线，路径随结果返回。
+默认保存到 `~/Downloads/HarnessSync 备份/YYYY-MM-DD HHmm/`；Downloads 不存在时保存在 HOME 下。
+超过 500 MB 会停止并显示大小，确认后运行 `hsync backup create --confirm-large`。
+
+```bash
+hsync backup create
+hsync backup list
+hsync backup verify "备份目录"
+hsync backup restore                       # 默认最早基线；返回 id 和 changes
+hsync backup restore --plan <id>            # 冲突保持原样
+hsync backup restore --plan <id> --overwrite /绝对/冲突路径
+hsync uninstall --restore                  # 推荐：先预览
+hsync uninstall --keep-files               # 保留原生文件，仍移除管理技能
+hsync uninstall --restore --delete-library # 导出后删除本机库
+hsync uninstall --plan <id>                # 使用预览时的选项执行
+```
+
+恢复只处理清单范围。目录按直接子项分别预览、快照和恢复；目录本身的权限变化不单独算冲突。`--overwrite` 只能选择具体冲突子项，不接受整个技能容器目录。备份中没有的用户新增子项默认保留，预览会明确说明覆盖将删除该子项。
+恢复前副本存入原备份下 `恢复前/`，可将它作为 restore 的目录再次预览。
+卸载前副本存入 `卸载前/`。恢复和卸载都会关闭自动部署；手动 plan 仍可预览源库的部署差异。
+旧版本收据没有完整文件指纹时保守列为冲突。卸载的 restore 模式遇到冲突会停止，先用 backup restore 处理后再预览卸载。
+
+备份包括注册工具（含停用插件）的全局技能写入/读取目录、全局指令与片段目录、已绑定项目的技能和指令路径。
+不会复制工具根目录、凭证或会话历史；链接只复制链接本身，保留文件权限，不保留 ACL、扩展属性或时间戳。
+HOME 外的项目用 `files/_projects/` 保存，实际路径见 manifest。备份登记留在本机，不同步。
+卸载导出可读源配置到备份的 `library/`，默认保留本机库；从源码运行跳过删除程序。
+安装器所有权无法确认的程序或启动器不会删除。远端仓库始终保留。重装按 README 的 install.sh 步骤。
+
+### 界面 API
+
+沿用本机会话 token、Host/Origin 检查及 `{ok:true,data:...}` 响应封装。
+
+| 方法与路径 | 请求 | data |
+| --- | --- | --- |
+| GET /api/backups | 无 | `[{dir,createdAt}]`，最早基线在前 |
+| POST /api/backups | `{confirmLarge?:boolean}` | `{dir,createdAt}` |
+| POST /api/backups/restore-plan | `{dir?:string}` | `{id,dir,revision,settings,changes}` |
+| POST /api/backups/restore | `{planId,overwrite?:string[]}` | `{backupDir,beforeDir,restored:string[],conflicts:string[],autoDeploy:false,message}` |
+| POST /api/uninstall-plan | `{mode:"restore"\|"keep-files",deleteLibrary?:boolean}` | `{id,mode,deleteLibrary?,backupDir,restore?,selfSkills,installation,serviceFile,serviceHash,revision,settings,nativeFingerprint}` |
+| POST /api/uninstall | `{planId}` | `{mode,backupDir,beforeDir,libraryDir,restored?,libraryDeleted,programRemoved,launcherRemoved,autoDeploy:false,serviceStopDeferred,message}` |
+
+`changes[]` 包含 `path,relative,type,fingerprint,absent,current,status,message`；status 为 `unchanged / restore / remove / conflict`。`remove` 表示撤下备份中没有且仍由 HarnessSync 完整拥有的子项。
+`selfSkills[]` 包含 `path,current,owned`；`installation` 包含 `dir,launcher,removeProgram,removeLauncher,marker,launcherHash,message`。
+卸载成功响应后关闭 HTTP 监听。`serviceStopDeferred:true` 表示服务 stop 命令安排在响应后执行，以免系统提前终止当前服务器；失败写入服务日志，响应不能证明该命令已经成功。`STALE_PLAN`（409）要求重新预览；`BACKUP_CONFIRM_SIZE` 要求明确确认大备份。
+
+部署只检查本机 backups.json 是否已有记录，不读取或校验已登记备份；备份被移动、删除或损坏不阻断部署。恢复和卸载仍须完整校验。`BACKUP_MISSING` 为 info 级提醒，仅检查登记目录是否存在，不计算指纹。

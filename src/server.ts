@@ -1,3 +1,5 @@
+import { Backups } from "./core/backup.ts";
+import { Uninstaller } from "./core/uninstall.ts";
 import {
   installGitSkills,
   updateGitSkills,
@@ -132,7 +134,81 @@ export async function startServer(
         const resource = parts[1];
         const id = parts[2];
         let result: unknown;
-        if (req.method === "GET" && resource === "harnesses" && !id) {
+        if (resource === "backups" && req.method === "GET" && !id)
+          result = new Backups(store).list();
+        else if (resource === "backups" && req.method === "POST" && !id)
+          result = await new Backups(store).create(
+            z.boolean().optional().parse(body.confirmLarge),
+          );
+        else if (
+          resource === "backups" &&
+          req.method === "POST" &&
+          id === "restore-plan"
+        )
+          result = new Backups(store).plan(
+            z.string().optional().parse(body.dir),
+          );
+        else if (
+          resource === "backups" &&
+          req.method === "POST" &&
+          id === "restore"
+        )
+          result = await new Backups(store).restore(
+            z.string().parse(body.planId),
+            undefined,
+            z.array(z.string()).optional().parse(body.overwrite),
+          );
+        else if (resource === "uninstall-plan" && req.method === "POST")
+          result = new Uninstaller(store, settings.service).plan(
+            z
+              .object({
+                mode: z.enum(["restore", "keep-files"]),
+                deleteLibrary: z.boolean().optional(),
+              })
+              .strict()
+              .parse(body),
+          );
+        else if (resource === "uninstall" && req.method === "POST") {
+          // bootout/stop can terminate this HTTP process. Remove the service
+          // definition now, but send the report before invoking those commands.
+          const deferred: { command: string; args: string[] }[] = [];
+          const service = new LoginService(store, {
+            ...options.service,
+            runner: async (command, args) => {
+              if (
+                args.some((a) =>
+                  ["bootout", "stop", "daemon-reload"].includes(a),
+                )
+              ) {
+                deferred.push({ command, args });
+                return { code: 0, stdout: "" };
+              }
+              return settings.service.runner(command, args);
+            },
+          });
+          res.once("finish", () => {
+            void (async () => {
+              for (const call of deferred) {
+                const outcome = await settings.service.runner(
+                  call.command,
+                  call.args,
+                );
+                if (outcome.code)
+                  console.error("登录服务停止失败：", outcome.stdout);
+              }
+            })().catch((error) =>
+              console.error("登录服务停止失败：", error.message),
+            );
+          });
+          result = {
+            ...(await new Uninstaller(store, service, {
+              stopScheduler: async () => {
+                await stopBackground();
+              },
+            }).apply(z.string().parse(body.planId))),
+            serviceStopDeferred: deferred.length > 0,
+          };
+        } else if (req.method === "GET" && resource === "harnesses" && !id) {
           result = store.harnesses();
         } else if (req.method === "PUT" && resource === "harnesses" && id) {
           const input = z
@@ -403,6 +479,11 @@ export async function startServer(
         const autoDeployQueued = mutation
           ? background.queue(`api:${resource}${id ? "/" + id : ""}`)
           : false;
+        if (resource === "uninstall")
+          res.once("finish", () => {
+            server.close();
+            void vite?.close();
+          });
         return send(200, {
           ok: true,
           data: result,

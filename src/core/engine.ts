@@ -1,3 +1,4 @@
+import { Backups, backupFingerprint } from "./backup.ts";
 import {
   registry,
   selectedHarnesses,
@@ -1058,6 +1059,7 @@ export class Engine {
       const changed = plan.changes.filter(
         (c) => !["unchanged", "skipped"].includes(c.status),
       );
+      if (changed.length) new Backups(this.store).ensureLocked();
       for (const stage of this.staging()) cleanStaging(stage);
       const confirmGlobalPaths = (receipts: Receipt[]) => {
         const harnesses = adapters(
@@ -1242,6 +1244,7 @@ export class Engine {
               ? { adoptedSourceHash: state.conflictChoices[c.path].sourceHash }
               : {}),
             path: c.path,
+            fullNativeHash: backupFingerprint(c.path),
             kind: c.kind,
             harness: c.harness,
             sourceId: c.sourceId,
