@@ -70,6 +70,17 @@ export function collectNotices(store: Store): Notice[] {
       command: "hsync backup create",
     });
   const manifest = read(() => store.manifest());
+  if (
+    read(() => local<{ pending: boolean }>(store, "self-skill-update.json"))
+      ?.pending &&
+    manifest?.skills.some((s) => s.name === "manage-harness-sync")
+  )
+    result.push({
+      code: "SELF_SKILL_UPDATE",
+      severity: "action",
+      message: `有新版管理技能可用；当前内容已修改或缺少生成指纹，未自动覆盖。确认替换正文和资源后运行 hsync self-skill（保留范围与启停）。${agentNotice}`,
+      command: "hsync self-skill",
+    });
   const sync = read(() => local<SyncConfig>(store, "sync.json"));
   if (sync?.conflicts?.length) {
     const list = names(

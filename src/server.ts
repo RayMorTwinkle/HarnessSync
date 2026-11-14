@@ -34,7 +34,7 @@ import { checkSync, type SyncCheckOptions } from "./core/sync-check.ts";
 import { Store } from "./core/store.ts";
 import { AppError, hash, parseSkill } from "./core/files.ts";
 import { scopeSchema } from "./shared/types.ts";
-import { installSelfSkill } from "./core/self-skill.ts";
+import { installSelfSkill, refreshSelfSkill } from "./core/self-skill.ts";
 import {
   createOnboarding,
   getOnboarding,
@@ -600,6 +600,7 @@ export async function startServer(
     });
   });
   try {
+    await refreshSelfSkill(store);
     background = await startBackgroundScheduler(store, engine, {
       intervalMs: options.schedulerIntervalMs,
       debounceMs: options.autoDeployDelayMs,

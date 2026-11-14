@@ -322,6 +322,7 @@ export class Store {
     id?: string,
     revision?: string,
     resources?: Bundle,
+    options: { replaceResources?: boolean } = {},
   ) {
     const input = skillInput.parse(data);
     return this.mutate(
@@ -342,9 +343,10 @@ export class Store {
           scope: input.scope,
           source: m.skills.find((s) => s.id === id)?.source,
         };
-        const bundle: Bundle = id
-          ? readBundle(this.skillPath(id))
-          : Object.create(null);
+        const bundle: Bundle =
+          id && !options.replaceResources
+            ? readBundle(this.skillPath(id))
+            : Object.create(null);
         if (resources) Object.assign(bundle, resources);
         const metadata = bundle["SKILL.md"]
           ? parseSkill(

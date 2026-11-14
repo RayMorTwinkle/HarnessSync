@@ -21,7 +21,11 @@ import {
   noSymlink,
   writeJson,
 } from "./files.ts";
-import { cliCommand, installSelfSkill } from "./self-skill.ts";
+import {
+  cliCommand,
+  installSelfSkill,
+  refreshSelfSkill,
+} from "./self-skill.ts";
 import { type HarnessId, type Onboarding } from "../shared/types.ts";
 
 const repositoryRunner: CommandRunner = (command, args) =>
@@ -212,7 +216,9 @@ export async function bootstrapOnboarding(store: Store, id: string) {
       "NO_HARNESS",
       "未检测到 Harness CLI 或配置目录，请先安装一个 Harness",
     );
-  const skill = await installSelfSkill(store, undefined, targets);
+  const skill =
+    (await refreshSelfSkill(store)) ??
+    (await installSelfSkill(store, undefined, targets));
   const engine = new Engine(store);
   const options = { onlySkillId: skill.id };
   const plan = engine.plan(options);

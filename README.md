@@ -85,6 +85,8 @@ hsync doctor --json
 
 Onboarding scans known tool locations and deploys only the management skill to detected tools. It preserves existing global instructions. Hand the generated prompt to your chosen tool to organize the rest of your library.
 
+The management skill uses the installer's verified `current/dist/cli.js` entry and stores paths under HOME as `{{device.home}}/...`; deployment renders local absolute paths. New `serve`/`open` services and `onboard prepare` refresh an existing, unmodified generated skill in place, preserving scope, enabled state and display name. Refreshes create source commits and service startup follows `deploy.auto`; onboarding still deploys only this skill. Startup never installs a missing skill. Modified skills and older copies without a generation fingerprint are preserved with a `SELF_SKILL_UPDATE` reminder in `status`. After reviewing, run `hsync self-skill` to explicitly replace their content and resources. Fingerprints travel with the source skill; reminder caches stay local. Paths outside HOME or different relative installation locations can still need coordination across devices.
+
 Examples for an existing skill package and project (replace the paths; use the project ID returned by `projects add`):
 
 ```sh

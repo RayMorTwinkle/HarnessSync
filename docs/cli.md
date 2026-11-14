@@ -19,6 +19,12 @@
 | `open [--port <端口>]`  | 自动打开 Web UI；别名 `gui`、`webui`。复用同库服务或启动新服务 |
 | `serve [--port <端口>]` | 启动本机 GUI，默认 47821；`--dev` 用于源码开发                 |
 
+管理技能中的本机 CLI 与配置根路径，位于 HOME 下时保存为 `{{device.home}}/...`，部署时渲染为本机绝对路径；HOME 外保留绝对路径。安装器的 `releases/<版本>` 在 `current` 符号链接确实指向它时，命令改用 `current/dist/cli.js`，不解析掉 `current`；初始化提示词仍使用本机绝对路径。
+
+`serve` / `open` 启动新服务时在调度器开始前刷新库中已有的管理技能；`onboard prepare/bootstrap` 同样先刷新已有技能，缺少时仅在初始化授权范围内安装。刷新保留原 ID、作用域、启停和显示名，完整替换正文、描述和资源，经过 `saveSkill` 产生源 Git 提交；服务启动后按 `deploy.auto` 走正常计划、收据、快照与回滚。初始化仍只部署管理技能。
+
+自动刷新仅覆盖与上次生成指纹一致的内容，指纹保存在技能 `SKILL.md` 的 `harness-sync-generated` 元数据中并随源库同步。手改正文、描述、元数据或资源时不覆盖；没有指纹的旧安装也保守跳过。`status` 的 `reminders` / 界面提醒显示 `SELF_SKILL_UPDATE`，确认替换后运行 `hsync self-skill`；该显式命令保留作用域、启停和显示名。服务启动不会自动安装库里没有的管理技能。HOME 下相同相对安装位置可跨设备生成一致源内容；HOME 外路径或不同相对位置仍可能需要人工协调。
+
 `doctor` 的 `healthy` 表示没有阻断性错误，不代表没有待部署变更；同时检查 `pendingChanges`。`observed: filesystem-only` 与 `sessionLoaded: unknown` 表示尚未观测会话加载。
 
 `open` 新启动的服务在当前终端运行，按 Ctrl+C 停止；复用已有服务时命令立即结束。默认端口 47821，浏览器启动失败时输出可手动访问的 URL。其他程序占用端口、或该端口的 HarnessSync 使用另一配置库时拒绝打开，可换用 `--port`。`serve` 保留仅启动服务、不打开浏览器的行为。

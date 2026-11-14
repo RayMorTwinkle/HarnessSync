@@ -23,7 +23,7 @@
 - `src/core/auto-deploy.ts`：保守检查完整计划、排队自动部署及本机结果记录。
 - `src/core/service.ts`：可注入命令执行器的登录服务与日志轮转。
 - `src/core/update-checks.ts`、`sync-scheduler.ts`：上游更新检查、退避、同库调度器独占及关闭。
-- `src/core/self-skill.ts`：从仓库内模板安装管理 Skill，注入本机 CLI 路径。
+- `src/core/self-skill.ts`：从仓库内模板安装与安全刷新管理 Skill，优先稳定入口，HOME 路径保存为设备变量；随技能元数据同步生成包指纹，手改或缺少指纹时保留并给本机提醒。
 - `src/server.ts`：只监听本机的 HTTP API 与前端服务。
 - `src/cli.ts`：CLI。`src/ui/`：React GUI。
 

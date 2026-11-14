@@ -115,3 +115,9 @@ macOS 使用 `$HOME/Library/LaunchAgents/io.github.raymortwinkle.harness-sync.pl
 变量更新会按渲染结果重新计算技能更新和收据，不把仍匹配旧收据的部署误报为外部修改。技能缺变量时保留占位符原文照常部署，并给出不阻断的 `skill-missing-variable` 提醒（技能正文常引用变量语法作示例；新设备也不会因此缺少技能）。补齐变量后计划显示该技能更新。
 
 `compose instructions [--json]` 和 `compose skill <id> [--json]` 只读展示组成，不修改原生文件。变量字节从原类别扣除并单列。指令的 `pending` 比较计划全文与磁盘，`error` 不代表部署成功；技能缺变量时占位符按原文计入。HTTP 接口和字段见 [CLI 文档](cli.md#内容组成只读)。
+
+## 内置管理技能刷新
+
+`serve/open` 启动新服务时，在调度器开始前刷新已有的 `manage-harness-sync`，之后按 `deploy.auto` 部署；关闭时仅更新源库，原生文件等待手动 plan/apply。`onboard prepare/bootstrap` 继续只部署管理技能。启动服务不会自动安装缺少的管理技能。
+
+自动刷新使用技能元数据 `harness-sync-generated` 的完整生成包指纹，不比较用户的作用域、启停和显示名，因此这些设置会保留并继续生效。手改内容或没有旧指纹时跳过，设备本地 `self-skill-update.json` 缓存提醒；状态显示 `SELF_SKILL_UPDATE`。确认替换正文和资源后用 `hsync self-skill` 主动更新。指纹随技能同步，提醒缓存不进入 Git；路径在 HOME 下时保存为设备变量，部署时才渲染。
