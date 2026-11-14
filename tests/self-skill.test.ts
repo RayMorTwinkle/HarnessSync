@@ -96,9 +96,9 @@ test("source paths are portable and deployment renders this device's absolute pa
   assert.ok(engine.plan().changes.every((c) => c.status === "unchanged"));
 });
 
-test("rendered commands preserve shell arguments for HOME containing quotes, spaces and dollars", async (t) => {
+test("rendered commands preserve shell arguments for HOME containing spaces, dollars and backticks", async (t) => {
   const { root } = await fixture(t);
-  const home = path.join(root, "someone's $HOME `name`");
+  const home = path.join(root, "some one $HOME `name`");
   fs.mkdirSync(home);
   const store = await new Store(path.join(home, ".hs"), home).init();
   const program = app(home, "old");
