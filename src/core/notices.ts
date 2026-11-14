@@ -55,6 +55,20 @@ export function collectNotices(store: Store): Notice[] {
       return undefined;
     }
   };
+  const missingBackups = read(() =>
+    local<{ dir: string }[]>(store, "backups.json")?.filter(
+      (b) => !exists(b.dir),
+    ),
+  );
+  if (missingBackups?.length)
+    result.push({
+      code: "BACKUP_MISSING",
+      severity: "info",
+      message:
+        "初始备份已被移动或删除；恢复不可用，可运行 hsync backup create 新建",
+      paths: missingBackups.map((b) => b.dir),
+      command: "hsync backup create",
+    });
   const manifest = read(() => store.manifest());
   const sync = read(() => local<SyncConfig>(store, "sync.json"));
   if (sync?.conflicts?.length) {
@@ -211,7 +225,7 @@ export async function cliNoticeOutput(
       ? notices
           .map(
             (n) =>
-              `[HarnessSync] ${n.message}\n  查看：${n.command || "hsync status"}${n.paths?.length ? `\n  文件：${tilde(store, path.join(store.root, "conflicts"))}/<冲突 ID>/{local,remote,merged}` : ""}`,
+              `[HarnessSync] ${n.message}\n  查看：${n.command || "hsync status"}${n.paths?.length ? (n.code === "SYNC_CONFLICTS" ? `\n  文件：${tilde(store, path.join(store.root, "conflicts"))}/<冲突 ID>/{local,remote,merged}` : `\n  文件：${n.paths.map((p) => tilde(store, p)).join("、")}`) : ""}`,
           )
           .join("\n")
       : `[HarnessSync] 有 ${notices.length} 类提醒待查看；运行 hsync status --json 查看详情。`;

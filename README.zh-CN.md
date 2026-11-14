@@ -58,6 +58,14 @@ bash install-harness-sync.sh --help
 
 内置[安装技能](skills/harness-sync-install/SKILL.md)也可指导 AI 安装和初始化。
 
+### 备份与卸载
+
+首次扫描或实际部署前自动保存本机基线到 `~/Downloads/HarnessSync 备份/`；没有 Downloads 时放在 HOME 下。包含已注册工具（含停用工具）及已绑定项目的技能、指令路径，不复制工具根目录、凭证和会话；符号链接只保存链接本身。
+
+运行 `hsync backup list` 查看位置，`hsync backup verify <目录>` 校验。`hsync backup restore` 先预览，再用 `--plan <id>` 执行。外部修改默认保留，覆盖需指定 `--overwrite <路径>`。恢复前另存副本，并关闭自动部署。
+
+卸载先运行 `hsync uninstall --restore`（推荐）或 `hsync uninstall --keep-files` 预览，再运行 `hsync uninstall --plan <id>`。配置库导出到备份的 `library/`，预览加 `--delete-library` 才删除本机库；远端仓库不删除。从源码运行不会删除程序。详见 [CLI 文档](docs/cli.md)。
+
 ## 快速开始
 
 ```sh

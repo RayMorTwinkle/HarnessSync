@@ -1,3 +1,5 @@
+import { Backups } from "./core/backup.ts";
+import { Uninstaller } from "./core/uninstall.ts";
 import {
   registry,
   pluginDirectory,
@@ -92,7 +94,7 @@ const run =
     }
     if (value !== undefined)
       output(
-        store
+        store && fs.existsSync(store.root)
           ? await cliNoticeOutput(store, value, {
               quiet:
                 (group === "hsync" && name === "status") ||
@@ -290,6 +292,56 @@ cli
   .command("self-skill")
   .description("将 AI 管理 Skill 安装到源配置库，按自动部署设置写入各工具")
   .action(run(async () => installSelfSkill(await getStore())));
+const backup = cli.command("backup").description("备份与恢复原生配置");
+backup
+  .command("create")
+  .option("--confirm-large", "确认复制超过 500 MB 的备份")
+  .action(
+    run(async (o) => new Backups(await getStore()).create(o.confirmLarge)),
+  );
+backup
+  .command("list")
+  .action(run(async () => new Backups(await getStore()).list()));
+backup
+  .command("verify <dir>")
+  .action(
+    run(async (dir) => ({
+      valid: true,
+      manifest: new Backups(await getStore()).verify(dir),
+    })),
+  );
+backup
+  .command("restore [dir]")
+  .option("--plan <id>", "执行已预览的计划")
+  .option("--overwrite <paths...>", "覆盖指定冲突路径")
+  .action(
+    run(async (dir, o) => {
+      const b = new Backups(await getStore());
+      return o.plan ? b.restore(o.plan, dir, o.overwrite) : b.plan(dir);
+    }),
+  );
+cli
+  .command("uninstall")
+  .option("--restore", "恢复备份（推荐）")
+  .option("--keep-files", "保留已部署文件")
+  .option("--delete-library", "删除本机配置库")
+  .option("--plan <id>", "执行已预览的计划")
+  .action(
+    run(async (o) => {
+      const u = new Uninstaller(await getStore());
+      if (o.plan) return u.apply(o.plan);
+      if (!!o.restore === !!o.keepFiles)
+        throw new AppError(
+          "UNINSTALL_MODE",
+          "请选择 --restore 或 --keep-files",
+        );
+      return u.plan({
+        mode: o.restore ? "restore" : "keep-files",
+        deleteLibrary: !!o.deleteLibrary,
+      });
+    }),
+  );
+
 const onboard = cli
   .command("onboard")
   .description("扫描、安装管理技能并生成 AI 初始化提示词");

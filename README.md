@@ -58,6 +58,14 @@ bash install-harness-sync.sh --help
 
 The bundled [installation skill](skills/harness-sync-install/SKILL.md) can also guide an AI through installation and onboarding.
 
+### Backup and uninstall
+
+Before the first scan or deployment, HarnessSync saves a local baseline under `~/Downloads/HarnessSync 备份/` (or HOME when Downloads is absent). It includes registered skill/instruction paths, including disabled tools and bound projects; it excludes tool roots, credentials, and session history. Links are preserved without following them.
+
+Use `hsync backup list`, `hsync backup verify <dir>`, and `hsync backup restore` to inspect and preview recovery. Execute with `--plan <id>`; external edits stay untouched unless explicitly selected with `--overwrite`. Recovery saves another snapshot and disables automatic deployment.
+
+Preview `hsync uninstall --restore` (recommended) or `hsync uninstall --keep-files`, then execute `hsync uninstall --plan <id>`. The library is exported into the backup; local library deletion requires `--delete-library` in the preview. Remote repositories remain intact. Source runs skip program removal. See [CLI details](docs/cli.md#备份恢复与卸载v06).
+
 ## Quick start
 
 ```sh

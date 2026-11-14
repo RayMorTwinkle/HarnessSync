@@ -51,3 +51,5 @@ Codex 的 `.agents/skills`、Claude 的 `.claude/skills` 可能被其他工具�
 如果之后才连接已有仓库，同内容条目会自动合并，不同内容会成为冲突，用 `hsync sync conflicts` 查看 `<store>/conflicts/<entryId>/` 并处理。
 
 第一台且没有已有同步仓库时，本机初始化完成后可介绍 `hsync sync setup --create` 或 `hsync sync setup --url <仓库URL>`。按可用命令帮助执行；这是可选末步，不把本地 Git 历史当作已完成跨设备同步。
+
+初始化第 0 步前，先向用户展示扫描结果的 `backupDir`：这是使用 HarnessSync 前的本机基线。说明可用 `hsync backup restore` 预览恢复，执行后关闭自动部署。没有完成备份时不要继续部署；大于 500 MB 需用户明确同意后创建。
