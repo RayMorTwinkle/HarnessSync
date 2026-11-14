@@ -38,6 +38,8 @@ description: 管理 HarnessSync 的共享技能、全局指令、设备变量与
 
 ## 技能与指令
 
+技能包中的 `.gitignore`、`.gitattributes` 和其他 `.git*` 普通文件按包数据保存，不作为配置库的忽略或转换规则；文件原始字节（含 CRLF、二进制）和执行位参与提交、同步、历史比较与源恢复。只有本机 `sync ignore` 规则控制上传范围，包内 `.git` 仍按原有导入规则排除。下次提交会自动补收工作区仍存在、旧版本漏提交的文件；已丢失且从未进入提交的内容无法从旧历史恢复。
+
 技能使用包含 `SKILL.md` 的完整目录，通过 `skills import /完整/技能目录` 导入。脚本、执行权限、参考资料、资源文件和额外元数据都会保留。用 `skills edit <id> --file /完整/SKILL.md` 修改正文并保留资源。
 
 默认共享给四个 Harness。项目专属使用 `--scope project --target <项目ID>`，设备专属使用 `--scope device --target <设备ID>`；`--harness codex` 等参数选择工具。DeepSeek、OpenCode、Codex 共用项目 `AGENTS.md`，面向其中任一工具的项目指令需要同时选择三者；Claude Code 使用独立 `CLAUDE.md`。项目技能可以分别选择。

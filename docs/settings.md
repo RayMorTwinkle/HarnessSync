@@ -106,7 +106,7 @@ macOS 使用 `$HOME/Library/LaunchAgents/io.github.raymortwinkle.harness-sync.pl
 
 ## 上传忽略规则
 
-`sync-ignore.json` 是设备本地设置，独立于 `config` 键，不进入源 Git。通过 `sync ignore add|remove|list` 或 `/api/sync/ignore` 管理；规则只改变上传及拉取合并，不改变本机部署。默认无忽略，技能内凭证也同步。详见 [CLI 上传忽略规则](cli.md#本机上传忽略规则)。
+`sync-ignore.json` 是设备本地设置，独立于 `config` 键，不进入源 Git。通过 `sync ignore add|remove|list` 或 `/api/sync/ignore` 管理；规则只改变上传及拉取合并，不改变本机部署。默认无忽略，技能内凭证也同步。技能包内的 `.gitignore` 不构成本机设置，`.gitattributes` 也不参与源库字节转换；仅此处的规则能排除上传内容，本机提交仍保留完整包。详见 [CLI 上传忽略规则](cli.md#本机上传忽略规则)。
 
 ## 设备变量与组成预览
 

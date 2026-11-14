@@ -572,7 +572,9 @@ test("setup merges two existing libraries and rejects invalid options, credentia
     /凭证/,
   );
   fs.symlinkSync("/tmp", path.join(b.repo, "unsafe"));
-  b.commit("unsafe");
+  // Craft an unsafe remote outside Store, which now refuses source symlinks.
+  b.git(["add", "--", "unsafe"]);
+  b.git(["-c", "commit.gpgsign=false", "commit", "-m", "unsafe"]);
   b.git(["push", remote, "HEAD:main"]);
   await assert.rejects(sa.setup({ url: remote }), /符号链接/);
 });
@@ -1441,10 +1443,11 @@ for (const operation of ["resolve", "merge"] as const)
     fs.writeFileSync(file, raw);
     fs.chmodSync(file, 0o640);
     a.commit("保留原始格式");
+    // Safety commits also build trees now; fail the merge after its checkpoint.
     const reject =
       operation === "resolve"
-        ? "args.includes('commit') && args.some(a => a.startsWith('解决同步冲突：remote'))"
-        : "args[0] === 'write-tree'";
+        ? "args.includes('commit-tree') && args.some(a => a.startsWith('解决同步冲突：remote'))"
+        : `args[0] === 'write-tree' && fs.existsSync(${JSON.stringify(path.join(a.root, "sync-recovery.json"))})`;
     await interceptedGit(
       dir,
       `if (${reject}) { process.stderr.write('fatal: 测试注入 Git 失败\\n'); process.exit(1); }`,
@@ -1485,7 +1488,7 @@ test("review 3: an edit during fetch is retained in the checkpoint HEAD after me
     dir,
     `
     if (args[0] === 'fetch') fs.writeFileSync(${JSON.stringify(file)}, ${JSON.stringify(edited)});
-    if (args[0] === 'write-tree') { process.stderr.write('fatal: 测试注入写树失败\\n'); process.exit(1); }
+    if (args[0] === 'write-tree' && fs.existsSync(${JSON.stringify(path.join(a.root, "sync-recovery.json"))})) { process.stderr.write('fatal: 测试注入写树失败\\n'); process.exit(1); }
   `,
     async () => {
       await assert.rejects(sa.now());

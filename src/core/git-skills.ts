@@ -241,12 +241,50 @@ async function checkout<T>(
       ],
       dir,
     );
-    await git(
-      source.url,
-      ["checkout", "--quiet", "--detach", "FETCH_HEAD"],
-      dir,
-    );
-    const head = await git(source.url, ["rev-parse", "HEAD"], dir);
+    const head = await git(source.url, ["rev-parse", "FETCH_HEAD"], dir);
+    // Materialize blobs directly: checkout would apply package attributes and filters.
+    const tree = await git(source.url, ["ls-tree", "-rz", head], dir);
+    for (const row of tree.split("\0").filter(Boolean)) {
+      const match =
+        /^(100644|100755|120000|160000) (?:blob|commit) ([a-f0-9]+)\t([\s\S]+)$/.exec(
+          row,
+        );
+      if (
+        !match ||
+        match[3].split("/").some((p) => !p || [".", "..", ".git"].includes(p))
+      )
+        throw new AppError("UNSAFE_SOURCE", "Git 技能仓库包含不支持的路径");
+      const file = path.join(dir, match[3]);
+      noSymlink(file);
+      if (match[1] === "160000") continue;
+      const content = await limited(
+        () =>
+          new Promise<Buffer>((resolve, reject) => {
+            execFile(
+              "git",
+              ["cat-file", "blob", match[2]],
+              {
+                cwd: dir,
+                encoding: "buffer",
+                timeout: 60_000,
+                maxBuffer: 32 * 1024 * 1024,
+              },
+              (error, stdout) => {
+                if (error)
+                  reject(new AppError("SKILL_GIT", "无法读取 Git 技能文件"));
+                else resolve(stdout);
+              },
+            );
+          }),
+      );
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      // Preserve links for readBundle to reject them if the selected package contains one.
+      if (match[1] === "120000") fs.symlinkSync(content.toString(), file);
+      else {
+        fs.writeFileSync(file, content);
+        fs.chmodSync(file, match[1] === "100755" ? 0o755 : 0o644);
+      }
+    }
     return await fn(dir, head);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -254,7 +292,7 @@ async function checkout<T>(
 }
 function readGitBundle(root: string) {
   const bundle = readBundle(root);
-  // Git only preserves the executable bit; checkout permissions also depend on umask.
+  // Git only preserves the executable bit; normalize ordinary permissions.
   for (const file of Object.values(bundle))
     file.mode = file.mode & 0o111 ? 0o755 : 0o644;
   return bundle;

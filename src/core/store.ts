@@ -43,6 +43,8 @@ import {
 
 import { manifestSchema, diskManifest, writeManifest } from "./layout.ts";
 
+type TreeFile = Bundle[string] | { diskPath: string; mode: number };
+
 export class Store {
   readonly root: string;
   readonly repo: string;
@@ -156,16 +158,161 @@ export class Store {
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
     }).trim();
   }
+  // Construct blobs without Git's ignore rules, attributes, or clean filters.
+  // An isolated index also avoids inheriting stale or partially staged entries.
+  writeTree(files: Iterable<[string, TreeFile]>) {
+    noSymlink(this.repo);
+    noSymlink(path.join(this.repo, ".git"));
+    const temp = path.join(this.root, `source-index-${crypto.randomUUID()}`);
+    noSymlink(temp);
+    fs.mkdirSync(temp, { mode: 0o700 });
+    const index = path.join(temp, "index");
+    const inputFile = path.join(temp, "input");
+    const git = (args: string[], input?: Buffer) => {
+      let fd: number | undefined;
+      let ownsInput = false;
+      try {
+        if (input !== undefined) {
+          noSymlink(inputFile);
+          const writer = fs.openSync(inputFile, "wx", 0o600);
+          ownsInput = true;
+          try {
+            fs.writeFileSync(writer, input);
+          } finally {
+            fs.closeSync(writer);
+          }
+          fd = fs.openSync(inputFile, "r");
+        }
+        // A file descriptor avoids spawnSync pipe stalls with repeated large blobs.
+        return execFileSync("git", args, {
+          cwd: this.repo,
+          env: {
+            ...process.env,
+            GIT_INDEX_FILE: index,
+            GIT_TERMINAL_PROMPT: "0",
+          },
+          timeout: 60_000,
+          maxBuffer: 32 * 1024 * 1024,
+          stdio: [fd ?? "ignore", "pipe", "pipe"],
+        })
+          .toString()
+          .trim();
+      } finally {
+        if (fd !== undefined) fs.closeSync(fd);
+        if (ownsInput) fs.rmSync(inputFile, { force: true });
+      }
+    };
+    try {
+      git(["read-tree", "--empty"]);
+      const records: { name: string; mode: number; file: string }[] = [];
+      for (const [name, data] of files) {
+        if (
+          path.isAbsolute(name) ||
+          name.includes("\0") ||
+          name.split("/").some((p) => !p || [".", "..", ".git"].includes(p))
+        )
+          throw new AppError("UNSAFE_SOURCE", "源库文件路径无效");
+        let file: string;
+        if ("diskPath" in data) {
+          file = path.join(this.repo, name);
+          if (data.diskPath !== file)
+            throw new AppError("UNSAFE_SOURCE", "源库文件路径与磁盘路径不符");
+          noSymlink(file);
+          if (!fs.lstatSync(file).isFile())
+            throw new AppError("SPECIAL_FILE", `不支持特殊文件：${file}`);
+        } else {
+          file = path.join(temp, `blob-${records.length}`);
+          fs.writeFileSync(file, Buffer.from(data.content, "base64"), {
+            flag: "wx",
+            mode: 0o600,
+          });
+        }
+        records.push({ name, mode: data.mode, file });
+      }
+      // --stdin-paths accepts C-quoted UTF-8 bytes, not NUL-separated paths.
+      // Quote every path so newlines, tabs, backslashes and quotes stay literal.
+      const quote = (file: string) =>
+        '"' +
+        Array.from(Buffer.from(file), (byte) =>
+          byte >= 32 && byte < 127 && byte !== 34 && byte !== 92
+            ? String.fromCharCode(byte)
+            : "\\" + byte.toString(8).padStart(3, "0"),
+        ).join("") +
+        '"';
+      const blobs = records.length
+        ? git(
+            ["hash-object", "-w", "--no-filters", "--stdin-paths"],
+            Buffer.from(records.map(({ file }) => quote(file) + "\n").join("")),
+          ).split("\n")
+        : [];
+      if (
+        blobs.length !== records.length ||
+        blobs.some((id) => !/^[a-f0-9]{40,64}$/.test(id))
+      )
+        throw new AppError("SOURCE_GIT", "Git 批量写入结果无效", 500);
+      const entries = records.map(
+        ({ name, mode }, i) =>
+          `${mode & 0o111 ? "100755" : "100644"} ${blobs[i]}\t${name}\0`,
+      );
+      git(
+        ["update-index", "-z", "--index-info"],
+        Buffer.from(entries.join("")),
+      );
+      return git(["write-tree"]);
+    } finally {
+      fs.rmSync(temp, { recursive: true, force: true });
+    }
+  }
+  stageSource() {
+    const repo = this.repo;
+    function* walk(dir: string): Generator<[string, TreeFile]> {
+      noSymlink(dir);
+      for (const name of fs.readdirSync(dir)) {
+        if (
+          name === ".git" ||
+          (dir === path.join(repo, "skills") &&
+            name.startsWith(".hsync-staging-"))
+        )
+          continue;
+        const file = path.join(dir, name);
+        noSymlink(file);
+        const stat = fs.lstatSync(file);
+        if (stat.isDirectory()) yield* walk(file);
+        else if (stat.isFile())
+          yield [
+            path.relative(repo, file).split(path.sep).join("/"),
+            {
+              diskPath: file,
+              mode: stat.mode,
+            },
+          ];
+        else throw new AppError("SPECIAL_FILE", `不支持特殊文件：${file}`);
+      }
+    }
+    const tree = this.writeTree(walk(repo));
+    noSymlink(path.join(repo, ".git", "index"));
+    noSymlink(path.join(repo, ".git", "index.lock"));
+    // read-tree without -u updates only the index; it never filters worktree bytes.
+    this.git(["read-tree", tree]);
+    return tree;
+  }
   commit(message: string) {
-    this.git(["add", "--all", "--", ".", ":(exclude)skills/.hsync-staging-*"]);
-    if (this.git(["diff", "--cached", "--name-only"]))
-      this.git([
-        "-c",
-        "commit.gpgsign=false",
-        "commit",
-        "-m",
-        `${message}\n\n设备：${this.device().name.replace(/[\r\n]/g, " ")}`,
-      ]);
+    const tree = this.stageSource();
+    let parent: string | undefined;
+    try {
+      parent = this.git(["rev-parse", "--verify", "HEAD"]);
+    } catch {}
+    if (parent && tree === this.git(["rev-parse", `${parent}^{tree}`])) return;
+    const commit = this.git([
+      "-c",
+      "commit.gpgsign=false",
+      "commit-tree",
+      tree,
+      ...(parent ? ["-p", parent] : []),
+      "-m",
+      `${message}\n\n设备：${this.device().name.replace(/[\r\n]/g, " ")}`,
+    ]);
+    this.git(["update-ref", "HEAD", commit, ...(parent ? [parent] : [])]);
   }
   history() {
     return this.git(["log", "-40", "--format=%H%x09%cI%x09%s"])
@@ -296,7 +443,7 @@ export class Store {
         writeManifest(this.repo, JSON.parse(before));
         writeJson(path.join(this.root, "device.json"), beforeDevice);
         writeJson(path.join(this.root, "state.json"), beforeState);
-        this.git(["reset", "--mixed", "HEAD"]);
+        this.git(["reset", "--mixed", "--no-refresh", "HEAD"]);
         throw e;
       }
       return result;
