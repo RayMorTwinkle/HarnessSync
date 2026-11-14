@@ -107,11 +107,17 @@ export class SyncIgnore {
   }
   status(): SyncIgnoreStatus {
     const rules = this.rules();
+    // Status runs on every snapshot: skip the manifest (and its file walks) unless a rule names a skill.
+    const named = new Set(
+      rules.filter((r) => !r.startsWith("rule:")).map((r) => r.split("/")[0]),
+    );
+    if (!named.size) return { rules, matched: [] };
     return {
       rules,
       matched: this.store
         .manifest()
-        .skills.flatMap<SyncIgnoreStatus["matched"][number]>((s) => {
+        .skills.filter((s) => named.has(s.name))
+        .flatMap<SyncIgnoreStatus["matched"][number]>((s) => {
           if (this.skill(s.name, rules))
             return [{ skill: s.name, files: "all" as const }];
           const files = this.paths(s.id).filter((f) =>

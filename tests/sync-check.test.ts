@@ -506,7 +506,7 @@ test("onboarding sync instructions require preflight and personal login without 
     "用户本人在终端",
     "! gh auth login",
     "不得向用户索要 token、密码或私钥",
-    "任何文件或 URL",
+    "指令正文或 URL",
   ])
     assert.ok(prompt.includes(text), text);
 });
