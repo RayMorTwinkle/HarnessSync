@@ -17,6 +17,11 @@ import {
 } from "./sync-workspace.ts";
 import { cliCommand } from "./self-skill.ts";
 import { lastAutoDeploy } from "./auto-deploy.ts";
+import {
+  githubCredentialArgs,
+  redactSyncOutput,
+  validateSyncUrl,
+} from "./sync-remote.ts";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -752,7 +757,7 @@ export class Sync {
         },
       }).trim();
     } catch (e: any) {
-      const detail = String(e.stderr || e.message);
+      const detail = redactSyncOutput(String(e.stderr || e.message));
       const hint =
         command === "gh"
           ? "GitHub 创建失败：请安装 gh 并运行 gh auth login，或改用 sync setup --url <git-url>"
@@ -783,15 +788,13 @@ export class Sync {
   private git(args: string[]) {
     // Borrow gh's credentials for GitHub HTTPS remotes without touching global git config.
     const url = this.config(false)?.url || this.pendingUrl;
-    if (url?.startsWith("https://github.com/") && this.hasGh())
-      return this.command("git", [
-        "-c",
-        "credential.https://github.com.helper=",
-        "-c",
-        "credential.https://github.com.helper=!gh auth git-credential",
-        ...args,
-      ]);
-    return this.command("git", args);
+    return this.command("git", [
+      ...githubCredentialArgs(
+        url || "",
+        !!url?.startsWith("https://github.com/") && this.hasGh(),
+      ),
+      ...args,
+    ]);
   }
   private pendingUrl?: string;
   private hasGh() {
@@ -986,6 +989,25 @@ export class Sync {
     });
   }
   async setup(options: SyncSetup) {
+    try {
+      return await this.setupRemote(options);
+    } catch (error) {
+      if (error instanceof AppError)
+        throw new AppError(
+          error.code,
+          `${error.message}；运行 hsync sync check 查看缺少什么`,
+          error.status,
+        );
+      const detail =
+        error instanceof Error ? redactSyncOutput(error.message) : "";
+      throw new AppError(
+        "SYNC_SETUP",
+        `${detail || "连接同步失败"}；运行 hsync sync check 查看缺少什么`,
+        409,
+      );
+    }
+  }
+  private async setupRemote(options: SyncSetup) {
     return this.store.lock(() => {
       if (!!options.url === !!options.create)
         throw new AppError("SYNC_OPTIONS", "请指定 --url 或 --create 其中一个");
@@ -1019,16 +1041,8 @@ export class Sync {
         ]);
         if (url.startsWith("https://") && !url.endsWith(".git")) url += ".git";
       }
-      if (
-        !url ||
-        url.startsWith("-") ||
-        /[\r\n]/.test(url) ||
-        /(https?:\/\/[^/]*@|:\/\/[^/]*:[^/]*@|[?#])/.test(url)
-      )
-        throw new AppError(
-          "SYNC_URL",
-          "Git URL 无效；请勿在 URL 中嵌入凭证，使用 SSH 或 Git 凭证助手",
-        );
+      validateSyncUrl(url || "");
+      if (!url) throw new AppError("SYNC_URL", "请指定 Git URL");
       this.pendingUrl = url;
       const defaultRef = options.branch
         ? ""

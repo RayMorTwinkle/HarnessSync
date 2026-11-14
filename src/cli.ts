@@ -20,6 +20,7 @@ import { LoginService, rotateServiceLog } from "./core/service.ts";
 import { autoDeploy, lastAutoDeploy } from "./core/auto-deploy.ts";
 import { startBackgroundScheduler } from "./core/sync-scheduler.ts";
 import { Sync } from "./core/sync.ts";
+import { checkSync } from "./core/sync-check.ts";
 import {
   ignoreNativePaths,
   refreshSkills,
@@ -333,6 +334,12 @@ onboard
   .description("取消尚未发布的全局指令替换登记")
   .action(run(async () => unstageInstructions(await getStore())));
 const sync = cli.command("sync").description("通过用户私有 Git 仓库同步源配置");
+sync
+  .command("check")
+  .description("连接前检查 Git、GitHub 登录及仓库权限")
+  .option("--url <git-url>")
+  .option("--create [name]")
+  .action(run(async (o) => checkSync(o)));
 sync
   .command("setup")
   .option("--url <git-url>")

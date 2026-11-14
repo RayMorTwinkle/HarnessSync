@@ -21,6 +21,7 @@ import {
 } from "./core/update-checks.ts";
 import { startBackgroundScheduler } from "./core/sync-scheduler.ts";
 import { Sync } from "./core/sync.ts";
+import { checkSync, type SyncCheckOptions } from "./core/sync-check.ts";
 import { Store } from "./core/store.ts";
 import { AppError, hash, parseSkill } from "./core/files.ts";
 import { scopeSchema } from "./shared/types.ts";
@@ -42,6 +43,7 @@ export async function startServer(
     schedulerIntervalMs?: number;
     autoDeployDelayMs?: number;
     updateChecker?: UpdateChecker;
+    syncCheck?: SyncCheckOptions;
   } = {},
 ) {
   const engine = new Engine(store);
@@ -179,7 +181,29 @@ export async function startServer(
           id === "conflicts"
         )
           result = await new Sync(store).conflicts(true);
-        else if (resource === "sync" && req.method === "POST" && id === "setup")
+        else if (
+          resource === "sync" &&
+          req.method === "GET" &&
+          id === "check"
+        ) {
+          const create = url.searchParams.get("create");
+          result = await checkSync(
+            {
+              url: url.searchParams.get("url") || undefined,
+              create:
+                create === null || create === "false"
+                  ? undefined
+                  : create === "" || create === "true"
+                    ? true
+                    : create,
+            },
+            options.syncCheck,
+          );
+        } else if (
+          resource === "sync" &&
+          req.method === "POST" &&
+          id === "setup"
+        )
           result = await new Sync(store).setup(
             z
               .object({

@@ -58,7 +58,7 @@ description: 管理 HarnessSync 的共享技能、全局指令、设备变量与
 
 CLI 遵守 Harness 的沙箱权限。写入被拒绝时，说明需要哪些目录权限，并使用该 Harness 可用的授权机制，不得声称操作已经成功。
 
-源配置保存后产生本地 Git 提交。跨设备使用 `sync setup --url <git-url>` 或 `sync setup --create` 连接用户私有仓库，`sync now` 同步；冲突先运行 `sync conflicts --json` 查看目录和差异，使用 `sync resolve <entry-id> --keep local|remote|both|merged`，`sync undo` 撤销最近一次处理；`sync auto on|off` 控制自动同步。同步后按 deploy.auto 尝试自动部署干净计划；needs-review 时再审查 `plan`。
+源配置保存后产生本地 Git 提交。连接前先运行 `sync check --url <url>` 或 `sync check --create [name]`，用一两句话告诉用户检查结果与修复办法，通过后再 setup。登录必须由用户本人在终端运行 `gh auth login` 并按浏览器提示授权；Claude Code 中可用 `! gh auth login`。不得向用户索要 token、密码或私钥，也不得把凭证写进任何文件或 URL。认证沿用本机 gh、SSH 或系统 Git 凭证助手。跨设备使用 `sync setup --url <git-url>` 或 `sync setup --create` 连接用户私有仓库，`sync now` 同步；冲突先运行 `sync conflicts --json` 查看目录和差异，使用 `sync resolve <entry-id> --keep local|remote|both|merged`，`sync undo` 撤销最近一次处理；`sync auto on|off` 控制自动同步。同步后按 deploy.auto 尝试自动部署干净计划；needs-review 时再审查 `plan`。
 
 从 Git 仓库安装技能用 `skills install <owner/repo|Git URL> [--skill 名称,...]`；`skills updates` 检查上游，`skills diff <名称>` 查看差异，`skills update <名称>` 更新（本地改过时会拒绝，只有用户明确同意才加 `--force`），`skills detach <名称>` 脱离上游。
 
@@ -87,7 +87,7 @@ CLI 对象输出可能附加 `reminders`（与 `plan.notices` 的部署阻断通
 
 未连接同步的初始化，先问“这是你第一台使用 HarnessSync 的设备吗？”。无论答案如何，
 本机 gh 已登录时，用 `gh repo view harness-sync-config --json name,url,visibility` 查默认仓库；
-也要说明可能用了其他名字。已有仓库或不是第一台时，先确认仓库 URL、`sync setup --url <url>`，
+也要说明可能用了其他名字。已有仓库或不是第一台时，先确认仓库 URL，运行 `sync check --url <url>` 并简述结果，通过后 `sync setup --url <url>`，
 再重新 `onboard show <id>` 比较本机扫描结果，最后导入。已连接则跳过这个判断。
 
 读取 `inventory.skills[].library.status`：same 复用现有条目并接管原生副本；absent 普通导入。
