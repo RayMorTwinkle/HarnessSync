@@ -453,10 +453,15 @@ function gitEntries(store: Store, ids: string[] = []) {
       : all.filter((s) => typeof s.source === "object")
   ) as GitSkill[];
 }
-const remoteChecks = new Map<string, Promise<string[][]>>();
-function remoteRefs(store: Store, url: string) {
-  const key = JSON.stringify([store.root, url]);
-  let pending = remoteChecks.get(key);
+type RefRequests = Map<string, Promise<string[][]>>;
+// Skills from one repository share a single ls-remote within one check. A new
+// check never reuses a request that started earlier, which could predate a push.
+function remoteRefs(
+  store: Store,
+  url: string,
+  shared: RefRequests = new Map(),
+) {
+  let pending = shared.get(url);
   if (!pending) {
     pending = git(url, ["ls-remote", "--", url], store.root, 15_000).then(
       (output) =>
@@ -465,13 +470,16 @@ function remoteRefs(store: Store, url: string) {
           .filter(Boolean)
           .map((line) => line.split(/\s+/)),
     );
-    remoteChecks.set(key, pending);
-    void pending.finally(() => remoteChecks.delete(key)).catch(() => {});
+    shared.set(url, pending);
   }
   return pending;
 }
-async function remoteHead(store: Store, source: GitSkillSource) {
-  const lines = await remoteRefs(store, source.url);
+async function remoteHead(
+  store: Store,
+  source: GitSkillSource,
+  shared?: RefRequests,
+) {
+  const lines = await remoteRefs(store, source.url, shared);
   const ref = source.ref;
   if (/^[0-9a-f]{40,64}$/.test(ref)) return ref;
   const names =
@@ -536,6 +544,7 @@ function remoteTrees(store: Store, url: string, commits: string[]) {
 }
 export async function checkGitSkillUpdates(store: Store, ids: string[] = []) {
   const entries = gitEntries(store, ids);
+  const refs: RefRequests = new Map();
   const checks: UpdateCheck[] = await Promise.all(
     entries.map(async (s) => {
       const base = {
@@ -545,7 +554,7 @@ export async function checkGitSkillUpdates(store: Store, ids: string[] = []) {
         commit: s.source.commit,
       };
       try {
-        const latestCommit = await remoteHead(store, s.source);
+        const latestCommit = await remoteHead(store, s.source, refs);
         return {
           ...base,
           latestCommit,

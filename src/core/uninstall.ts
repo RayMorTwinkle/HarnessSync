@@ -186,11 +186,7 @@ export class Uninstaller {
           "UNINSTALL_CONFLICT",
           "管理技能已被修改，请先保存并处理冲突",
         );
-      if (plan.restore?.changes.some((c) => c.status === "conflict"))
-        throw new AppError(
-          "UNINSTALL_CONFLICT",
-          "先用 backup restore 处理冲突，再重新预览卸载",
-        );
+      // Conflicts keep their current content; the report lists them.
       const beforeDir = path.join(plan.backupDir, "卸载前", String(Date.now()));
       new Backups(this.store).capture(
         beforeDir,

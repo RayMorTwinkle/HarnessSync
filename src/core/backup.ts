@@ -278,6 +278,7 @@ export class Backups {
       const owned =
         current !== "absent" &&
         receipts.some((r) => r.path === e.path && r.fullNativeHash === current);
+      // Something the user added after the backup is theirs: keep it, no choice needed.
       const status =
         current === e.fingerprint
           ? "unchanged"
@@ -285,7 +286,9 @@ export class Backups {
             ? child && e.absent
               ? "remove"
               : "restore"
-            : "conflict";
+            : e.absent
+              ? "keep"
+              : "conflict";
       return {
         ...e,
         current,
@@ -296,10 +299,12 @@ export class Backups {
             : status === "remove"
               ? "移除 HarnessSync 新增的条目"
               : status === "restore"
-                ? "恢复为备份内容"
-                : e.absent
-                  ? "备份中没有此条目；默认保留，选择覆盖将删除此条目"
-                  : "条目已被删除或外部修改；默认保留，选择覆盖将恢复备份内容",
+                ? e.absent
+                  ? "备份时不存在，删除 HarnessSync 创建的内容"
+                  : "恢复为备份内容"
+                : status === "keep"
+                  ? "备份之后新增，不是 HarnessSync 写入的，保留"
+                  : "备份之后被删除或修改过；默认保留现状，选择覆盖将恢复备份内容",
       };
     };
     const changes = m.entries.flatMap((e) => {

@@ -95,7 +95,8 @@ const run =
     }
     if (value !== undefined)
       output(
-        store && fs.existsSync(store.root)
+        // After uninstalling there is nothing left to remind about.
+        store && fs.existsSync(store.root) && name !== "uninstall"
           ? await cliNoticeOutput(store, value, {
               quiet:
                 (group === "hsync" && name === "status") ||

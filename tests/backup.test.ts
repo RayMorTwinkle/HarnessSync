@@ -292,13 +292,10 @@ for (const existingDirectory of [true, false])
     fs.chmodSync(root, 0o700);
     const plan = backups.plan();
     assert.equal(plan.changes.find((c) => c.path === owned)?.status, "remove");
-    assert.equal(
-      plan.changes.find((c) => c.path === personal)?.status,
-      "conflict",
-    );
+    assert.equal(plan.changes.find((c) => c.path === personal)?.status, "keep");
     assert.match(
       plan.changes.find((c) => c.path === personal)!.message,
-      /覆盖将删除/,
+      /保留/,
     );
     assert.ok(!plan.changes.some((c) => c.path === root));
     if (existingDirectory)
@@ -317,17 +314,17 @@ for (const existingDirectory of [true, false])
       fs.readFileSync(path.join(personal, "SKILL.md"), "utf8"),
       "new personal skill",
     );
-    assert.deepEqual(result.conflicts, [personal]);
+    assert.deepEqual(result.conflicts, []);
     const snapshot = backups.verify(result.beforeDir);
     assert.ok(snapshot.entries.some((e) => e.path === owned));
     assert.ok(!snapshot.entries.some((e) => e.path === root));
     assert.equal(store.state().receipts.length, 0);
-    // Overwrite selects only this child, even when another personal child exists.
-    const other = path.join(root, "other");
-    put(path.join(other, "SKILL.md"), "keep");
-    await backups.restore(backups.plan().id, undefined, [personal]);
-    assert.ok(!fs.existsSync(personal));
-    assert.ok(fs.existsSync(other));
+    // The user's own additions can never be selected for deletion.
+    await assert.rejects(
+      backups.restore(backups.plan().id, undefined, [personal]),
+      /只能选择/,
+    );
+    assert.ok(fs.existsSync(personal));
   });
 
 test("owned child updates restore; deleted and externally edited children remain conflicts; container mode is ignored", async (t) => {
@@ -440,7 +437,7 @@ test("failed child restore rolls back only touched children and keeps receipts",
   );
 });
 
-test("uninstall restore preview lists child conflicts and succeeds once they are resolved", async (t) => {
+test("uninstall restore keeps the user's additions and does not stop for them", async (t) => {
   const { home, store, engine, backups } = await fixture(t);
   const root = path.join(home, ".claude/skills");
   fs.mkdirSync(root, { recursive: true });
@@ -458,15 +455,17 @@ test("uninstall restore preview lists child conflicts and succeeds once they are
   const preview = u.plan({ mode: "restore" });
   assert.deepEqual(
     preview
-      .restore!.changes.filter((c) => c.status === "conflict")
+      .restore!.changes.filter((c) => c.status === "keep")
       .map((c) => c.path),
     [personal],
   );
-  await assert.rejects(u.apply(preview.id), /先用 backup restore/);
-  await backups.restore(backups.plan().id, undefined, [personal]);
-  const result = await u.apply(u.plan({ mode: "restore" }).id);
+  const result = await u.apply(preview.id);
   assert.equal(result.mode, "restore");
   assert.deepEqual(result.restored?.conflicts, []);
+  assert.equal(
+    fs.readFileSync(path.join(personal, "SKILL.md"), "utf8"),
+    "personal",
+  );
 });
 
 test("missing or damaged baseline does not block apply; missing notice is info and restore/uninstall explain why unavailable", async (t) => {
