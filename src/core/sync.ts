@@ -345,7 +345,7 @@ export class Sync {
   private restoreFiles(beforeFiles: Bundle, files = this.sourceFiles()) {
     for (const name of Object.keys(beforeFiles)) {
       if (
-        !/^(manifest\.json|harness-sync\.json|entries\/(rules|skills|projects)\/[a-zA-Z0-9-]+\.json|skills\/[a-zA-Z0-9-]+\/.+)$/.test(
+        !/^(manifest\.json|harness-sync\.json|entries\/(rules|skills|projects)\/[a-zA-Z0-9-]+\.json|skills\/[a-zA-Z0-9-]+\/[\s\S]+)$/.test(
           name,
         ) ||
         name.split("/").some((part) => ["..", ".", ".git"].includes(part))
@@ -528,7 +528,7 @@ export class Sync {
       }
       this.restoreFiles(beforeFiles, files);
       writeReferences(this.store, record.references, "before");
-      this.git(["reset", "--mixed", record.undoCommit]);
+      this.git(["reset", "--mixed", "--no-refresh", record.undoCommit]);
       if (c) {
         c.conflicts = record.conflicts;
         this.save(c);
@@ -570,7 +570,7 @@ export class Sync {
             );
             if (
               !match ||
-              !/^(manifest\.json|harness-sync\.json|entries\/(rules|skills|projects)\/[a-zA-Z0-9-]+\.json|skills\/[a-zA-Z0-9-]+\/.+)$/.test(
+              !/^(manifest\.json|harness-sync\.json|entries\/(rules|skills|projects)\/[a-zA-Z0-9-]+\.json|skills\/[a-zA-Z0-9-]+\/[\s\S]+)$/.test(
                 match[3],
               )
             )
@@ -821,7 +821,7 @@ export class Sync {
       const match = row.match(/^(100644|100755) blob ([a-f0-9]+)\t([\s\S]+)$/);
       if (
         !match ||
-        !/^(manifest\.json|harness-sync\.json|entries\/(rules|skills|projects)\/[a-zA-Z0-9-]+\.json|skills\/[a-zA-Z0-9-]+\/.+)$/.test(
+        !/^(manifest\.json|harness-sync\.json|entries\/(rules|skills|projects)\/[a-zA-Z0-9-]+\.json|skills\/[a-zA-Z0-9-]+\/[\s\S]+)$/.test(
           match[3],
         )
       )
@@ -1402,14 +1402,7 @@ export class Sync {
         try {
           this.write(merged);
           writeReferences(this.store, references, "after");
-          this.git([
-            "add",
-            "--all",
-            "--",
-            ".",
-            ":(exclude)skills/.hsync-staging-*",
-          ]);
-          const tree = this.git(["write-tree"]);
+          const tree = this.store.stageSource();
           const sha =
             base === checkpoint.before &&
             tree === this.git(["rev-parse", `${remote}^{tree}`])
@@ -1443,7 +1436,7 @@ export class Sync {
         } catch (e) {
           this.restoreFiles(checkpoint.beforeFiles);
           writeReferences(this.store, references, "before");
-          this.git(["reset", "--mixed", checkpoint.before]);
+          this.git(["reset", "--mixed", "--no-refresh", checkpoint.before]);
           throw e;
         }
       }
@@ -1507,52 +1500,20 @@ export class Sync {
       );
     if (remote && comparable(files) === comparable(this.libraryFiles(previous)))
       return remote;
-    const index = path.join(
-      this.store.root,
-      `sync-index-${crypto.randomUUID()}`,
-    );
-    noSymlink(index);
-    const git = (args: string[], input?: Buffer) =>
-      execFileSync("git", args, {
-        cwd: this.store.repo,
-        env: { ...process.env, GIT_INDEX_FILE: index },
-        input,
-        timeout: 60_000,
-        maxBuffer: 32 * 1024 * 1024,
-      })
-        .toString()
-        .trim();
-    try {
-      git(["read-tree", "--empty"]);
-      for (const [name, file] of Object.entries(files)) {
-        const blob = git(
-          ["hash-object", "-w", "--stdin"],
-          Buffer.from(file.content, "base64"),
-        );
-        git([
-          "update-index",
-          "--add",
-          "--cacheinfo",
-          `${file.mode & 0o111 ? "100755" : "100644"},${blob},${name}`,
-        ]);
-      }
-      const tree = git(["write-tree"]);
-      if (remote && tree === this.git(["rev-parse", `${remote}^{tree}`]))
-        return remote;
-      return this.git([
-        "-c",
-        "commit.gpgsign=false",
-        "commit-tree",
-        tree,
-        ...(remote ? ["-p", remote] : []),
-        "-m",
-        `同步上传配置\n\n设备：${this.store.device().name}`,
-      ]);
-    } finally {
-      fs.rmSync(index, { force: true });
-      fs.rmSync(`${index}.lock`, { force: true });
-    }
+    const tree = this.store.writeTree(Object.entries(files));
+    if (remote && tree === this.git(["rev-parse", `${remote}^{tree}`]))
+      return remote;
+    return this.git([
+      "-c",
+      "commit.gpgsign=false",
+      "commit-tree",
+      tree,
+      ...(remote ? ["-p", remote] : []),
+      "-m",
+      `同步上传配置\n\n设备：${this.store.device().name}`,
+    ]);
   }
+
   private conflictDetails(c: SyncConfig, textDiff = false) {
     const libraries = new Map<string, Library>();
     const read = (commit: string) => {
@@ -1836,7 +1797,7 @@ export class Sync {
         const checkpoint = json<any>(this.undoPath());
         this.restoreFiles(checkpoint.beforeFiles);
         writeReferences(this.store, references, "before");
-        this.git(["reset", "--mixed", checkpoint.before]);
+        this.git(["reset", "--mixed", "--no-refresh", checkpoint.before]);
         throw e;
       }
       c.conflicts = c.conflicts.filter((x) => x !== conflict);

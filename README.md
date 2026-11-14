@@ -140,6 +140,8 @@ Every CLI command attaches `reminders` (sync conflicts, paused deployments, skil
 
 After setup, automatic sync defaults to pushing after 120 seconds without edits and pulling every 10 minutes. It runs while `hsync open`, `hsync serve`, or `hsync sync watch` is running. Pulled changes can deploy automatically when `deploy.auto` is enabled and the entire plan is clean. Device paths, variables, snapshots, local plugins, and settings do not sync.
 
+Package `.gitignore`, `.gitattributes`, and other ordinary `.git*` files are stored as data. Commits, sync, history comparisons, and source restore preserve raw bytes (including CRLF and binary files) and executable bits. Only device-local `sync ignore` rules restrict uploads; package `.git` internals remain excluded during import. The next commit automatically includes previously omitted files still present in the worktree. Bytes already lost and never committed cannot be recovered from old history. Files are saved in batches, avoiding a Git process per file.
+
 Git skills are a separate source mechanism:
 
 ```sh
