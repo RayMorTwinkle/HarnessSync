@@ -18,7 +18,7 @@ GUI、CLI 提示和内置技能目前使用简体中文，欢迎参与国际化�
 - 自动部署干净变更，保留快照，支持失败恢复和回滚。
 - 同名冲突逐项选择：使用库版本、原生版本收库或跳过目标。
 - Git 技能来源：安装、检查上游变化、查看差异、更新或脱离上游。
-- 通过自己的私有 Git 仓库跨设备同步，按条目解决冲突。
+- 通过自己的私有 Git 仓库跨设备同步：相同条目自动合并，不同的并排对比，由你或你的 Agent 处理。
 - 声明式工具插件：用 JSON 描述发现路径即可添加工具。
 - 设置页及登录启动服务，支持 macOS 和具有 systemd 用户服务的 Linux。
 - CLI ≡ GUI：配置和部署均调用同一套核心。
@@ -120,7 +120,9 @@ hsync sync status --json
 hsync sync now --json
 ```
 
-也可以用 `hsync sync setup --create`，通过已安装并登录的 `gh` 创建私有 GitHub 仓库。新设备连接同一 URL 即可恢复配置库。源配置按对象合并；冲突逐项选择，例如 `hsync sync resolve ENTRY_ID --keep local`，也支持 `remote` 或 `both`，删除冲突不支持两者都保留。未解决冲突阻止推送和自动部署。
+也可以用 `hsync sync setup --create`，通过已安装并登录的 `gh` 创建私有 GitHub 仓库。新设备在初始化之前或之后连接同一 URL 都可以；初始化会先问这是不是你的第一台设备，再把本机技能和共享库逐个比较。源配置按对象合并，两台设备上同名且内容相同的条目自动合成一份。内容不同时，`hsync sync conflicts` 列出每个冲突的差异，文件放在 `~/.harness-sync/conflicts/<id>/`（`local/`、`remote/`、`merged/`）。可以用 `hsync sync resolve ENTRY_ID --keep local|remote|both` 选择，也可以交给 Agent 合并：列表里附带的提示词要求它先说明差异、得到你同意，才写入 `merged/` 并执行 `--keep merged`。未解决冲突阻止推送和自动部署。
+
+每个 CLI 命令都会附带 `reminders`（同步冲突、暂停的部署、技能更新、同步失败），调用 `hsync` 的 Agent 因此能及时知道；用 `hsync config set notices.cli false` 关闭。
 
 连接成功后，自动同步默认在停止编辑 120 秒后推送，每 10 分钟拉取一次；需要 `hsync open`、`hsync serve` 或 `hsync sync watch` 持续运行。开启 `deploy.auto` 且完整计划干净时，拉取的变更可自动部署。设备路径、变量、快照、本机插件和设置不参与同步。
 

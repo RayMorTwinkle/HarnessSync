@@ -163,6 +163,12 @@ function App() {
       </div>
     );
   const { manifest, device } = data;
+  const syncConflicts =
+    Number(
+      data.notices
+        ?.find((n) => n.code === "SYNC_CONFLICTS")
+        ?.message.match(/^(\d+)/)?.[1],
+    ) || 0;
   const scopeText = (scope: Scope) =>
     scope.kind === "global"
       ? "所有设备与项目"
@@ -269,6 +275,11 @@ function App() {
               >
                 <n.icon size={18} />
                 <span>{n.title}</span>
+                {n.id === "sync" && syncConflicts > 0 && (
+                  <span className="nav-count warn" title="同步冲突待处理">
+                    {syncConflicts}
+                  </span>
+                )}
               </button>
             ))}
           </nav>

@@ -18,10 +18,10 @@ import {
 import type {
   AutoSyncSettings,
   Snapshot,
-  SyncConflict,
   SyncStatus,
 } from "../shared/types.ts";
 import { useApp } from "./app-context.tsx";
+import { SyncConflicts } from "./SyncConflicts.tsx";
 
 type HistoryItem = {
   hash: string;
@@ -339,35 +339,13 @@ export function SyncPanel({
         }
       />
       {conflicts.length > 0 ? (
-        <section className="panel sync-conflicts">
-          <div className="settings-card-title">
-            <TriangleAlert size={19} />
-            <div>
-              <h2>待处理冲突</h2>
-              <p>
-                两台设备改了同一条目。本机版本暂时保留，选择后会先保存安全点。
-              </p>
-            </div>
-          </div>
-          {conflicts.map((c) => (
-            <ConflictRow
-              key={`${c.kind}-${c.entryId}`}
-              conflict={c}
-              data={data}
-              busy={busy}
-              resolve={(keep) =>
-                run(
-                  () =>
-                    api<SyncStatus>("sync/resolve", {
-                      entryId: c.entryId,
-                      keep,
-                    }),
-                  "冲突已处理，再同步一次即可推送",
-                )
-              }
-            />
-          ))}
-        </section>
+        <SyncConflicts
+          conflicts={conflicts}
+          data={data}
+          api={api}
+          busy={busy}
+          run={run}
+        />
       ) : null}
       <SyncHistory
         api={api}
@@ -530,6 +508,19 @@ function SyncHistory({
     string,
     string
   >;
+  // Unifying two same-named entries changes only the ID; show it as one merge.
+  const collapse = (changes: HistoryItem["changes"]) =>
+    changes.flatMap((c, i) => {
+      const twin = (d: HistoryItem["changes"][number]) =>
+        d.kind === c.kind &&
+        d.name &&
+        d.name === c.name &&
+        d.action !== c.action &&
+        ["新增", "删除"].includes(d.action);
+      const j = changes.findIndex(twin);
+      if (j < 0 || !["新增", "删除"].includes(c.action)) return [c];
+      return j > i ? [{ ...c, action: "合并" }] : [];
+    });
   return (
     <section className="panel sync-history">
       <div className="sync-history-head">
@@ -592,15 +583,17 @@ function SyncHistory({
               </div>
               {item.changes.length > 0 && (
                 <div className="sync-history-changes">
-                  {item.changes.slice(0, 6).map((c) => (
-                    <span
-                      key={`${c.kind}-${c.id}`}
-                      className={`history-chip ${verb[c.action] || ""}`}
-                    >
-                      {c.action}
-                      {kindLabel[c.kind]} {c.name || c.id.slice(0, 8)}
-                    </span>
-                  ))}
+                  {collapse(item.changes)
+                    .slice(0, 6)
+                    .map((c) => (
+                      <span
+                        key={`${c.kind}-${c.id}`}
+                        className={`history-chip ${verb[c.action] || ""}`}
+                      >
+                        {c.action}
+                        {kindLabel[c.kind]} {c.name || c.id.slice(0, 8)}
+                      </span>
+                    ))}
                   {item.changes.length > 6 && (
                     <span className="history-chip">
                       等 {item.changes.length} 项
@@ -616,67 +609,6 @@ function SyncHistory({
   );
 }
 
-function ConflictRow({
-  conflict,
-  data,
-  busy,
-  resolve,
-}: {
-  conflict: SyncConflict;
-  data: Snapshot;
-  busy: boolean;
-  resolve: (keep: "local" | "remote" | "both") => void;
-}) {
-  const list = data.manifest[conflict.kind] as {
-    id: string;
-    name?: string;
-    title?: string;
-  }[];
-  const local = list.find(
-    (e) => e.id === (conflict.localId || conflict.entryId),
-  );
-  const label = local?.name || local?.title || conflict.entryId.slice(0, 8);
-  const reason =
-    conflict.reason === "name"
-      ? "两台设备各自新建了同名技能"
-      : local
-        ? "两台设备都修改了这一条目"
-        : "一台设备删除了它，另一台做了修改";
-  return (
-    <div className="conflict-row">
-      <div>
-        <span className="tiny-tag">{kindLabel[conflict.kind]}</span>
-        <strong>{label}</strong>
-        <small>{reason}</small>
-      </div>
-      <div className="conflict-choices">
-        <button
-          className="button small"
-          disabled={busy}
-          onClick={() => resolve("local")}
-        >
-          保留本机
-        </button>
-        <button
-          className="button small"
-          disabled={busy}
-          onClick={() => resolve("remote")}
-        >
-          使用远端
-        </button>
-        <button
-          className="button small"
-          disabled={busy || !local}
-          title={local ? "远端版本另存为副本" : "删除冲突无法两者都保留"}
-          onClick={() => resolve("both")}
-        >
-          两者都保留
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function SyncFacts() {
   return (
     <section className="panel sync-facts">
@@ -686,7 +618,10 @@ function SyncFacts() {
       </h3>
       <ul>
         <li>按条目合并：不同条目的修改自动合并，不会互相覆盖。</li>
-        <li>同一条目两边都改时记为冲突，本机版本保留，暂停推送直到你选择。</li>
+        <li>两台设备有同名且内容相同的条目时，自动合成一份。</li>
+        <li>
+          同一条目两边内容不同时记为冲突，本机版本保留，暂停推送直到你选择。
+        </li>
         <li>每次合并或处理冲突前保存安全点，可在「版本与部署」中恢复。</li>
         <li>
           同步只改技能库。写入各 AI 工具时只动 HarnessSync

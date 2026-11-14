@@ -343,6 +343,10 @@ nav button.active svg {
   padding: 1px 5px;
   font-size: 11.5px;
 }
+.nav-count.warn {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
 .sidebar-bottom {
   margin-top: auto;
 }
@@ -2494,6 +2498,36 @@ nav button {
   color: var(--text-3);
   font-size: 13px;
 }
+.reminder-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 17px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.reminder-bar.warn {
+  border: 1px solid var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.reminder-bar.info {
+  border: 1px solid var(--info-border, var(--border));
+  background: var(--info-bg);
+  color: var(--info);
+}
+.reminder-bar > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.reminder-bar .text-button {
+  flex: none;
+  color: inherit;
+}
 .onboarding-entry > span {
   display: flex;
   align-items: center;
@@ -3082,23 +3116,39 @@ nav button {
 .sync-conflicts .settings-card-title {
   color: var(--warn);
 }
+.conflict-card {
+  border-top: 1px solid var(--border);
+}
 .conflict-row {
   display: flex;
   align-items: center;
   gap: 16px;
   padding: 14px 0;
-  border-top: 1px solid var(--border);
 }
-.conflict-row > div:first-child {
+.conflict-toggle {
   flex: 1;
   min-width: 0;
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: 14px auto 1fr;
   column-gap: 8px;
   row-gap: 4px;
   align-items: center;
+  text-align: left;
+  color: var(--text-4);
 }
-.conflict-row strong {
+.conflict-toggle:disabled {
+  cursor: default;
+}
+.conflict-toggle:disabled > svg {
+  visibility: hidden;
+}
+.conflict-toggle > svg {
+  transition: transform 0.15s ease;
+}
+.conflict-card.open .conflict-toggle > svg {
+  transform: rotate(90deg);
+}
+.conflict-toggle strong {
   font-size: 13px;
   font-weight: 500;
   color: var(--text-2);
@@ -3106,10 +3156,73 @@ nav button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.conflict-row small {
-  grid-column: 2;
+.conflict-toggle small {
+  grid-column: 2 / -1;
   font-size: 11.5px;
   color: var(--text-4);
+}
+.conflict-diffs {
+  display: grid;
+  gap: 10px;
+  padding: 0 0 16px 22px;
+}
+.conflict-diffs .diff-pane {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.conflict-diffs .diff-heading {
+  padding: 9px 14px;
+  font-size: 11px;
+  color: var(--text-4);
+}
+.conflict-diffs .diff-code {
+  min-height: 0;
+  max-height: 320px;
+  padding: 10px 0;
+}
+.conflict-agent {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 6px;
+  padding: 16px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+.conflict-agent > svg {
+  flex: none;
+  margin-top: 1px;
+}
+.conflict-agent > div {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+.conflict-agent strong {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.conflict-agent p {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--text-4);
+}
+.conflict-agent code {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  justify-self: start;
+  max-width: 100%;
+  font-size: 11px;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+.conflict-agent .conflict-error {
+  color: var(--danger);
 }
 .conflict-choices {
   display: flex;
@@ -3137,9 +3250,13 @@ nav button {
   color: var(--text-4);
 }
 @media (max-width: 640px) {
-  .conflict-row {
+  .conflict-row,
+  .conflict-agent {
     flex-direction: column;
     align-items: stretch;
+  }
+  .conflict-diffs {
+    padding-left: 0;
   }
   .conflict-choices {
     justify-content: flex-start;

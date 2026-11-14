@@ -12,6 +12,7 @@ import {
   GitBranch,
   Layers3,
   Search,
+  RefreshCw,
   Sparkles,
   Terminal,
   TriangleAlert,
@@ -35,6 +36,7 @@ export function Overview() {
   const hasError = conflicts.length + data.plan.errors.length;
   return (
     <>
+      <Reminders />
       <div className="onboarding-entry">
         <span>
           <Sparkles size={16} />
@@ -302,6 +304,68 @@ export function Overview() {
           <ArrowRight size={14} />
         </button>
       </section>
+    </>
+  );
+}
+
+// Reminders the CLI also hands to Agents. Deployment pauses already show in the
+// header, so only sync and update reminders appear here, with our own wording.
+function Reminders() {
+  const { data, setPage } = useApp();
+  const shown = (data.notices || []).flatMap((n) => {
+    const count = Number(n.message.match(/^(\d+)/)?.[1]) || n.items?.length;
+    const names = n.items?.length
+      ? `：${n.items.join("、")}${count && count > n.items.length ? ` 等` : ""}`
+      : "";
+    if (n.code === "SYNC_CONFLICTS")
+      return [
+        {
+          code: n.code,
+          tone: "warn",
+          icon: <TriangleAlert size={15} />,
+          text: `${count} 个同步冲突等你处理${names}`,
+          action: "去处理",
+          page: "sync" as Page,
+        },
+      ];
+    if (n.code === "SYNC_FAILED")
+      return [
+        {
+          code: n.code,
+          tone: "warn",
+          icon: <TriangleAlert size={15} />,
+          text: "跨设备同步没有完成，修改暂时只在这台设备上",
+          action: "查看同步",
+          page: "sync" as Page,
+        },
+      ];
+    if (n.code === "SKILL_UPDATES")
+      return [
+        {
+          code: n.code,
+          tone: "info",
+          icon: <RefreshCw size={15} />,
+          text: `${count} 个技能有新版本${names}`,
+          action: "查看",
+          page: "skills" as Page,
+        },
+      ];
+    return [];
+  });
+  return (
+    <>
+      {shown.map((r) => (
+        <div key={r.code} className={`reminder-bar ${r.tone}`}>
+          <span>
+            {r.icon}
+            {r.text}
+          </span>
+          <button className="text-button" onClick={() => setPage(r.page)}>
+            {r.action}
+            <ArrowRight size={14} />
+          </button>
+        </div>
+      ))}
     </>
   );
 }

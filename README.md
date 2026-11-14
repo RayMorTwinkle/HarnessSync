@@ -18,7 +18,7 @@ The GUI, CLI messages, and bundled skills are currently in Simplified Chinese. C
 - Automatic deployment of clean changes, with snapshots, failure recovery, and rollback.
 - Conflict choices: use the library version, import the native version, or skip a target.
 - Git skill sources: install packages, check upstream changes, inspect diffs, update, or detach.
-- Cross-device sync through your own private Git repository, with per-entry conflict resolution.
+- Cross-device sync through your own private Git repository: identical entries merge themselves, differing ones become side-by-side conflicts you or your Agent can resolve.
 - Declarative tool plugins: add discovery paths in JSON.
 - Settings page and login service for macOS and Linux with systemd user services.
 - CLI ≡ GUI: both call the same core for configuration and deployment.
@@ -120,7 +120,9 @@ hsync sync status --json
 hsync sync now --json
 ```
 
-Alternatively, `hsync sync setup --create` creates a private GitHub repository using an installed, authenticated `gh`. On another device, connect the same URL to recover the library. Source entries merge by object; conflicting entries need a choice, for example `hsync sync resolve ENTRY_ID --keep local` (also `remote` or `both`; deletion conflicts cannot keep both). Unresolved conflicts block pushing and automatic deployment.
+Alternatively, `hsync sync setup --create` creates a private GitHub repository using an installed, authenticated `gh`. On another device, connect the same URL before or after onboarding; onboarding asks whether this is your first device and compares local skills with the shared library. Entries merge by object, and same-named entries with identical content on two devices become one automatically. When content differs, `hsync sync conflicts` lists each conflict with diffs and folders under `~/.harness-sync/conflicts/<id>/` (`local/`, `remote/`, `merged/`). Choose `hsync sync resolve ENTRY_ID --keep local|remote|both`, or let an Agent combine them: the listing includes a prompt that makes it explain the differences and get your agreement before writing `merged/` and running `--keep merged`. Unresolved conflicts block pushing and automatic deployment.
+
+Every CLI command attaches `reminders` (sync conflicts, paused deployments, skill updates, sync failures) so an Agent that calls `hsync` learns about them; turn this off with `hsync config set notices.cli false`.
 
 After setup, automatic sync defaults to pushing after 120 seconds without edits and pulling every 10 minutes. It runs while `hsync open`, `hsync serve`, or `hsync sync watch` is running. Pulled changes can deploy automatically when `deploy.auto` is enabled and the entire plan is clean. Device paths, variables, snapshots, local plugins, and settings do not sync.
 
