@@ -74,6 +74,8 @@ export type Device = {
   bindings: Record<string, string>;
   origins?: Record<string, string>;
   originRealPaths?: Record<string, string>;
+  // Source directory fingerprint when it was last read into the library.
+  originHashes?: Record<string, string>;
   ignoredNativePaths?: string[];
 };
 export type Harness = {

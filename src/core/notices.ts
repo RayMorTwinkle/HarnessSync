@@ -37,6 +37,13 @@ function local<T>(store: Store, name: string): T | undefined {
   noSymlink(file);
   return exists(file) ? json<T>(file) : undefined;
 }
+// Store paths are ours, not user data: show them whole, with HOME as ~.
+function tilde(store: Store, file: string) {
+  const rel = path.relative(store.home, file);
+  return rel && !rel.startsWith("..") && !path.isAbsolute(rel)
+    ? `~/${rel}`
+    : file;
+}
 // Cache-only: no Engine.plan(), native skill traversal, Git or network calls.
 export function collectNotices(store: Store): Notice[] {
   const result: Notice[] = [];
@@ -204,7 +211,7 @@ export async function cliNoticeOutput(
       ? notices
           .map(
             (n) =>
-              `[HarnessSync] ${n.message}\n  查看：${n.command || "hsync status"}${n.paths?.length ? ` （文件在 ${noticeName(path.join(store.root, "conflicts"))}/）` : ""}`,
+              `[HarnessSync] ${n.message}\n  查看：${n.command || "hsync status"}${n.paths?.length ? `\n  文件：${tilde(store, path.join(store.root, "conflicts"))}/<冲突 ID>/{local,remote,merged}` : ""}`,
           )
           .join("\n")
       : `[HarnessSync] 有 ${notices.length} 类提醒待查看；运行 hsync status --json 查看详情。`;

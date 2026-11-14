@@ -579,6 +579,10 @@ export class Store {
           entry.description = parsed.description;
           entry.source = "local-import";
           d.origins = { ...d.origins, [entry.id]: original };
+          d.originHashes = {
+            ...d.originHashes,
+            [entry.id]: bundleDiskHash(absolute),
+          };
           if (d.originRealPaths) delete d.originRealPaths[entry.id];
           if (original !== absolute)
             d.originRealPaths = { ...d.originRealPaths, [entry.id]: absolute };
@@ -590,6 +594,10 @@ export class Store {
           // A renamed copy has a different SKILL.md and cannot be refreshed from the old name.
           if (options.name === undefined) {
             d.origins = { ...d.origins, [entry.id]: original };
+            d.originHashes = {
+              ...d.originHashes,
+              [entry.id]: bundleDiskHash(absolute),
+            };
             if (original !== absolute)
               d.originRealPaths = {
                 ...d.originRealPaths,
@@ -630,6 +638,7 @@ export class Store {
           if (d.origins) {
             delete d.origins[id];
             if (d.originRealPaths) delete d.originRealPaths[id];
+            if (d.originHashes) delete d.originHashes[id];
             writeJson(path.join(this.root, "device.json"), d);
           }
         }

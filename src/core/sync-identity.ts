@@ -104,7 +104,12 @@ export function referenceChanges(store: Store, ids: IdMap): LocalReferences {
           ...new Set([...order, ...rules.map((r) => r.id)].map(mapped)),
         ];
       }
-      for (const key of ["bindings", "origins", "originRealPaths"]) {
+      for (const key of [
+        "bindings",
+        "origins",
+        "originRealPaths",
+        "originHashes",
+      ]) {
         if (!value[key]) continue;
         for (const [from, to] of Object.entries(ids))
           if (Object.hasOwn(value[key], from)) {

@@ -87,10 +87,16 @@ export function sourceStatus(store: Store) {
     )
       return [];
     try {
-      const changed =
-        bundleDiskHash(
-          fs.realpathSync(resolvedSkillSource(store, skill.id)!),
-        ) !== bundleDiskHash(store.skillPath(skill.id));
+      // "Changed" means the source directory moved on since it was last read.
+      // Library edits from sync, merges or the editor are not source updates.
+      // Imports from before baselines existed fall back to comparing contents.
+      const current = bundleDiskHash(
+        fs.realpathSync(resolvedSkillSource(store, skill.id)!),
+      );
+      const baseline = store.device().originHashes?.[skill.id];
+      const changed = baseline
+        ? current !== baseline
+        : current !== bundleDiskHash(store.skillPath(skill.id));
       return [
         {
           id: skill.id,
@@ -128,9 +134,8 @@ export async function refreshSkills(store: Store, ids: string[]) {
           "NO_SKILL_SOURCE",
           `技能没有本机源目录：${entry.name}`,
         );
-      const bundle = readBundle(
-        fs.realpathSync(resolvedSkillSource(store, id)!),
-      );
+      const real = fs.realpathSync(resolvedSkillSource(store, id)!);
+      const bundle = readBundle(real);
       if (!bundle["SKILL.md"])
         throw new AppError("INVALID_SKILL", "目录中缺少 SKILL.md");
       const parsed = parseSkill(
@@ -147,6 +152,12 @@ export async function refreshSkills(store: Store, ids: string[]) {
         writeBundle(store.skillPath(id), bundle);
         entry.description = parsed.description;
       }
+      const device = store.device();
+      device.originHashes = {
+        ...device.originHashes,
+        [id]: bundleDiskHash(real),
+      };
+      writeJson(path.join(store.root, "device.json"), device);
       return {
         id,
         changed,

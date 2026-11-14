@@ -12,7 +12,7 @@ import {
   autoDeployBlockers,
 } from "../src/core/auto-deploy.ts";
 import { Engine, publicPlan } from "../src/core/engine.ts";
-import { ignoreNativePaths } from "../src/core/skill-sources.ts";
+import { ignoreNativePaths, refreshSkills } from "../src/core/skill-sources.ts";
 import { Store } from "../src/core/store.ts";
 import { Sync } from "../src/core/sync.ts";
 import {
@@ -701,6 +701,31 @@ test("source-directory warnings stop automatic deployment of an outdated library
     ),
   );
   assert.equal(engine.deployments().length, 0);
+});
+
+test("library edits from sync, merges or the editor are not source-directory updates", async (t) => {
+  const { store, engine, root } = await fixture(t);
+  const incoming = path.join(root, "incoming");
+  fs.mkdirSync(incoming);
+  fs.writeFileSync(
+    path.join(incoming, "SKILL.md"),
+    skillMarkdown("baseline", "test", "text"),
+  );
+  const entry = await store.importSkill(incoming, {
+    kind: "global",
+    harnesses: ["deepseek", "opencode", "codex", "claude"],
+  });
+  await store.saveSkill({ ...entry, body: "edited in the library" }, entry.id);
+  assert.equal((await autoDeploy(engine, "library edit")).outcome, "applied");
+  fs.appendFileSync(path.join(incoming, "SKILL.md"), "changed source");
+  const result = await autoDeploy(engine, "source edit");
+  assert.ok(result.blockers?.some((b) => b.code === "skill-source-changed"));
+  await refreshSkills(store, [entry.id]);
+  assert.equal((await autoDeploy(engine, "refreshed")).outcome, "applied");
+  fs.appendFileSync(path.join(store.skillPath(entry.id), "SKILL.md"), "");
+  assert.ok(
+    !engine.plan().notices.some((n) => n.code === "skill-source-changed"),
+  );
 });
 
 test("informational plugin, retained-path, scope, exposure and external-preservation notices still auto-apply", async (t) => {
