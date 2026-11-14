@@ -65,6 +65,7 @@ export type Manifest = {
   projects: Project[];
 };
 export type Device = {
+  ruleOrder?: string[];
   disabledHarnesses?: string[];
   id: string;
   name: string;

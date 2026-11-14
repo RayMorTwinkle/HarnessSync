@@ -1,3 +1,21 @@
+import {
+  semanticObject,
+  remapScopes,
+  referenceChanges,
+  validateReferences,
+  writeReferences,
+  type IdMap,
+  type LocalReferences,
+} from "./sync-identity.ts";
+import {
+  materialize,
+  removeWorkspace,
+  workspaceRoot,
+  checkWorkspace,
+  fileDifferences,
+  conflictPrompt,
+} from "./sync-workspace.ts";
+import { cliCommand } from "./self-skill.ts";
 import { lastAutoDeploy } from "./auto-deploy.ts";
 import fs from "node:fs";
 import path from "node:path";
@@ -262,6 +280,7 @@ export class Sync {
     after: Library,
     conflicts: SyncConflict[],
     operation: string,
+    references?: LocalReferences,
   ) {
     this.requireRecovered();
     const c = this.config(false);
@@ -275,6 +294,7 @@ export class Sync {
       conflicts: c?.conflicts || [],
       afterConflicts: conflicts,
       operation,
+      references,
       remote: c?.url,
       branch: c?.branch,
       pendingDeployment: this.autoState().runtime.pendingDeployment,
@@ -296,6 +316,9 @@ export class Sync {
     return this.store.lock(() => {
       this.store.checkRevision(revision);
       const library = this.read(commit);
+      const previousConflicts = this.config(false)?.conflicts || [];
+      for (const conflict of previousConflicts)
+        workspaceRoot(this.store, conflict.entryId);
       this.checkpoint(library, [], "restore");
       this.write(library);
       this.store.commit(`恢复配置至 ${commit.slice(0, 8)}`);
@@ -305,6 +328,8 @@ export class Sync {
         this.save(c);
       }
       this.finishCheckpoint();
+      for (const conflict of previousConflicts)
+        removeWorkspace(this.store, conflict.entryId);
       return { commit };
     });
   }
@@ -453,6 +478,17 @@ export class Sync {
           "SYNC_UNDO_CHANGED",
           "操作后源配置、同步连接或冲突已改变，拒绝覆盖；请从同步历史选择恢复点",
         );
+      const obsoleteWorkspaces = (
+        record.afterConflicts as SyncConflict[]
+      ).filter(
+        (next) =>
+          !record.conflicts.some(
+            (old: SyncConflict) => old.entryId === next.entryId,
+          ),
+      );
+      for (const conflict of obsoleteWorkspaces)
+        workspaceRoot(this.store, conflict.entryId);
+      validateReferences(this.store, record.references);
       this.read(record.before);
       const beforeFiles = record.beforeFiles as Bundle;
       // Persist the new commit before changing source, so an interrupted undo can resume.
@@ -482,6 +518,7 @@ export class Sync {
         fs.renameSync(`${swap.stage}-old`, swap.target);
       }
       this.restoreFiles(beforeFiles, files);
+      writeReferences(this.store, record.references, "before");
       this.git(["reset", "--mixed", record.undoCommit]);
       if (c) {
         c.conflicts = record.conflicts;
@@ -492,6 +529,9 @@ export class Sync {
         state.runtime.pendingDeployment = record.pendingDeployment;
         this.saveAuto(state);
       }
+      for (const conflict of obsoleteWorkspaces)
+        removeWorkspace(this.store, conflict.entryId);
+      if (c) this.conflictDetails(c);
       for (const swap of swaps) cleanStaging(swap.stage);
       fs.rmSync(file);
       return this.result(c);
@@ -925,7 +965,7 @@ export class Sync {
       message: !c
         ? "本机已断开同步；远端仓库仍然保留，不会被删除"
         : c.conflicts.length
-          ? `有 ${c.conflicts.length} 个冲突待处理；解决前暂停推送，用 hsync sync resolve <id> --keep local|remote|both 处理后再 sync now`
+          ? `有 ${c.conflicts.length} 个冲突待处理；解决前暂停推送，用 hsync sync resolve <id> --keep local|remote|both|merged 处理后再 sync now`
           : message,
     };
   }
@@ -1138,6 +1178,74 @@ export class Sync {
         const b = base ? this.read(base) : empty();
         const merged = structuredClone(l);
         const conflicts = [...c.conflicts];
+        const ids: IdMap = Object.create(null);
+        const reconciled = new Set<string>();
+        // Reconcile independently initialized entries before the ID-based merge.
+        // Projects first, so scope targets can be compared using canonical IDs.
+        for (const kind of ["projects", "rules", "skills"] as const) {
+          for (const remoteEntry of r.manifest[kind]) {
+            if (
+              l.manifest[kind].some((e) => e.id === remoteEntry.id) ||
+              b.manifest[kind].some((e) => e.id === remoteEntry.id)
+            )
+              continue;
+            const name =
+              "title" in remoteEntry ? remoteEntry.title : remoteEntry.name;
+            const candidates = l.manifest[kind].filter(
+              (e) =>
+                ("title" in e ? e.title : e.name) === name &&
+                !r.manifest[kind].some((other) => other.id === e.id) &&
+                !b.manifest[kind].some((other) => other.id === e.id),
+            );
+            if (!candidates.length) continue;
+            const candidate =
+              candidates.find(
+                (e) =>
+                  stable(semanticObject(l, kind, e.id)) ===
+                  stable(semanticObject(r, kind, remoteEntry.id)),
+              ) || candidates[0];
+            if (
+              conflicts.some(
+                (c) =>
+                  c.kind === kind &&
+                  (c.entryId === remoteEntry.id || c.localId === candidate.id),
+              )
+            )
+              continue;
+            if (
+              stable(semanticObject(l, kind, candidate.id)) !==
+              stable(semanticObject(r, kind, remoteEntry.id))
+            ) {
+              conflicts.push({
+                entryId: remoteEntry.id,
+                localId: candidate.id,
+                kind,
+                reason: "name",
+                localCommit: local,
+                remoteCommit: remote,
+              });
+              continue;
+            }
+            ids[candidate.id] = remoteEntry.id;
+            reconciled.add(`${kind}:${remoteEntry.id}`);
+            for (const library of [l, merged]) {
+              (library.manifest[kind] as any[]) = library.manifest[kind].filter(
+                (e) => e.id !== candidate.id,
+              );
+              (library.manifest[kind] as any[]).push(
+                structuredClone(remoteEntry),
+              );
+              if (kind === "skills") {
+                // Git preserves execution, not local read/write permission bits.
+                // Keep equivalent local bytes/modes so receipts remain unchanged.
+                library.bundles[remoteEntry.id] = library.bundles[candidate.id];
+                delete library.bundles[candidate.id];
+              }
+              if (kind === "projects") remapScopes(library, ids);
+            }
+            if (kind === "projects") remapScopes(b, ids);
+          }
+        }
         const object = (
           v: Library,
           kind: (typeof kinds)[number],
@@ -1156,6 +1264,7 @@ export class Sync {
             ),
           )) {
             if (
+              reconciled.has(`${kind}:${id}`) ||
               conflicts.some(
                 (c) =>
                   c.kind === kind && (c.entryId === id || c.localId === id),
@@ -1182,9 +1291,12 @@ export class Sync {
               conflict("entry");
               continue;
             }
-            if (kind === "skills" && rv) {
-              const collision = merged.manifest.skills.find(
-                (s) => s.id !== id && s.name === (rv.entry as any).name,
+            if (rv) {
+              const collision = merged.manifest[kind].find(
+                (s) =>
+                  s.id !== id &&
+                  ("title" in s ? s.title : s.name) ===
+                    ("title" in rv.entry ? rv.entry.title : rv.entry.name),
               );
               if (collision) {
                 conflict("name", collision.id);
@@ -1220,9 +1332,16 @@ export class Sync {
             }).length,
           0,
         );
-        const checkpoint = this.checkpoint(merged, conflicts, "merge");
+        const references = referenceChanges(this.store, ids);
+        const checkpoint = this.checkpoint(
+          merged,
+          conflicts,
+          "merge",
+          references,
+        );
         try {
           this.write(merged);
+          writeReferences(this.store, references, "after");
           this.git([
             "add",
             "--all",
@@ -1254,6 +1373,7 @@ export class Sync {
           this.git(["reset", "--soft", sha]);
           c.conflicts = conflicts;
           this.save(c);
+          this.conflictDetails(c);
           if (changed) {
             const state = this.autoState();
             state.runtime.pendingDeployment += changed;
@@ -1262,6 +1382,7 @@ export class Sync {
           fs.rmSync(this.recoveryPath());
         } catch (e) {
           this.restoreFiles(checkpoint.beforeFiles);
+          writeReferences(this.store, references, "before");
           this.git(["reset", "--mixed", checkpoint.before]);
           throw e;
         }
@@ -1285,10 +1406,110 @@ export class Sync {
     this.save(c);
     return this.result(c, this.head());
   }
-  async resolve(entryId: string, keep: "local" | "remote" | "both") {
+  private conflictDetails(c: SyncConfig, textDiff = false) {
+    const libraries = new Map<string, Library>();
+    const read = (commit: string) => {
+      if (!libraries.has(commit)) libraries.set(commit, this.read(commit));
+      return libraries.get(commit)!;
+    };
+    const rows = c.conflicts.map((conflict) => {
+      const local = read(conflict.localCommit),
+        remote = read(conflict.remoteCommit);
+      let base: Library | undefined;
+      let baseCommit: string | undefined;
+      try {
+        baseCommit = this.store.git([
+          "merge-base",
+          conflict.localCommit,
+          conflict.remoteCommit,
+        ]);
+      } catch {}
+      if (baseCommit) base = read(baseCommit);
+      const { paths, sides } = materialize(
+        this.store,
+        conflict,
+        local,
+        remote,
+        base,
+      );
+      const localEntry = local.manifest[conflict.kind].find(
+        (e) => e.id === (conflict.localId || conflict.entryId),
+      );
+      const remoteEntry = remote.manifest[conflict.kind].find(
+        (e) => e.id === conflict.entryId,
+      );
+      const entry = localEntry || remoteEntry;
+      const metadataDiff =
+        conflict.kind === "skills"
+          ? fileDifferences(
+              {
+                "entry.json": {
+                  content: Buffer.from(
+                    stable(
+                      semanticObject(
+                        local,
+                        "skills",
+                        conflict.localId || conflict.entryId,
+                      )?.entry,
+                    ),
+                  ).toString("base64"),
+                  mode: 0o600,
+                },
+              },
+              {
+                "entry.json": {
+                  content: Buffer.from(
+                    stable(
+                      semanticObject(remote, "skills", conflict.entryId)?.entry,
+                    ),
+                  ).toString("base64"),
+                  mode: 0o600,
+                },
+              },
+              textDiff,
+            )
+          : [];
+      const { command } = cliCommand(this.store);
+      const choices =
+        localEntry && remoteEntry
+          ? ["local", "remote", "both", "merged"]
+          : ["local", "remote", "merged"];
+      return {
+        ...conflict,
+        name: entry && ("title" in entry ? entry.title : entry.name),
+        paths,
+        localEntry,
+        remoteEntry,
+        summary: fileDifferences(sides.local, sides.remote, textDiff),
+        metadataDiff,
+        commands: choices.map(
+          (keep) =>
+            `${command} sync resolve '${conflict.entryId}' --keep ${keep}`,
+        ),
+      };
+    });
+    const prompt = conflictPrompt(this.store, rows);
+    return { conflicts: rows.map((row) => ({ ...row, prompt })) };
+  }
+  async conflicts(textDiff = false) {
+    return this.store.lock(() =>
+      this.conflictDetails(
+        this.config(false) || { url: "", branch: "main", conflicts: [] },
+        textDiff,
+      ),
+    );
+  }
+  async resolve(
+    entryId: string,
+    keep: "local" | "remote" | "both" | "merged",
+    from?: string,
+  ) {
     return this.store.lock(() => {
-      if (!["local", "remote", "both"].includes(keep))
-        throw new AppError("SYNC_OPTIONS", "keep 必须是 local、remote 或 both");
+      if (!["local", "remote", "both", "merged"].includes(keep))
+        throw new AppError(
+          "SYNC_OPTIONS",
+          "keep 必须是 local、remote、both 或 merged",
+        );
       const c = this.config()!;
       const matches = c.conflicts.filter((x) => x.entryId === entryId);
       if (matches.length !== 1)
@@ -1310,7 +1531,84 @@ export class Sync {
           "SYNC_CONFLICT",
           "删除冲突无法保留双方，请选择 local 或 remote",
         );
-      if (keep !== "local") {
+      const ids: IdMap = Object.create(null);
+      const root = workspaceRoot(this.store, entryId);
+      if (keep === "merged") {
+        const kind = conflict.kind;
+        const dir = from ? path.resolve(from) : path.join(root, "merged");
+        checkWorkspace(dir);
+        if (!exists(dir) || !fs.readdirSync(dir).length)
+          throw new AppError(
+            "SYNC_MERGED",
+            "合并目录为空，请先写入完整合并结果",
+          );
+        try {
+          const files = readBundle(dir);
+          const text = (name: string) => {
+            if (!files[name])
+              throw new AppError("SYNC_MERGED", `合并目录缺少 ${name}`);
+            return Buffer.from(files[name].content, "base64").toString("utf8");
+          };
+          const original =
+            entry ||
+            library.manifest[kind].find(
+              (e) => e.id === (conflict.localId || entryId),
+            );
+          let copy: any;
+          if (kind === "skills") {
+            const parsed = parseSkill(text("SKILL.md"));
+            copy = {
+              ...original,
+              name: parsed.name,
+              description: parsed.description,
+              id: entryId,
+            };
+            delete copy.source;
+            library.bundles[entryId] = files;
+          } else if (kind === "rules") {
+            copy = {
+              ...JSON.parse(text("meta.json")),
+              body: text("rule.md"),
+              id: entryId,
+            };
+            if (!copy.body.trim())
+              throw new AppError("SYNC_MERGED", "合并规则正文不能为空");
+          } else {
+            copy = { ...JSON.parse(text("project.json")), id: entryId };
+            if (typeof copy.name === "string") copy.name = copy.name.trim();
+          }
+          copy = manifestSchema.shape[kind].element.parse(copy);
+          const others = library.manifest[kind].filter(
+            (e) => e.id !== entryId && e.id !== conflict.localId,
+          );
+          if (
+            others.some((e) =>
+              kind === "projects"
+                ? (e as { name: string }).name.toLowerCase() ===
+                  copy.name.toLowerCase()
+                : ("title" in e ? e.title : e.name) ===
+                  (copy.title ?? copy.name),
+            )
+          )
+            throw new AppError(
+              "SYNC_MERGED",
+              "合并后的名称与其他条目重复，请修改名称",
+            );
+          if (
+            copy.scope?.kind === "project" &&
+            !library.manifest.projects.some((p) => p.id === copy.scope.target)
+          )
+            throw new AppError("SYNC_MERGED", "合并结果引用的项目不存在");
+          (library.manifest[kind] as any[]) = [...others, copy];
+          if (conflict.localId) ids[conflict.localId] = entryId;
+          if (kind === "projects") remapScopes(library, ids);
+        } catch (error: any) {
+          throw new AppError(
+            "SYNC_MERGED",
+            `合并结果无效：${error instanceof AppError ? error.message : "请检查文件内容和字段格式"}`,
+          );
+        }
+      } else if (keep !== "local") {
         const kind = conflict.kind;
         if (keep === "remote")
           (library.manifest[kind] as any[]) = library.manifest[kind].filter(
@@ -1361,17 +1659,25 @@ export class Sync {
           if (kind === "skills") library.bundles[copy.id] = bundle;
         }
       }
+      if (keep === "remote" && conflict.localId && entry) {
+        ids[conflict.localId] = entryId;
+        if (conflict.kind === "projects") remapScopes(library, ids);
+      }
+      const references = referenceChanges(this.store, ids);
       this.checkpoint(
         library,
         c.conflicts.filter((x) => x !== conflict),
         "resolve",
+        references,
       );
       try {
         if (keep !== "local") this.write(library);
+        writeReferences(this.store, references, "after");
         this.store.commit(`解决同步冲突：${keep}`);
       } catch (e) {
         const checkpoint = json<any>(this.undoPath());
         this.restoreFiles(checkpoint.beforeFiles);
+        writeReferences(this.store, references, "before");
         this.git(["reset", "--mixed", checkpoint.before]);
         throw e;
       }
@@ -1383,6 +1689,7 @@ export class Sync {
         state.runtime.nextRunAt = new Date().toISOString();
       this.saveAuto(state);
       this.finishCheckpoint();
+      removeWorkspace(this.store, entryId);
       return this.result(c);
     });
   }

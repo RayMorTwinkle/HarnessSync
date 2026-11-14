@@ -326,6 +326,9 @@ sync
 sync
   .command("status")
   .action(run(async () => new Sync(await getStore()).status()));
+sync
+  .command("conflicts")
+  .action(run(async () => new Sync(await getStore()).conflicts()));
 sync.command("now").action(run(async () => new Sync(await getStore()).now()));
 const auto = sync.command("auto").description("设置本机自动同步");
 for (const mode of ["on", "off"])
@@ -374,8 +377,13 @@ sync
   });
 sync
   .command("resolve <entry-id>")
-  .requiredOption("--keep <choice>", "local / remote / both")
-  .action(run(async (id, o) => new Sync(await getStore()).resolve(id, o.keep)));
+  .requiredOption("--keep <choice>", "local / remote / both / merged")
+  .option("--from <dir>", "完整合并结果目录")
+  .action(
+    run(async (id, o) =>
+      new Sync(await getStore()).resolve(id, o.keep, o.from),
+    ),
+  );
 sync
   .command("disconnect")
   .action(run(async () => new Sync(await getStore()).disconnect()));
