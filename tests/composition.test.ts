@@ -15,6 +15,7 @@ import { adapters } from "../src/core/adapters.ts";
 import { startServer } from "../src/server.ts";
 import { isCredentialPath } from "../src/core/credentials.ts";
 import { writeJson } from "../src/core/files.ts";
+import { SyncIgnore } from "../src/core/sync-ignore.ts";
 import { START, segmentsText } from "../src/core/rendering.ts";
 
 const total = (values: Record<string, number>) =>
@@ -267,6 +268,12 @@ test("技能分类、变量字节及凭证只 stat，不读取其他文件内容
   assert.equal(result.totals.variable, Buffer.byteLength("/中文机器"));
   assert.equal(total(result.totals), result.bytes);
   assert.deepEqual(read, [path.join(root, "SKILL.md")]);
+  await new SyncIgnore(store).update({ add: ["files/auth.json"] });
+  const ignored = skillComposition(store, skill.id).files;
+  assert.deepEqual(
+    ignored.filter((f) => f.syncIgnored).map((f) => f.path),
+    ["auth.json"],
+  );
   assert.throws(() => skillComposition(store, "unknown"), {
     code: "NOT_FOUND",
     status: 404,

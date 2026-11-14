@@ -3,6 +3,7 @@ import path from "node:path";
 import type { Store } from "./store.ts";
 import { adapters, projectTargets } from "./adapters.ts";
 import { isCredentialPath } from "./credentials.ts";
+import { SyncIgnore } from "./sync-ignore.ts";
 import { AppError, exists, hash, noSymlink } from "./files.ts";
 import {
   instructionSegments,
@@ -272,6 +273,8 @@ export function skillComposition(store: Store, id: string): SkillComposition {
   if (!skill) throw new AppError("NOT_FOUND", "Skill 不存在", 404);
   const root = store.skillPath(id);
   noSymlink(root);
+  const ignore = new SyncIgnore(store);
+  const rules = ignore.rules();
   const result: SkillComposition = {
     id,
     name: skill.name,
@@ -335,7 +338,7 @@ export function skillComposition(store: Store, id: string): SkillComposition {
         kind,
         executable,
         variables,
-        syncIgnored: false,
+        syncIgnored: ignore.fileIgnored(skill.name, relative, rules),
       });
     }
   };

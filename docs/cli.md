@@ -87,7 +87,7 @@ HTTP 使用现有本机会话鉴权和 `{ ok: true, data: ... }` 外壳：
 
 分类按作用域：设备规则为 `device`，项目规则为 `project`；全局规则覆盖全部已启用工具为 `shared`，其余为 `harness`。标记、标题、规则标题和生成的分隔空行为 `frame`；管理块前后用户自有文字分别为 `native`。无标记时保留整份原生文字，再追加待部署区块；显式登记的完整初始化替换沿用 plan 的整文件替换结果。
 
-`SkillComposition` 含 `id/name/bytes/totals/files`。`totals` 包含 `instructions/script/reference/asset/credential/other/variable`。`files` 每项含相对 `path`、渲染后 `bytes`、`kind`、`executable`、`variables`（仅顶层 `SKILL.md` 有已使用的变量键）、`syncIgnored`（暂恒为 false，尚未接入同步忽略）。技能缺变量时查询返回 `MISSING_VARIABLE`，补齐设备变量后重试。
+`SkillComposition` 含 `id/name/bytes/totals/files`。`totals` 包含 `instructions/script/reference/asset/credential/other/variable`。`files` 每项含相对 `path`、渲染后 `bytes`、`kind`、`executable`、`variables`（仅顶层 `SKILL.md` 有已使用的变量键）、`syncIgnored`（该文件是否被本机上传忽略规则排除）。技能缺变量时查询返回 `MISSING_VARIABLE`，补齐设备变量后重试。
 
 文件分类依次为：顶层 `SKILL.md` → instructions；凭证辅助函数识别的路径 → credential；可执行文件、`scripts/` 或脚本扩展名 → script；`references/`、`.md/.txt` → reference；`assets/`、图片、字体、音视频及常见二进制扩展名 → asset；其余 → other。只读取顶层 `SKILL.md` 来渲染变量，其他文件（包括凭证）只用 stat 计大小，不读取内容；拒绝包内符号链接。
 
