@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import type { Harness } from "../../shared/types.ts";
 import { AppearanceOptions } from "../Appearance.tsx";
+import { BackupSettings } from "../BackupSettings.tsx";
 import { useApp } from "../app-context.tsx";
 import { HarnessIcon } from "../common.tsx";
 import type { SettingsData, SettingsPatch } from "../lib.ts";
@@ -355,6 +356,8 @@ export function SettingsPage({
           )}
         </Row>
       </Group>
+
+      <BackupSettings Group={Group} Row={Row} />
 
       <Group icon={Palette} title="外观">
         <div className="setting-row appearance-row">

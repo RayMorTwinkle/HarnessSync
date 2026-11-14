@@ -4134,3 +4134,171 @@ body {
 .sync-check-error {
   color: var(--danger);
 }
+
+.button.danger {
+  color: var(--danger);
+}
+.button.danger-solid {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+.button.danger-solid:hover {
+  background: var(--danger);
+  filter: brightness(0.94);
+}
+.backup-path {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+.backup-body {
+  display: grid;
+  gap: 16px;
+  padding: 22px 27px 24px;
+}
+.uninstall-options {
+  display: grid;
+  gap: 8px;
+}
+.uninstall-options > label:not(.checkbox) {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.uninstall-options > label.selected {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+.uninstall-options input[type="radio"] {
+  margin-top: 3px;
+}
+.uninstall-options span {
+  display: grid;
+  gap: 3px;
+}
+.uninstall-options strong {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.uninstall-options small {
+  font-size: 11.5px;
+  color: var(--text-4);
+}
+.backup-body .checkbox {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.backup-group h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.backup-group h3 span {
+  font-weight: 400;
+  color: var(--text-4);
+}
+.backup-group ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.backup-group li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.backup-group li code {
+  font-size: 11px;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+.backup-group li .checkbox {
+  flex: none;
+}
+.backup-note,
+.backup-error {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--text-4);
+}
+.backup-error {
+  color: var(--danger);
+}
+.backup-dialog .modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+.backup-done {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+.backup-done > svg {
+  color: var(--accent-text);
+}
+.backup-done p {
+  margin: 0;
+}
+.backup-done dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin: 0;
+  font-size: 11.5px;
+}
+.backup-done dt {
+  color: var(--text-4);
+}
+.backup-done dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.backup-body input[type="radio"],
+.backup-body input[type="checkbox"] {
+  flex: none;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--primary);
+}
+.uninstall-options input[type="radio"] {
+  margin-top: 3px;
+}
+.uninstall-options > .checkbox {
+  padding: 4px 2px 0;
+}
+.backup-body label {
+  flex-direction: row;
+  font-weight: 400;
+}
