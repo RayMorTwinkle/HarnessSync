@@ -42,7 +42,11 @@ description: 管理 HarnessSync 的共享技能、全局指令、设备变量与
 
 默认共享给四个 Harness。项目专属使用 `--scope project --target <项目ID>`，设备专属使用 `--scope device --target <设备ID>`；`--harness codex` 等参数选择工具。DeepSeek、OpenCode、Codex 共用项目 `AGENTS.md`，面向其中任一工具的项目指令需要同时选择三者；Claude Code 使用独立 `CLAUDE.md`。项目技能可以分别选择。
 
-使用 `rules add --title 标题 --file /完整/指令.md` 添加指令。指令变量包括 `{{device.name}}`、`{{device.home}}`、`{{device.id}}`、`{{project.name}}`、`{{project.path}}`、`{{vars.KEY}}`。技能资源不做模板替换。
+使用 `rules add --title 标题 --file /完整/指令.md` 添加指令。变量写法是双花括号包住键名：将 `{{`、`vars.FORK_DIR`、`}}` 连在一起。可用键名包括 `device.name`、`device.home`、`device.id`、`vars.<键名>`；项目范围另有 `project.name`、`project.path`。用 `device set FORK_DIR /本机/目录` 配置本机变量。
+
+技能只渲染顶层 `SKILL.md` 的上述变量，其他模板语法原样保留，脚本和资源不替换。源库和同步保留模板，部署收据、漂移和接管按渲染结果比较。缺少变量时该技能的部署路径跳过并发出阻断通知，已有副本和收据保留；手动应用仍可处理其余干净路径，自动部署暂停等待审查。补齐变量后重新预览。此处将括号与键名拆开书写，以免说明文档本身被当作待填变量。
+
+用 `compose instructions --json` 查看全部本机指令输出，`compose skill <技能ID> --json` 查看技能文件组成；不加参数显示字符条、图例和字节数。指令片段按原生自有文字、共享、工具、设备、项目和框架分类，变量字节单独统计；`pending` 表示当前源配置与磁盘不同，`error` 表示结果仍有阻碍，不能当成可以直接部署。技能组成只读取顶层说明文件，凭证和其他资源只统计文件大小，`syncIgnored` 暂时恒为假。技能缺变量时组成查询报错，先补设备变量。查询不证明工具会话已加载。
 
 `skills import <原生目录> --adopt` 表示显式接管该目录，后续允许更新和撤下。新条目的普通导入保留原目录的外部管理状态；同名同内容复用已有 ID，并将匹配的原生目录登记为待接管。不同内容默认拒绝，需选择下文的导入方式。
 

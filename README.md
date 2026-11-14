@@ -13,7 +13,8 @@ The GUI, CLI messages, and bundled skills are currently in Simplified Chinese. C
 ## Features
 
 - Unified skill library: import complete packages, including scripts, assets, and executable permissions.
-- Instructions with device, project, and custom variables.
+- Instructions and top-level skill `SKILL.md` files with device, project, and custom variables.
+- Read-only instruction and skill composition through the CLI and local API.
 - Global, device, and per-project configuration with stable project IDs and local directory bindings.
 - Automatic deployment of clean changes, with snapshots, failure recovery, and rollback.
 - Conflict choices: use the library version, import the native version, or skip a target.
@@ -116,7 +117,9 @@ Instruction updates preserve content outside the managed block. The exception is
 
 Automatic deployment uses the same planner, receipts, and snapshots. Related CLI/API edits, pulled changes, and scheduler startup can trigger it. It accepts absent targets for creation and owned targets without external edits for updates/removal; an explicit skip must still match its fingerprint. Plan errors, conflicts, adoptions, replacements, staged instruction replacements, unfinished recovery, and blocking notices (leftover staging directories, a changed or unreadable local import source) stop the whole attempt for review. Informational notices, such as a disabled tool keeping its files or a shared directory that other tools also read, do not. It does not choose conflict resolutions or install upstream skill updates. Read `autoDeploy` in `hsync doctor --json`; for `needs-review`, inspect a fresh plan and apply it manually after resolving blockers. Details: [settings](docs/settings.md) (Chinese).
 
-Instructions support `{{device.name}}`, `{{device.id}}`, `{{device.home}}`, `{{project.name}}`, `{{project.path}}`, and `{{vars.KEY}}`. Missing variables block deployment; skill contents are not templated. Variables are rendered into native files, so do not use them for credentials.
+Instructions support `{{device.name}}`, `{{device.id}}`, `{{device.home}}`, `{{project.name}}`, `{{project.path}}`, and `{{vars.KEY}}`. Skills render only these recognized variables in the top-level `SKILL.md` (`project.*` only for project skills); other template syntax, scripts, and resources stay unchanged. The library and sync keep the template. Deployment hashes and adoption comparisons use rendered bytes, so changing a device variable produces an update without reporting external drift. A missing skill variable skips that skill's paths and retains existing copies; manual apply can continue with other clean paths, while the blocking notice pauses automatic deployment. Set values with `hsync device set KEY value`, then preview again. Variables are written to native files; do not use them for credentials.
+
+`hsync compose instructions [--json]` shows every enabled tool's global output and bound project outputs, deduplicating shared files. `hsync compose skill ID [--json]` shows skill file categories. Text output includes a 40-character bar, legend, and byte counts. JSON reports UTF-8 bytes, variables separately, and ordered instruction segments that reconstruct the planned file, including user text outside managed blocks. Instruction `pending` compares source output with disk; `error` marks incomplete or blocked previews. Skill composition reports missing variables as an error. These read-only queries never read credential contents and do not prove session loading. See the [CLI/API contract](docs/cli.md#内容组成只读).
 
 ## Sync
 

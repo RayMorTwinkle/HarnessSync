@@ -1,4 +1,13 @@
 import { activeOnboarding } from "./onboarding-session.ts";
+import {
+  managedBlock,
+  replaceBlock,
+  matchesScope,
+  instructionSegments,
+  segmentsText,
+  renderedSkillBundle,
+  renderSkillText,
+} from "./rendering.ts";
 import { Backups, backupFingerprint } from "./backup.ts";
 import {
   registry,
@@ -69,8 +78,6 @@ import type {
   Snapshot,
 } from "../shared/types.ts";
 
-const START = "<!-- harness-sync:begin -->";
-const END = "<!-- harness-sync:end -->";
 const absent = hash("ABSENT");
 type SavedFile = {
   native?: NativeTree;
@@ -96,24 +103,6 @@ type Deployment = {
   files: SavedFile[];
 };
 
-function managedBlock(text: string) {
-  const starts = text.split(START).length - 1,
-    ends = text.split(END).length - 1;
-  if (!starts && !ends) return null;
-  if (starts !== 1 || ends !== 1 || text.indexOf(END) < text.indexOf(START))
-    throw new AppError(
-      "MALFORMED_BLOCK",
-      "HarnessSync 管理区块标记损坏或重复，请先修复",
-    );
-  return text.slice(text.indexOf(START), text.indexOf(END) + END.length);
-}
-function replaceBlock(text: string, block: string | null) {
-  const previous = managedBlock(text);
-  if (previous) return text.replace(previous, block || "");
-  return block
-    ? `${text}${text && !text.endsWith("\n") ? "\n" : ""}${text ? "\n" : ""}${block}\n`
-    : text;
-}
 export function instructionOutsideHash(text: string) {
   return hash(replaceBlock(text, null));
 }
@@ -148,70 +137,11 @@ export class Engine {
     { key: string; value: Deployment }
   >();
   private matches(scope: Scope, harness: HarnessId, projectId?: string) {
-    if (
-      !selectedHarnesses(
-        scope.harnesses,
-        this.store.home,
-        this.store.root,
-        this.store.device().disabledHarnesses,
-      ).includes(harness)
-    )
-      return false;
-    if (projectId)
-      return scope.kind === "project" && scope.target === projectId;
-    return (
-      scope.kind === "global" ||
-      (scope.kind === "device" && scope.target === this.store.device().id)
-    );
-  }
-  private render(text: string, projectId?: string) {
-    const d = this.store.device();
-    const p = this.store.manifest().projects.find((p) => p.id === projectId);
-    const vars: Record<string, string | undefined> = {
-      "device.name": d.name,
-      "device.id": d.id,
-      "device.home": d.home,
-      "project.name": p?.name,
-      "project.path": projectId ? d.bindings[projectId] : undefined,
-      ...Object.fromEntries(
-        Object.entries(d.variables).map(([k, v]) => [`vars.${k}`, v]),
-      ),
-    };
-    return text.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key) => {
-      if (vars[key] === undefined)
-        throw new AppError(
-          "MISSING_VARIABLE",
-          `缺少变量 {{${key}}}，请在设备设置中配置`,
-        );
-      return vars[key]!;
-    });
+    return matchesScope(this.store, scope, harness, projectId);
   }
   private instructions(rules: Rule[], projectId?: string) {
-    if (!rules.length) return null;
-    // Identity reconciliation must not reorder an already deployed instruction block.
-    const order = new Map(
-      (this.store.device().ruleOrder || []).map((id, i) => [id, i]),
-    );
-    const content = [...rules]
-      .sort(
-        (a, b) =>
-          Number(a.scope.kind === "device") -
-            Number(b.scope.kind === "device") ||
-          (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity),
-      )
-      .map((r) => `## ${r.title}\n\n${this.render(r.body, projectId).trim()}`)
-      .join("\n\n");
-    if (Buffer.byteLength(content) > 48 * 1024)
-      throw new AppError(
-        "INSTRUCTIONS_TOO_LARGE",
-        "合成指令超过 48 KiB，请拆分为按需加载的 Skills",
-      );
-    if (content.includes(START) || content.includes(END))
-      throw new AppError(
-        "RESERVED_MARKER",
-        "指令正文不能包含 HarnessSync 保留标记",
-      );
-    return `${START}\n# HarnessSync\n\n${content}\n${END}`;
+    const segments = instructionSegments(this.store, rules, projectId).segments;
+    return segments.length ? segmentsText(segments) : null;
   }
   plan(options: { onlySkillId?: string } = {}): Plan {
     const source = this.store.manifest();
@@ -305,6 +235,10 @@ export class Engine {
       sourceId?: string;
       block?: string | null;
       sourceHash?: string;
+      skillText?: string;
+      templateHash?: string;
+      rendered?: boolean;
+      blocked?: string;
       removing?: boolean;
     }) => {
       spec.path = path.resolve(spec.path);
@@ -333,6 +267,18 @@ export class Engine {
         afterHash: absent,
         diff: "",
       };
+      if (spec.blocked) {
+        change.status = "skipped";
+        change.reason = spec.blocked;
+        notice(
+          "skill-missing-variable",
+          `${spec.path}：${spec.blocked}`,
+          true,
+          spec.path,
+        );
+        changes.push(change);
+        return;
+      }
       try {
         if (
           spec.kind === "skill" &&
@@ -428,7 +374,9 @@ export class Engine {
           const nativeAdoption =
             valid &&
             choice.use === "native" &&
-            choice.sourceHash === spec.sourceHash;
+            (choice.sourceHash === spec.sourceHash ||
+              choice.sourceHash === spec.templateHash);
+          const preserveNative = nativeAdoption && !spec.rendered;
           const collision =
             present &&
             !receipt &&
@@ -437,7 +385,7 @@ export class Engine {
           if (collision) {
             change.conflictFingerprint = fingerprint;
             change.conflictOptions = ["library", "native", "skip"];
-            this.conflictDiff(change, spec.sourceId!);
+            this.conflictDiff(change, spec.sourceId!, spec.skillText!);
             if (!valid)
               throw new AppError(
                 "TARGET_CONFLICT",
@@ -459,7 +407,7 @@ export class Engine {
             change.beforeHash = fingerprint!;
           }
           if (
-            (nativeAdoption && !fs.lstatSync(spec.path).isSymbolicLink()) ||
+            (preserveNative && !fs.lstatSync(spec.path).isSymbolicLink()) ||
             (receipt?.adoptedSourceHash !== undefined &&
               receipt.adoptedSourceHash === spec.sourceHash)
           )
@@ -476,7 +424,7 @@ export class Engine {
             );
           change.status =
             collision &&
-            (!nativeAdoption || fs.lstatSync(spec.path).isSymbolicLink())
+            (!preserveNative || fs.lstatSync(spec.path).isSymbolicLink())
               ? "replace"
               : present && !receipt
                 ? "adopt"
@@ -491,12 +439,7 @@ export class Engine {
             change.before = present
               ? fs.readFileSync(path.join(spec.path, "SKILL.md"), "utf8")
               : "";
-            change.after = spec.removing
-              ? ""
-              : fs.readFileSync(
-                  path.join(this.store.skillPath(spec.sourceId!), "SKILL.md"),
-                  "utf8",
-                );
+            change.after = spec.removing ? "" : spec.skillText!;
           }
           if (!change.conflictOptions)
             change.diff = createTwoFilesPatch(
@@ -615,6 +558,7 @@ export class Engine {
         }
       }
     }
+    const blockedSkills = new Set<string>();
     for (const skill of manifest.skills.filter((s) => s.enabled)) {
       const projectId =
         skill.scope.kind === "project" ? skill.scope.target : undefined;
@@ -624,8 +568,12 @@ export class Engine {
       if (projectId && (!projectDir || !exists(projectDir))) continue;
       try {
         const sourcePath = this.store.skillPath(skill.id);
-        const sourceHash = bundleDiskHash(sourcePath);
-        parseSkill(fs.readFileSync(path.join(sourcePath, "SKILL.md"), "utf8"));
+        noSymlink(sourcePath);
+        const template = fs.readFileSync(
+          path.join(sourcePath, "SKILL.md"),
+          "utf8",
+        );
+        parseSkill(template);
         const readers = skillReaders(
           this.store.home,
           projectDir,
@@ -664,6 +612,22 @@ export class Engine {
             `${skill.name}：共享技能目录也会被 ${exposure.join("、")} 读取，不能保证仅对所选 Harness 可见`,
             false,
           );
+        let skillText: string | undefined;
+        let blocked: string | undefined;
+        try {
+          skillText = renderSkillText(this.store, template, projectId);
+        } catch (e) {
+          if (!(e instanceof AppError) || e.code !== "MISSING_VARIABLE")
+            throw e;
+          blocked = e.message;
+          blockedSkills.add(skill.id);
+        }
+        const sourceHash =
+          skillText !== undefined
+            ? bundleDiskHash(sourcePath, { "SKILL.md": Buffer.from(skillText) })
+            : undefined;
+        const templateHash =
+          skillText !== undefined ? bundleDiskHash(sourcePath) : undefined;
         for (const entry of placement)
           add({
             path: path.join(entry.dir, skill.name),
@@ -674,6 +638,10 @@ export class Engine {
               select(skill.scope.harnesses).includes(h),
             )!,
             sourceHash,
+            templateHash,
+            rendered: sourceHash !== templateHash,
+            skillText,
+            blocked,
           });
       } catch (e: any) {
         errors.push(`${skill.name}: ${e.message}`);
@@ -683,7 +651,8 @@ export class Engine {
     for (const receipt of state.receipts) {
       if (
         (options.onlySkillId && receipt.sourceId !== options.onlySkillId) ||
-        wanted.has(receipt.path)
+        wanted.has(receipt.path) ||
+        (receipt.sourceId !== undefined && blockedSkills.has(receipt.sourceId))
       )
         continue;
       if (
@@ -772,7 +741,7 @@ export class Engine {
       createdAt: new Date().toISOString(),
     };
   }
-  private conflictDiff(change: Change, sourceId: string) {
+  private conflictDiff(change: Change, sourceId: string, skillText: string) {
     let tree: NativeTree;
     try {
       tree = readNative(change.path);
@@ -782,6 +751,10 @@ export class Engine {
       return;
     }
     const library = readBundle(this.store.skillPath(sourceId));
+    library["SKILL.md"] = {
+      ...library["SKILL.md"],
+      content: Buffer.from(skillText).toString("base64"),
+    };
     let native = tree.files;
     let prefix = "";
     if (native[""].link !== undefined) {
@@ -892,8 +865,12 @@ export class Engine {
           sourceId: selected.sourceId!,
           ...(use === "native"
             ? {
-                sourceHash: bundleDiskHash(
-                  this.store.skillPath(selected.sourceId!),
+                sourceHash: bundleHash(
+                  renderedSkillBundle(
+                    this.store,
+                    selected.sourceId!,
+                    selected.projectId,
+                  ),
                 ),
               }
             : {}),
@@ -1213,7 +1190,11 @@ export class Engine {
             if (change.status === "remove")
               fs.rmSync(change.path, { recursive: true, force: true });
             else {
-              const files = readBundle(this.store.skillPath(change.sourceId!));
+              const files = renderedSkillBundle(
+                this.store,
+                change.sourceId!,
+                change.projectId,
+              );
               if (bundleHash(files) !== change.afterHash)
                 throw new AppError(
                   "STALE_SOURCE",

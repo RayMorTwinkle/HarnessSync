@@ -175,7 +175,8 @@ export type PlanNotice = {
     | "staging-leftover"
     | "ignored-native-path"
     | "skill-source-changed"
-    | "skill-source-unreadable";
+    | "skill-source-unreadable"
+    | "skill-missing-variable";
   message: string;
   blocking: boolean;
   path?: string;
