@@ -1,5 +1,9 @@
+import path from "node:path";
+import { SyncIgnore } from "./sync-ignore.ts";
+import { isCredentialPath } from "./credentials.ts";
+import type { Store } from "./store.ts";
 import { execFile } from "node:child_process";
-import { AppError } from "./files.ts";
+import { AppError, exists, json, noSymlink } from "./files.ts";
 import {
   githubCredentialArgs,
   githubRepository,
@@ -24,7 +28,11 @@ export type SyncCheckRunner = (
   args: string[],
   options: { timeout: number; env: NodeJS.ProcessEnv },
 ) => Promise<{ code: number; stdout: string; stderr?: string }>;
-export type SyncCheckOptions = { runner?: SyncCheckRunner; platform?: string };
+export type SyncCheckOptions = {
+  runner?: SyncCheckRunner;
+  platform?: string;
+  store?: Store;
+};
 
 const runner: SyncCheckRunner = (command, args, options) =>
   new Promise((resolve) => {
@@ -64,6 +72,12 @@ export async function checkSync(
       input.create !== false)
   )
     throw new AppError("SYNC_OPTIONS", "请指定 --url 或 --create 其中一个");
+  if (input.url === undefined && !input.create && options.store) {
+    const file = path.join(options.store.root, "sync.json");
+    noSymlink(file);
+    if (exists(file))
+      input = { ...input, url: json<{ url: string }>(file).url };
+  }
   if (input.url !== undefined) validateSyncUrl(input.url);
   const create = input.create !== undefined && input.create !== false;
   const name =
@@ -374,6 +388,58 @@ export async function checkSync(
     );
   } else add("ssh", "skip", "SSH 认证", "未使用 SSH URL");
 
+  if (options.store) {
+    const ignore = new SyncIgnore(options.store),
+      rules = ignore.rules();
+    const credentials = options.store.manifest().skills.flatMap((skill) =>
+      ignore.skill(skill.name, rules)
+        ? []
+        : ignore
+            .paths(skill.id)
+            .filter(
+              (file) =>
+                isCredentialPath(file) &&
+                !ignore.fileIgnored(skill.name, file, rules),
+            )
+            .map((file) => `${skill.name}/${file}`),
+    );
+    if (credentials.length) {
+      let visibility: "private" | "public" | "unknown" = "unknown";
+      if (create) visibility = "private";
+      else if (github && authenticated) {
+        const result = await run("gh", [
+          "api",
+          `repos/${github}`,
+          "--hostname",
+          "github.com",
+          "--jq",
+          ".private",
+        ]);
+        if (result.code === 0)
+          visibility =
+            result.stdout.trim() === "true"
+              ? "private"
+              : result.stdout.trim() === "false"
+                ? "public"
+                : "unknown";
+      }
+      add(
+        "credentials",
+        visibility === "private"
+          ? "ok"
+          : visibility === "public"
+            ? "fail"
+            : "warn",
+        "凭证文件同步",
+        visibility === "private"
+          ? `将同步 ${credentials.length} 个凭证文件到私有仓库${create ? "（创建时使用 --private）" : ""}`
+          : `仓库${visibility === "public" ? "为公开" : "可见性无法确认"}，未忽略的凭证文件：${credentials.join("、")}`,
+        visibility === "private"
+          ? undefined
+          : "把仓库设为私有，或用 sync ignore 排除这些文件",
+      );
+    }
+  }
   const ready =
     gitOk &&
     !checks.some((check) => check.status === "fail") &&

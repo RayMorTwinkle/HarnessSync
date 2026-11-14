@@ -60,7 +60,7 @@ bash install-harness-sync.sh --help
 
 ### 备份与卸载
 
-首次扫描或实际部署前自动保存本机基线到 `~/Downloads/HarnessSync 备份/`；没有 Downloads 时放在 HOME 下。包含已注册工具（含停用工具）及已绑定项目的技能、指令路径，不复制工具根目录、凭证和会话；符号链接只保存链接本身。
+首次扫描或实际部署前自动保存本机基线到 `~/Downloads/HarnessSync 备份/`；没有 Downloads 时放在 HOME 下。包含已注册工具（含停用工具）及已绑定项目的技能、指令路径，不复制工具根目录和会话；技能包内部的凭证文件会包含在备份中；符号链接只保存链接本身。
 
 运行 `hsync backup list` 查看位置，`hsync backup verify <目录>` 校验。`hsync backup restore` 先预览，再用 `--plan <id>` 执行。外部修改默认保留，覆盖需指定 `--overwrite <路径>`。恢复前另存副本，并关闭自动部署。
 
@@ -120,7 +120,7 @@ hsync rollback DEPLOYMENT_ID
 
 ## 同步
 
-连接自己拥有的私有专用 Git 仓库。凭证来自本机已有的 gh 登录、SSH 或系统 Git 凭证助手。GitHub HTTPS 命令临时借用 `gh auth git-credential`，不改全局 Git 配置。HarnessSync 不接收、不保存 token：认证留给本机工具，避免密钥进入共享配置与 Git 历史。不要把凭证写进文件或 URL。先运行 `hsync sync check`，再按选用的 URL 或创建选项检查后连接。需要登录时，由你本人在终端运行 `gh auth login` 并按浏览器提示授权（Claude Code 中可用 `! gh auth login`）。
+连接自己拥有的私有专用 Git 仓库。凭证来自本机已有的 gh 登录、SSH 或系统 Git 凭证助手。GitHub HTTPS 命令临时借用 `gh auth git-credential`，不改全局 Git 配置。HarnessSync 不接受 URL 中的认证 token，认证留给本机工具。技能包默认完整同步，包括其中的凭证文件，因此请使用私有仓库。先运行 `hsync sync check`，再按选用的 URL 或创建选项检查后连接。需要登录时，由你本人在终端运行 `gh auth login` 并按浏览器提示授权（Claude Code 中可用 `! gh auth login`）。
 
 ```sh
 hsync sync check --url git@github.com:USER/config.git
@@ -192,3 +192,5 @@ Ctrl+C 停止开发服务。CLI（`npm run cli -- plan --json`）、构建后的
 独立实现，参考 [Skills Manager](https://github.com/xingkongliang/skills-manager) 的思路。
 
 许可证：[MIT](LICENSE)。
+
+本机上传忽略：`hsync sync ignore add anysearch/.env genbox`，取消用 `sync ignore remove anysearch/.env`，查看用 `sync ignore list --json`。支持整技能、文件路径、加引号的 `*`/`**`/`?` 通配符及 `rule:<ID或标题>`。规则只属于当前设备，不影响本机保存和部署；已上传版本保留远端，忽略后的本机变化不上传，拉取不覆盖本机忽略文件。取消后恢复正常合并。启用忽略后上传使用独立历史，既有远端历史不清除。[完整语义、API 与显式远端移除](docs/cli.md#本机上传忽略规则)。`sync check` 对含未忽略凭证的公开仓库报失败，可见性未知报警告，私有仓库显示文件数量。

@@ -323,7 +323,7 @@ hsync uninstall --plan <id>                # 使用预览时的选项执行
 旧版本收据没有完整文件指纹时保守列为冲突。卸载的 restore 模式遇到冲突会停止，先用 backup restore 处理后再预览卸载。
 
 备份包括注册工具（含停用插件）的全局技能写入/读取目录、全局指令与片段目录、已绑定项目的技能和指令路径。
-不会复制工具根目录、凭证或会话历史；链接只复制链接本身，保留文件权限，不保留 ACL、扩展属性或时间戳。
+不会复制工具根目录或会话历史；技能包内的凭证文件仍会保留；链接只复制链接本身，保留文件权限，不保留 ACL、扩展属性或时间戳。
 HOME 外的项目用 `files/_projects/` 保存，实际路径见 manifest。备份登记留在本机，不同步。
 卸载导出可读源配置到备份的 `library/`，默认保留本机库；从源码运行跳过删除程序。
 安装器所有权无法确认的程序或启动器不会删除。远端仓库始终保留。重装按 README 的 install.sh 步骤。
@@ -346,3 +346,15 @@ HOME 外的项目用 `files/_projects/` 保存，实际路径见 manifest。备�
 卸载成功响应后关闭 HTTP 监听。`serviceStopDeferred:true` 表示服务 stop 命令安排在响应后执行，以免系统提前终止当前服务器；失败写入服务日志，响应不能证明该命令已经成功。`STALE_PLAN`（409）要求重新预览；`BACKUP_CONFIRM_SIZE` 要求明确确认大备份。
 
 部署只检查本机 backups.json 是否已有记录，不读取或校验已登记备份；备份被移动、删除或损坏不阻断部署。恢复和卸载仍须完整校验。`BACKUP_MISSING` 为 info 级提醒，仅检查登记目录是否存在，不计算指纹。
+
+## 本机上传忽略规则
+
+默认同步完整技能包，包括凭证文件。`hsync sync ignore add anysearch/.env genbox` 添加规则，`hsync sync ignore remove anysearch/.env` 取消，`hsync sync ignore list --json` 查看。规则保存到配置根的 `sync-ignore.json`，不进入共享 Git；每台设备独立设置，不影响本机源库、部署、快照和回滚。整技能用名称，文件用 `技能名/相对路径`，支持 `*`（不跨目录）、`**`（跨目录）、`?`（单字符），目录规则匹配其所有子文件；含 glob 的参数请加引号。`rule:<指令ID或完整标题>` 排除整条指令。暂不支持否定、注释、字符组；不能单独排除 `SKILL.md`，需要时忽略整个技能。
+
+合并和身份比较排除忽略内容，拉取后保留本机忽略文件；若远端删除了包含本机忽略文件的技能，保留本机完整技能以维持有效包。新忽略的技能不会上传。已经上传过的内容保留远端最新版本，之后不发送本机变化，也不从远端覆盖本机忽略内容。其他设备仍可看到或修改远端既有版本。取消忽略后重新参与合并和上传；双方都有修改时仍需正常解决冲突。
+
+启用后上传提交只继承远端历史，不推送包含忽略内容的本机提交历史；即使取消所有规则仍保留此隔离。请勿删除本机 `sync-ignore.json` 来取消规则，使用 remove。已上传的旧提交不会被清除。显式从远端最新版本移除：先在持有本机副本的设备添加忽略规则，再用独立 Git 克隆删除 `skills/<ID>/<文件>` 并提交推送；整技能同时删除 `entries/skills/<ID>.json` 和 `skills/<ID>/`，指令删除 `entries/rules/<ID>.json`。随后运行 `sync now`。其他未忽略设备可能重新上传，请同步设置其规则。彻底清除已泄露凭证需另行清理远端历史并更换凭证；本功能不改写历史。
+
+`sync status` 返回 `ignoreCount` 和 `ignore: { rules, matched }`；snapshot 的 sync 字段包含 ignore。`GET /api/sync/ignore` 与 `POST /api/sync/ignore`（`{ add?: string[], remove?: string[] }`）返回 `{ rules: string[], matched: { skill: string, files: string[] | "all" }[] }`，沿用本机 API 令牌和来源校验。matched 仅列技能，指令规则在 rules 中显示。
+
+`sync check` 默认检查已连接仓库，也可用 `--url <URL>` 指定；按文件名检查未忽略凭证：公开仓库为 fail，可见性未知为 warn，已确认私有为 ok 并说明文件数。非 GitHub 或无法查询时不把可读等同于私有。`sync setup --create` 始终用 `--private` 创建仓库；check 是连接前诊断，不是每次推送的强制闸门。

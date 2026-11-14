@@ -1,3 +1,4 @@
+import { SyncIgnore } from "./core/sync-ignore.ts";
 import { Backups } from "./core/backup.ts";
 import { Uninstaller } from "./core/uninstall.ts";
 import {
@@ -251,6 +252,14 @@ export async function startServer(
           (!id || id === "status")
         )
           result = await new Sync(store).status();
+        else if (resource === "sync" && id === "ignore" && req.method === "GET")
+          result = new SyncIgnore(store).status();
+        else if (
+          resource === "sync" &&
+          id === "ignore" &&
+          req.method === "POST"
+        )
+          result = await new SyncIgnore(store).update(body);
         else if (
           resource === "sync" &&
           req.method === "GET" &&
@@ -273,7 +282,7 @@ export async function startServer(
                     ? true
                     : create,
             },
-            options.syncCheck,
+            { ...options.syncCheck, store },
           );
         } else if (
           resource === "sync" &&

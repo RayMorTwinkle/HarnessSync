@@ -206,6 +206,7 @@ export type Snapshot = {
   }[];
   root: string;
   sync?: {
+    ignore?: SyncIgnoreStatus;
     connected: boolean;
     remote?: string;
     lastSyncTime?: string;
@@ -326,7 +327,13 @@ export type SyncRuntime = {
   observedSource?: string;
   changedAt?: string;
 };
+export type SyncIgnoreStatus = {
+  rules: string[];
+  matched: { skill: string; files: string[] | "all" }[];
+};
 export type SyncStatus = {
+  ignore?: SyncIgnoreStatus;
+  ignoreCount?: number;
   autoDeploy?: import("../core/auto-deploy.ts").AutoDeployResult | null;
   auto: AutoSyncSettings;
   scheduler: SyncRuntime;

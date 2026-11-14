@@ -60,7 +60,7 @@ The bundled [installation skill](skills/harness-sync-install/SKILL.md) can also 
 
 ### Backup and uninstall
 
-Before the first scan or deployment, HarnessSync saves a local baseline under `~/Downloads/HarnessSync 备份/` (or HOME when Downloads is absent). It includes registered skill/instruction paths, including disabled tools and bound projects; it excludes tool roots, credentials, and session history. Links are preserved without following them.
+Before the first scan or deployment, HarnessSync saves a local baseline under `~/Downloads/HarnessSync 备份/` (or HOME when Downloads is absent). It includes registered skill/instruction paths, including disabled tools and bound projects; it excludes tool roots and session history; credential files inside skill packages are included. Links are preserved without following them.
 
 Use `hsync backup list`, `hsync backup verify <dir>`, and `hsync backup restore` to inspect and preview recovery. Execute with `--plan <id>`; external edits stay untouched unless explicitly selected with `--overwrite`. Recovery saves another snapshot and disables automatic deployment.
 
@@ -120,7 +120,7 @@ Instructions support `{{device.name}}`, `{{device.id}}`, `{{device.home}}`, `{{p
 
 ## Sync
 
-Connect your own private, dedicated Git repository. Credentials come from your existing `gh` login, SSH setup, or system Git credential helper. GitHub HTTPS commands temporarily use `gh auth git-credential` without changing global Git configuration. HarnessSync never accepts or stores tokens: authentication stays with these local tools, keeping secrets out of shared configuration and Git history. Never put credentials in files or URLs. Run `hsync sync check` first, then check your chosen URL or creation option before setup. If login is needed, run `gh auth login` yourself in a terminal and follow the browser authorization flow (in Claude Code, use `! gh auth login`).
+Connect your own private, dedicated Git repository. Credentials come from your existing `gh` login, SSH setup, or system Git credential helper. GitHub HTTPS commands temporarily use `gh auth git-credential` without changing global Git configuration. HarnessSync does not accept authentication tokens in URLs; authentication stays with these local tools. Skill packages are synced in full by default, including credential files, so use a private repository. Run `hsync sync check` first, then check your chosen URL or creation option before setup. If login is needed, run `gh auth login` yourself in a terminal and follow the browser authorization flow (in Claude Code, use `! gh auth login`).
 
 ```sh
 hsync sync check --url git@github.com:USER/config.git
@@ -192,3 +192,5 @@ Start with [CONTRIBUTING.md](CONTRIBUTING.md) and the [architecture map](docs/ar
 Independent implementation, informed by [Skills Manager](https://github.com/xingkongliang/skills-manager).
 
 License: [MIT](LICENSE).
+
+Upload-only exclusions are device-local: `hsync sync ignore add anysearch/.env genbox`, `sync ignore remove anysearch/.env`, and `sync ignore list --json`. Skill names exclude whole packages; paths support quoted `*`, `**`, and `?` globs; `rule:<ID or title>` excludes instructions. Local storage and deployment remain intact. Already uploaded versions remain on the remote; ignored local changes are not sent or overwritten by pulls. Removing a rule resumes normal merging. Uploads use separate history after enabling exclusions, but existing remote history is not erased. See [ignore semantics, API and explicit remote removal](docs/cli.md#本机上传忽略规则). `sync check` fails for public repositories with unignored credentials, warns when visibility is unknown, and reports the count for private repositories.

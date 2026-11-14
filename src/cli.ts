@@ -1,3 +1,4 @@
+import { SyncIgnore } from "./core/sync-ignore.ts";
 import { Backups } from "./core/backup.ts";
 import { Uninstaller } from "./core/uninstall.ts";
 import {
@@ -392,7 +393,7 @@ sync
   .description("连接前检查 Git、GitHub 登录及仓库权限")
   .option("--url <git-url>")
   .option("--create [name]")
-  .action(run(async (o) => checkSync(o)));
+  .action(run(async (o) => checkSync(o, { store: await getStore() })));
 sync
   .command("setup")
   .option("--url <git-url>")
@@ -406,6 +407,18 @@ sync
   .command("conflicts")
   .action(run(async () => new Sync(await getStore()).conflicts()));
 sync.command("now").action(run(async () => new Sync(await getStore()).now()));
+const ignore = sync.command("ignore").description("本机上传忽略规则");
+ignore
+  .command("list")
+  .action(run(async () => new SyncIgnore(await getStore()).status()));
+for (const action of ["add", "remove"] as const)
+  ignore
+    .command(`${action} <rules...>`)
+    .action(
+      run(async (rules) =>
+        new SyncIgnore(await getStore()).update({ [action]: rules }),
+      ),
+    );
 const auto = sync.command("auto").description("设置本机自动同步");
 for (const mode of ["on", "off"])
   auto

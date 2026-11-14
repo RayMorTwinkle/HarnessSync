@@ -1,3 +1,4 @@
+import { SyncIgnore } from "./sync-ignore.ts";
 import {
   semanticObject,
   remapScopes,
@@ -152,7 +153,10 @@ export class Sync {
     return options.locked ? save() : this.store.lock(save);
   }
   private sourceStamp() {
-    const rows = [this.store.git(["rev-parse", "HEAD"])];
+    const rows = [
+      this.store.git(["rev-parse", "HEAD"]),
+      stable(new SyncIgnore(this.store).rules()),
+    ];
     const walk = (dir: string) => {
       for (const name of fs.readdirSync(dir).sort()) {
         if (name === ".git" || name.startsWith(".hsync-staging-")) continue;
@@ -950,7 +954,28 @@ export class Sync {
       ])
         .split(/\s+/)
         .map(Number);
+    const ignore = new SyncIgnore(this.store);
+    if (remote && ignore.active()) {
+      const signature = (library: Library) =>
+        stable(
+          kinds.map((kind) =>
+            library.manifest[kind]
+              .map((e) => ({
+                id: e.id,
+                value: semanticObject(library, kind, e.id),
+              }))
+              .sort((a, b) => a.id.localeCompare(b.id)),
+          ),
+        );
+      ahead =
+        signature(ignore.filter(this.current())) ===
+        signature(ignore.filter(this.read(remote)))
+          ? 0
+          : 1;
+    }
     return {
+      ignore: ignore.status(),
+      ignoreCount: ignore.rules().length,
       autoDeploy: lastAutoDeploy(this.store),
       auto: this.autoSettings(),
       scheduler: this.autoState().runtime,
@@ -977,6 +1002,7 @@ export class Sync {
     const c = this.config(false);
     return {
       connected: !!c,
+      ignore: new SyncIgnore(this.store).status(),
       remote: c?.url,
       lastSyncTime: c?.lastSyncTime,
       conflicts: c?.conflicts.length || 0,
@@ -1178,18 +1204,36 @@ export class Sync {
     this.store.migrate();
     this.store.commit("同步前保存本地配置");
     const local = this.head();
+    const ignore = new SyncIgnore(this.store);
     const remote = this.fetch(c);
+    const original = this.current();
+    if (ignore.rules().length) {
+      c.conflicts = c.conflicts.filter((conflict) => {
+        const left = ignore.filter(this.read(conflict.localCommit));
+        const right = ignore.filter(this.read(conflict.remoteCommit));
+        const equal =
+          stable(
+            semanticObject(
+              left,
+              conflict.kind,
+              conflict.localId || conflict.entryId,
+            ),
+          ) === stable(semanticObject(right, conflict.kind, conflict.entryId));
+        if (equal) removeWorkspace(this.store, conflict.entryId);
+        return !equal;
+      });
+    }
     c.lastFetchedCommit = remote;
     this.save(c);
     if (remote && remote !== local) {
-      const r = this.read(remote),
-        l = this.current();
+      const r = ignore.filter(this.read(remote)),
+        l = ignore.filter(original);
       let base: string | undefined;
       try {
         base = this.store.git(["merge-base", local, remote]);
       } catch {}
       if (base !== remote) {
-        const b = base ? this.read(base) : empty();
+        const b = ignore.filter(base ? this.read(base) : empty());
         const merged = structuredClone(l);
         const conflicts = [...c.conflicts];
         const ids: IdMap = Object.create(null);
@@ -1326,22 +1370,24 @@ export class Sync {
               if (rv) merged.bundles[id] = rv.bundle!;
             }
           }
+        ignore.preserve(merged, original);
+        remapScopes(merged, ids);
         const changed = kinds.reduce(
           (n, kind) =>
             n +
             [
               ...new Set(
-                [...l.manifest[kind], ...merged.manifest[kind]].map(
+                [...original.manifest[kind], ...merged.manifest[kind]].map(
                   (e) => e.id,
                 ),
               ),
             ].filter((id) => {
-              const a = l.manifest[kind].find((e) => e.id === id),
+              const a = original.manifest[kind].find((e) => e.id === id),
                 b = merged.manifest[kind].find((e) => e.id === id);
               return (
                 stable(a) !== stable(b) ||
                 (kind === "skills" &&
-                  stable(l.bundles[id]) !== stable(merged.bundles[id]))
+                  stable(original.bundles[id]) !== stable(merged.bundles[id]))
               );
             }).length,
           0,
@@ -1413,17 +1459,108 @@ export class Sync {
       this.save(c);
       return this.result(c, remote);
     }
-    this.git(["push", "--", c.url, `HEAD:refs/heads/${c.branch}`]);
-    c.lastSyncedCommit = this.head();
+    const published = ignore.active()
+      ? this.uploadCommit(remote, ignore)
+      : this.head();
+    this.git(["push", "--", c.url, `${published}:refs/heads/${c.branch}`]);
+    let uploadedAncestor = false;
+    if (ignore.active()) {
+      try {
+        uploadedAncestor =
+          this.git(["merge-base", this.head(), published]) === published;
+      } catch {}
+    }
+    if (ignore.active() && !uploadedAncestor) {
+      // The local-only bridge records the merge base without ever becoming an upload parent.
+      const bridge = this.git([
+        "-c",
+        "commit.gpgsign=false",
+        "commit-tree",
+        this.git(["rev-parse", "HEAD^{tree}"]),
+        "-p",
+        this.head(),
+        "-p",
+        published,
+        "-m",
+        "记录上传基线",
+      ]);
+      this.git(["reset", "--soft", bridge]);
+    }
+    c.lastSyncedCommit = published;
     c.lastFetchedCommit = c.lastSyncedCommit;
     c.lastSyncTime = new Date().toISOString();
     this.save(c);
-    return this.result(c, this.head());
+    return this.result(c, published);
+  }
+  private uploadCommit(remote: string | undefined, ignore: SyncIgnore) {
+    const previous = remote ? this.read(remote) : empty();
+    const library = ignore.preserve(ignore.filter(this.current()), previous);
+    const files = this.libraryFiles(library);
+    const comparable = (bundle: Bundle) =>
+      stable(
+        Object.fromEntries(
+          Object.entries(bundle).map(([name, file]) => [
+            name,
+            { content: file.content, executable: !!(file.mode & 0o111) },
+          ]),
+        ),
+      );
+    if (remote && comparable(files) === comparable(this.libraryFiles(previous)))
+      return remote;
+    const index = path.join(
+      this.store.root,
+      `sync-index-${crypto.randomUUID()}`,
+    );
+    noSymlink(index);
+    const git = (args: string[], input?: Buffer) =>
+      execFileSync("git", args, {
+        cwd: this.store.repo,
+        env: { ...process.env, GIT_INDEX_FILE: index },
+        input,
+        timeout: 60_000,
+        maxBuffer: 32 * 1024 * 1024,
+      })
+        .toString()
+        .trim();
+    try {
+      git(["read-tree", "--empty"]);
+      for (const [name, file] of Object.entries(files)) {
+        const blob = git(
+          ["hash-object", "-w", "--stdin"],
+          Buffer.from(file.content, "base64"),
+        );
+        git([
+          "update-index",
+          "--add",
+          "--cacheinfo",
+          `${file.mode & 0o111 ? "100755" : "100644"},${blob},${name}`,
+        ]);
+      }
+      const tree = git(["write-tree"]);
+      if (remote && tree === this.git(["rev-parse", `${remote}^{tree}`]))
+        return remote;
+      return this.git([
+        "-c",
+        "commit.gpgsign=false",
+        "commit-tree",
+        tree,
+        ...(remote ? ["-p", remote] : []),
+        "-m",
+        `同步上传配置\n\n设备：${this.store.device().name}`,
+      ]);
+    } finally {
+      fs.rmSync(index, { force: true });
+      fs.rmSync(`${index}.lock`, { force: true });
+    }
   }
   private conflictDetails(c: SyncConfig, textDiff = false) {
     const libraries = new Map<string, Library>();
     const read = (commit: string) => {
-      if (!libraries.has(commit)) libraries.set(commit, this.read(commit));
+      if (!libraries.has(commit))
+        libraries.set(
+          commit,
+          new SyncIgnore(this.store).filter(this.read(commit)),
+        );
       return libraries.get(commit)!;
     };
     const rows = c.conflicts.map((conflict) => {
@@ -1530,7 +1667,9 @@ export class Sync {
         throw new AppError("SYNC_CONFLICT", "请指定唯一待处理条目 ID");
       const conflict = matches[0],
         library = this.current();
-      const remote = this.read(conflict.remoteCommit);
+      const ignore = new SyncIgnore(this.store);
+      const original = structuredClone(library);
+      const remote = ignore.filter(this.read(conflict.remoteCommit));
       const entry = remote.manifest[conflict.kind].find(
         (e) => e.id === entryId,
       );
@@ -1676,6 +1815,11 @@ export class Sync {
       if (keep === "remote" && conflict.localId && entry) {
         ids[conflict.localId] = entryId;
         if (conflict.kind === "projects") remapScopes(library, ids);
+      }
+      if (keep !== "local") {
+        const restored = ignore.preserve(ignore.filter(library), original);
+        library.manifest = restored.manifest;
+        library.bundles = restored.bundles;
       }
       const references = referenceChanges(this.store, ids);
       this.checkpoint(
