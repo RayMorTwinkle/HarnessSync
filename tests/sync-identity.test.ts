@@ -479,9 +479,12 @@ test("interrupted identity merge recovers source and receipts atomically, refuse
     `
     import {Store} from ${JSON.stringify(path.resolve("src/core/store.ts"))};
     import {Sync} from ${JSON.stringify(path.resolve("src/core/sync.ts"))};
-    const sync = new Sync(await new Store(${JSON.stringify(b.root)},${JSON.stringify(b.home)}).init());
-    const git = sync.git.bind(sync);
-    sync.git = args => { if(args[0] === 'write-tree') process.exit(77); return git(args); };
+    import fs from "node:fs";
+    const store = await new Store(${JSON.stringify(b.root)},${JSON.stringify(b.home)}).init();
+    const sync = new Sync(store);
+    // Crash while building the merged tree, after the recovery checkpoint exists.
+    const writeTree = store.writeTree.bind(store);
+    store.writeTree = files => { if (fs.existsSync(${JSON.stringify(path.join(b.root, "sync-recovery.json"))})) process.exit(77); return writeTree(files); };
     await sync.setup({url:${JSON.stringify(remote)}});
   `,
   );
