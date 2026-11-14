@@ -224,7 +224,7 @@ export class Backups {
       path.join(dir, "如何恢复.md"),
       '# 如何恢复\n\n运行 `hsync backup restore "' +
         dir +
-        '"` 查看预览，再加 `--plan <id>` 执行。冲突默认保留，覆盖需明确指定路径。\n\n已经卸载时：先退出相关工具，按 manifest.json 的 path 将 files 中对应 relative 的内容复制回去（保留权限和符号链接，不跟随链接）。absent 表示原先不存在；删除前请确认没有后来新增的个人内容。\n\n包含注册工具的技能、指令及已绑定项目路径；不包含工具根目录、会话、凭证、扩展属性或 ACL。HOME 外的项目存于 files/_projects，按清单还原。恢复前副本位于“恢复前”，可用同一恢复命令预览撤回。\n',
+        '"` 查看预览，再加 `--plan <id>` 执行。冲突默认保留，覆盖需明确指定路径。\n\n已经卸载时：先退出相关工具，按 manifest.json 的 path 将 files 中对应 relative 的内容复制回去（保留权限和符号链接，不跟随链接）。absent 表示原先不存在；删除前请确认没有后来新增的个人内容。\n\n包含注册工具的技能、指令及已绑定项目路径；包含技能目录内的凭证文件，仅保存在本机；不包含工具根目录、会话、扩展属性或 ACL。HOME 外的项目存于 files/_projects，按清单还原。恢复前副本位于“恢复前”，可用同一恢复命令预览撤回。\n',
     );
     return manifest;
   }

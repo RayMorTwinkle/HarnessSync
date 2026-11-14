@@ -3,8 +3,93 @@ import path from "node:path";
 import { exists } from "./files.ts";
 import type { DiscoveredSkill, Harness } from "../shared/types.ts";
 
-type Origin = Pick<DiscoveredSkill, "origin" | "originReason" | "sourceUrl">;
-export function originDetector(harnesses: Harness[], warnings: string[]) {
+type Origin = Pick<
+  DiscoveredSkill,
+  "origin" | "originReason" | "sourceUrl" | "bundledBy"
+>;
+const within = (file: string, root: string) =>
+  file === root || file.startsWith(root + path.sep);
+function bundled(pathname: string, name: string): Origin {
+  return {
+    origin: "bundled",
+    originReason: `链接或目录位于产品 ${name} 内部，会随产品更新`,
+    bundledBy: { name, path: pathname },
+  };
+}
+function pureSkillCollection(dir: string) {
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const directories = entries.filter(
+    (e) => e.isDirectory() && !e.name.startsWith("."),
+  );
+  const skillTree =
+    exists(path.join(dir, "SKILL.md")) ||
+    directories.some(
+      (e) => e.name === "skills" || exists(path.join(dir, e.name, "SKILL.md")),
+    );
+  return (
+    skillTree &&
+    directories.every(
+      (e) =>
+        ["skills", "scripts", "references", "assets", "node_modules"].includes(
+          e.name,
+        ) || exists(path.join(dir, e.name, "SKILL.md")),
+    ) &&
+    entries
+      .filter((e) => e.isFile())
+      .every((e) =>
+        /^(SKILL\.md|package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|pyproject\.toml|Cargo\.(toml|lock)|go\.(mod|sum)|README.*|LICENSE.*|\..*)$/i.test(
+          e.name,
+        ),
+      )
+  );
+}
+function bundledOrigin(
+  canonical: string,
+  linked: boolean,
+  home: string,
+): Origin | undefined {
+  const app = canonical.match(/^(.*?\/([^/]+)\.app)\/Contents(?:\/|$)/);
+  if (app) return bundled(app[1], app[2]);
+  for (const root of [
+    "/Applications",
+    "/opt/homebrew",
+    "/usr/local",
+    "/usr/share",
+    path.join(home, ".local/share"),
+  ]) {
+    if (!within(canonical, root)) continue;
+    const child = path.relative(root, canonical).split(path.sep)[0];
+    return bundled(path.join(root, child), child || path.basename(root));
+  }
+  const modules = canonical.indexOf(`${path.sep}node_modules${path.sep}`);
+  if (modules >= 0) {
+    const root = canonical.slice(0, modules + "/node_modules".length);
+    const parts = path.relative(root, canonical).split(path.sep);
+    const name = parts[0].startsWith("@")
+      ? parts.slice(0, 2).join("/")
+      : parts[0];
+    return bundled(path.join(root, name), name);
+  }
+  if (!linked || !within(canonical, home)) return;
+  for (
+    let dir = canonical, depth = 0;
+    dir !== home && within(dir, home) && depth < 8;
+    dir = path.dirname(dir), depth++
+  ) {
+    if (
+      ["package.json", "pyproject.toml", "Cargo.toml", "go.mod"].some((f) =>
+        exists(path.join(dir, f)),
+      ) &&
+      !pureSkillCollection(dir)
+    )
+      return bundled(dir, path.basename(dir));
+  }
+}
+export function originDetector(
+  harnesses: Harness[],
+  warnings: string[],
+  home: string,
+) {
   const rules = harnesses.flatMap((h) => [
     ...(h.id === "claude"
       ? [
@@ -35,6 +120,12 @@ export function originDetector(harnesses: Harness[], warnings: string[]) {
       ),
     );
     if (rule) return { origin: rule.origin, originReason: rule.originReason };
+    const product = bundledOrigin(
+      canonical,
+      canonical !== path.resolve(entryPath),
+      home,
+    );
+    if (product) return product;
     for (let dir = path.dirname(entryPath); ; dir = path.dirname(dir)) {
       if (exists(path.join(dir, ".codex-system-skills.marker")))
         return {

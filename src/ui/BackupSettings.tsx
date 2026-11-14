@@ -84,7 +84,7 @@ export function BackupSettings({
               <>
                 {missing
                   ? "备份文件夹已被移动或删除，恢复暂时不可用。"
-                  : `${time(baseline.createdAt)} 保存。只包含 HarnessSync 可能改动的技能目录和指令文件，不含会话记录和登录凭证。`}
+                  : `${time(baseline.createdAt)} 保存。只包含 HarnessSync 可能改动的技能目录和指令文件，技能目录内的凭证文件也会保存，仅保存在本机；不含会话记录。`}
                 <code className="backup-path">{shown}</code>
               </>
             )

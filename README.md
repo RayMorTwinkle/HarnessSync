@@ -60,7 +60,7 @@ The bundled [installation skill](skills/harness-sync-install/SKILL.md) can also 
 
 ### Backup and uninstall
 
-Before the first scan or deployment, HarnessSync saves a local baseline under `~/Downloads/HarnessSync 备份/` (or HOME when Downloads is absent). It includes registered skill/instruction paths, including disabled tools and bound projects; it excludes tool roots, credentials, and session history. Links are preserved without following them.
+Before the first scan or deployment, HarnessSync saves a local baseline under `~/Downloads/HarnessSync 备份/` (or HOME when Downloads is absent). It includes registered skill/instruction paths, including disabled tools and bound projects; it includes credential files inside skill directories and stays local, while excluding tool roots and session history. Links are preserved without following them.
 
 Use `hsync backup list`, `hsync backup verify <dir>`, and `hsync backup restore` to inspect and preview recovery. Execute with `--plan <id>`; external edits stay untouched unless explicitly selected with `--overwrite`. Recovery saves another snapshot and disables automatic deployment.
 
@@ -94,7 +94,7 @@ hsync skills import /absolute/project-skill --scope project --target PROJECT_ID
 hsync plan --json
 ```
 
-Automatic deployment is on by default, so these source edits may also write clean changes to native folders. For a workflow that requires manual review before deployment, disable it **before editing**:
+Outside an active onboarding session, automatic deployment is on by default, so these source edits may also write clean changes to native folders. For a workflow that requires manual review before deployment, disable it **before editing**:
 
 ```sh
 hsync config set deploy.auto false
@@ -120,7 +120,7 @@ Instructions support `{{device.name}}`, `{{device.id}}`, `{{device.home}}`, `{{p
 
 ## Sync
 
-Connect your own private, dedicated Git repository. Credentials come from your existing `gh` login, SSH setup, or system Git credential helper. GitHub HTTPS commands temporarily use `gh auth git-credential` without changing global Git configuration. HarnessSync never accepts or stores tokens: authentication stays with these local tools, keeping secrets out of shared configuration and Git history. Never put credentials in files or URLs. Run `hsync sync check` first, then check your chosen URL or creation option before setup. If login is needed, run `gh auth login` yourself in a terminal and follow the browser authorization flow (in Claude Code, use `! gh auth login`).
+Connect your own private, dedicated Git repository. Credentials come from your existing `gh` login, SSH setup, or system Git credential helper. GitHub HTTPS commands temporarily use `gh auth git-credential` without changing global Git configuration. HarnessSync does not accept sync login tokens; authentication stays with these local tools. Selected skill packages, including credential files, are synchronized to your private repository, which must remain private. Never put credential values in instruction text or URLs. Run `hsync sync check` first, then check your chosen URL or creation option before setup. If login is needed, run `gh auth login` yourself in a terminal and follow the browser authorization flow (in Claude Code, use `! gh auth login`).
 
 ```sh
 hsync sync check --url git@github.com:USER/config.git
@@ -192,3 +192,15 @@ Start with [CONTRIBUTING.md](CONTRIBUTING.md) and the [architecture map](docs/ar
 Independent implementation, informed by [Skills Manager](https://github.com/xingkongliang/skills-manager).
 
 License: [MIT](LICENSE).
+
+### Onboarding scans and local sources
+
+`onboard scan` (also used by prepare and the UI) starts a device-local session that pauses automatic deployment for up to seven days without changing `deploy.auto`. Status and doctor expose `onboarding` and a readable `needs-review` blocker. A successful full manual `apply --plan <id>`, including a no-op apply, finishes the session; bootstrap and failed applies do not. `onboard cancel <session-id>` abandons it while retaining source edits and staged replacements. Cancellation or expiry restores the original automatic deployment policy for subsequent triggers. A new scan supersedes the previous session.
+
+Receipted deployment locations are not independent development sources. Apply clears local origins for adopted or removed locations; current receipts and successful deployment snapshots let older installations ignore obsolete origins automatically. Links to independent development directories retain update detection.
+
+Scans classify product-installed skills as `origin=bundled`, with `originReason` and `bundledBy: {name,path}`. Application bundles, common installation directories, node_modules and linked software projects are recognized; project traversal stays within HOME and stops after eight ancestors. Pure skill collections remain user skills. `summary.bundledSkills` counts these advisory exclusions: do not import or upload by default, but honor an explicit user request to import them.
+
+`inventory.skills[].credentials` and `skills show <id>.credentials` list suspected credential files by relative filename, without displaying values; `summary.credentialSkills` counts affected physical packages. All selected configuration, including secret files, follows the user's private-repository sync choice. Keep the repository private; exclude unwanted uploads with `hsync sync ignore <skill>/<file>` (provided by the sync-ignore feature). Never request tokens from the user or put values in instruction text or URLs.
+
+`onboard repository` returns `absent` for GitHub's explicit repository-resolution failure: the default name is absent, but a differently named repository may exist. Network and permission errors remain `unknown`.

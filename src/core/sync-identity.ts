@@ -131,7 +131,11 @@ export function referenceChanges(store: Store, ids: IdMap): LocalReferences {
           value[to] = { ...value[from], id: to };
           delete value[from];
         }
-    } else if (value.beforeState) state(value.beforeState);
+    } else if (value.beforeState) {
+      state(value.beforeState);
+      for (const origin of value.removedOrigins || [])
+        origin.id = mapped(origin.id);
+    }
     if (stable(value) === original) continue;
     const mode = fs.statSync(file).mode & 0o777;
     before[name] = { content: raw.toString("base64"), mode };

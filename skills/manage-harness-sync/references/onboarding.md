@@ -1,10 +1,16 @@
 # 首次初始化的整理流程
 
-先运行 `sync status`。已经连接时跳过第一台判断；未连接先问“这是你第一台使用 HarnessSync 的设备吗？”。无论答案如何，gh 已登录时查 `gh repo view harness-sync-config --json name,url,visibility`（也可用 `onboard repository`）；说明可能使用了其他名字，失败不等于没有仓库。已有仓库或不是第一台时，先确认仓库 URL、`sync setup --url <url>` 拉取共享库，再比较扫描结果并导入。
+先运行 `sync status`。已经连接时跳过第一台判断；未连接先问“这是你第一台使用 HarnessSync 的设备吗？”。无论答案如何，gh 已登录时查 `gh repo view harness-sync-config --json name,url,visibility`（也可用 `onboard repository`）；返回 `absent` 表示默认名称的仓库不存在，用户仍可能使用了其他名字；网络或权限错误仍为 `unknown`，其他失败不等于没有仓库。已有仓库或不是第一台时，先确认仓库 URL、`sync setup --url <url>` 拉取共享库，再比较扫描结果并导入。
+
+`onboard scan`（含 prepare 和界面扫描）启动设备本地初始化会话，7 天内暂停自动部署，不修改 `deploy.auto`。`status` / `doctor` 的 `onboarding` 返回会话 ID、开始和失效时间，`autoDeploy` 显示 `needs-review` 及“初始化进行中：确认部署预览后再写入”。成功的完整手动 `apply --plan <id>`（包括无变更计划）结束会话；失败或仅部署管理技能不会结束。放弃用 `onboard cancel <会话ID>`，源配置与替换登记保留；取消或到期后恢复原设置，后续正常触发自动部署。重复扫描以最新会话为准，不接受旧 ID 取消。无需 Agent 手动关闭再打开自动部署。
 
 先读取提示词中的扫描 ID：`onboard show <id> --json`。扫描范围是已知用户技能目录、兼容目录与本机已绑定项目；不是全盘搜索，也不是模型有效上下文的完整列表。
 
 ## 技能整理
+
+`origin=bundled` 表示产品附带，附 `originReason` 与 `bundledBy: {name,path}`；`inventory.summary.bundledSkills` 单独计数，也计入 `excludedSkills`。识别应用包、常见安装目录、node_modules 和链接指向的软件项目；向上查找项目不越过 HOME，最多 8 层，纯技能集合保留用户分类。默认建议不导入、不上传，说明会随产品更新；用户坚持时照常 `skills import`，并不禁止导入。
+
+扫描的 `inventory.skills[].credentials` 和 `skills show <id>` 的 `credentials` 列出技能内疑似凭证文件的相对路径，仅按文件名识别，不展示值；`inventory.summary.credentialSkills` 按真实技能目录计数。用户选择全部配置（含密钥文件）同步到私有仓库，仓库必须保持私有。不想上传的文件可用 `hsync sync ignore <技能名>/<文件>`（由同步忽略功能提供）。不得向用户索要 token、密码或私钥，不要把凭证写进指令正文或 URL。
 
 `onboard show` 每次按当前共享库重算 `inventory.skills[].library`（same/differs/absent）及 `inventory.summary.library` 三类计数。same 复用已有 ID 并接管原生副本；absent 普通导入。differs 先集中说明关键差异并给建议：`skills import <目录> --use-library` 用共享库版本，`--replace-library` 替换共享库，`--name <新名称>` 两份都留。Agent 合并先写到独立目录，再用 `--replace-library` 导入。替换共享库或合并之前必须得到用户明确同意，替换会同步到其他设备。
 
@@ -25,6 +31,8 @@
 外部保留：`onboard ignore <绝对入口路径...>` 记录所有相应 `paths` 到设备本地，不进入 Git。后续扫描标记 `ignored`，不再询问；同名部署目标显示“外部保留”信息且不写入。取消用 `onboard ignore <路径...> --remove`。
 
 ## 源目录刷新
+
+HarnessSync 收据管理的部署位置不是独立源目录；成功 apply 清理被接管或移除位置的本机来源及指纹。旧安装通过当前收据及已成功部署快照识别并忽略遗留记录，无需手工修 JSON。链接指向外部开发目录时保留真实来源，仍检测更新；不按目录名称猜测所有权。
 
 导入记录原始入口和链接真实源目录，按技能 ID 保存在本机。即使原生链接已替换为副本，开发仓库的变化仍可检测。`status --json` / `doctor --json` 的 `sourceUpdates` 报告“源目录有更新”或无法读取；不会声称开发源与部署实时同步。
 

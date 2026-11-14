@@ -1,3 +1,5 @@
+import { cancelOnboarding } from "./core/onboarding-session.ts";
+import { credentialPaths } from "./core/credentials.ts";
 import { Backups } from "./core/backup.ts";
 import { Uninstaller } from "./core/uninstall.ts";
 import {
@@ -323,6 +325,11 @@ export async function startServer(
           result = getOnboarding(store, id);
         else if (req.method === "POST" && resource === "onboarding-scan")
           result = await createOnboarding(store);
+        else if (req.method === "POST" && resource === "onboarding-cancel")
+          result = await cancelOnboarding(
+            store,
+            z.string().uuid().parse(body.id),
+          );
         else if (req.method === "POST" && resource === "onboarding-bootstrap")
           result = await bootstrapOnboarding(store, z.string().parse(body.id));
         else if (
@@ -387,6 +394,7 @@ export async function startServer(
             ...skill,
             localSource: listedSkills(store).find((s) => s.id === id)
               ?.localSource,
+            credentials: credentialPaths(store.skillPath(id)),
             body: markdown,
           };
         } else if (req.method === "POST" && resource === "rules")
