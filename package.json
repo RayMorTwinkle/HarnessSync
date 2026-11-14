@@ -1,6 +1,7 @@
 {
   "name": "harness-sync",
   "version": "0.5.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "Local-first instructions and skills for your AI harnesses",

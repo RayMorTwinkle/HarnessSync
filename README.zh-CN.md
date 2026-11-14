@@ -180,4 +180,4 @@ Ctrl+C 停止开发服务。CLI（`npm run cli -- plan --json`）、构建后的
 
 独立实现，参考 [Skills Manager](https://github.com/xingkongliang/skills-manager) 的思路。
 
-License: to be decided.
+许可证：[MIT](LICENSE)。

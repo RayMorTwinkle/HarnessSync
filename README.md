@@ -180,4 +180,4 @@ Start with [CONTRIBUTING.md](CONTRIBUTING.md) and the [architecture map](docs/ar
 
 Independent implementation, informed by [Skills Manager](https://github.com/xingkongliang/skills-manager).
 
-License: to be decided.
+License: [MIT](LICENSE).
