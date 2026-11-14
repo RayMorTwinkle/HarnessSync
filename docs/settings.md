@@ -112,6 +112,6 @@ macOS 使用 `$HOME/Library/LaunchAgents/io.github.raymortwinkle.harness-sync.pl
 
 `device set <键> <值>` / `device unset <键>` 管理本机变量，变量不随源 Git 同步。指令和技能顶层 `SKILL.md` 在计划与部署时渲染；技能只识别 `{{vars.KEY}}`、`{{device.name}}`、`{{device.id}}`、`{{device.home}}`，项目技能另识别 `{{project.name}}`、`{{project.path}}`。未知技能模板、脚本和资源保留原样，源库保存模板原文。
 
-变量更新会按渲染结果重新计算技能更新和收据，不把仍匹配旧收据的部署误报为外部修改。技能缺变量产生逐路径 `skill-missing-variable` 阻断通知和 `skipped` 变更，保留该技能已有副本与收据；手动 apply 可处理其余干净路径。自动部署沿用整次暂停策略，直到补齐变量并重新预览。未受影响的技能不会因另一技能缺变量而变成冲突。
+变量更新会按渲染结果重新计算技能更新和收据，不把仍匹配旧收据的部署误报为外部修改。技能缺变量时保留占位符原文照常部署，并给出不阻断的 `skill-missing-variable` 提醒（技能正文常引用变量语法作示例；新设备也不会因此缺少技能）。补齐变量后计划显示该技能更新。
 
-`compose instructions [--json]` 和 `compose skill <id> [--json]` 只读展示组成，不修改原生文件。变量字节从原类别扣除并单列。指令的 `pending` 比较计划全文与磁盘，`error` 不代表部署成功；技能缺变量时查询报错。HTTP 接口和字段见 [CLI 文档](cli.md#内容组成只读)。
+`compose instructions [--json]` 和 `compose skill <id> [--json]` 只读展示组成，不修改原生文件。变量字节从原类别扣除并单列。指令的 `pending` 比较计划全文与磁盘，`error` 不代表部署成功；技能缺变量时占位符按原文计入。HTTP 接口和字段见 [CLI 文档](cli.md#内容组成只读)。

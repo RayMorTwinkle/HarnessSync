@@ -315,7 +315,7 @@ export function skillComposition(store: Store, id: string): SkillComposition {
           store,
           fs.readFileSync(file, "utf8"),
           skill.scope.kind === "project" ? skill.scope.target : undefined,
-          { skill: true },
+          { skill: true, partial: true },
         );
         bytes = Buffer.byteLength(partsText(rendered.parts));
         variables = [

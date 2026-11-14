@@ -65,7 +65,7 @@ CLI 暂无独立的 `skills add` 命令；新建包含 `SKILL.md` 的目录后�
 
 技能只对顶层 `SKILL.md` 渲染 `{{vars.KEY}}`、`{{device.name}}`、`{{device.id}}`、`{{device.home}}`；项目范围另可使用 `{{project.name}}`、`{{project.path}}`。支持花括号内空白，未知占位符原样保留，不递归展开变量值；脚本、嵌套 `SKILL.md` 和资源原样复制。共享库与同步保存模板，部署哈希、漂移检测和接管比较基于渲染包，导入同名比较与同步身份仍按模板原文。
 
-缺少变量时只将该技能路径标为 `skipped`，通知 `code=skill-missing-variable`、`blocking=true`，说明缺失键和设备设置方法；保留该技能已有副本与收据，手动 apply 可部署其他干净路径。自动部署仍暂停整次计划。运行 `hsync device set KEY 值` 后重新 plan；变量修改会显示受影响技能更新，旧计划失效。
+缺少变量时保留占位符原文照常部署，通知 `code=skill-missing-variable`、`blocking=false`，说明缺失键和设备设置方法，不阻断自动部署。运行 `hsync device set KEY 值` 后重新 plan，受影响技能显示更新。
 
 ## 内容组成（只读）
 
@@ -87,7 +87,7 @@ HTTP 使用现有本机会话鉴权和 `{ ok: true, data: ... }` 外壳：
 
 分类按作用域：设备规则为 `device`，项目规则为 `project`；全局规则覆盖全部已启用工具为 `shared`，其余为 `harness`。标记、标题、规则标题和生成的分隔空行为 `frame`；管理块前后用户自有文字分别为 `native`。无标记时保留整份原生文字，再追加待部署区块；显式登记的完整初始化替换沿用 plan 的整文件替换结果。
 
-`SkillComposition` 含 `id/name/bytes/totals/files`。`totals` 包含 `instructions/script/reference/asset/credential/other/variable`。`files` 每项含相对 `path`、渲染后 `bytes`、`kind`、`executable`、`variables`（仅顶层 `SKILL.md` 有已使用的变量键）、`syncIgnored`（该文件是否被本机上传忽略规则排除）。技能缺变量时查询返回 `MISSING_VARIABLE`，补齐设备变量后重试。
+`SkillComposition` 含 `id/name/bytes/totals/files`。`totals` 包含 `instructions/script/reference/asset/credential/other/variable`。`files` 每项含相对 `path`、渲染后 `bytes`、`kind`、`executable`、`variables`（仅顶层 `SKILL.md` 有已使用的变量键）、`syncIgnored`（该文件是否被本机上传忽略规则排除）。缺少的变量保留占位符原文计入 SKILL.md。
 
 文件分类依次为：顶层 `SKILL.md` → instructions；凭证辅助函数识别的路径 → credential；可执行文件、`scripts/` 或脚本扩展名 → script；`references/`、`.md/.txt` → reference；`assets/`、图片、字体、音视频及常见二进制扩展名 → asset；其余 → other。只读取顶层 `SKILL.md` 来渲染变量，其他文件（包括凭证）只用 stat 计大小，不读取内容；拒绝包内符号链接。
 

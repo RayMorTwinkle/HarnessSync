@@ -6,7 +6,8 @@ import {
   instructionSegments,
   segmentsText,
   renderedSkillBundle,
-  renderSkillText,
+  renderParts,
+  partsText,
 } from "./rendering.ts";
 import { Backups, backupFingerprint } from "./backup.ts";
 import {
@@ -558,7 +559,6 @@ export class Engine {
         }
       }
     }
-    const blockedSkills = new Set<string>();
     for (const skill of manifest.skills.filter((s) => s.enabled)) {
       const projectId =
         skill.scope.kind === "project" ? skill.scope.target : undefined;
@@ -612,22 +612,21 @@ export class Engine {
             `${skill.name}：共享技能目录也会被 ${exposure.join("、")} 读取，不能保证仅对所选 Harness 可见`,
             false,
           );
-        let skillText: string | undefined;
-        let blocked: string | undefined;
-        try {
-          skillText = renderSkillText(this.store, template, projectId);
-        } catch (e) {
-          if (!(e instanceof AppError) || e.code !== "MISSING_VARIABLE")
-            throw e;
-          blocked = e.message;
-          blockedSkills.add(skill.id);
-        }
-        const sourceHash =
-          skillText !== undefined
-            ? bundleDiskHash(sourcePath, { "SKILL.md": Buffer.from(skillText) })
-            : undefined;
-        const templateHash =
-          skillText !== undefined ? bundleDiskHash(sourcePath) : undefined;
+        const rendered = renderParts(this.store, template, projectId, {
+          skill: true,
+          partial: true,
+        });
+        const skillText = partsText(rendered.parts);
+        if (rendered.errors.length)
+          notice(
+            "skill-missing-variable",
+            `${skill.name}：${rendered.errors.join("；")}；已保留占位符原文部署`,
+            false,
+          );
+        const sourceHash = bundleDiskHash(sourcePath, {
+          "SKILL.md": Buffer.from(skillText),
+        });
+        const templateHash = bundleDiskHash(sourcePath);
         for (const entry of placement)
           add({
             path: path.join(entry.dir, skill.name),
@@ -641,7 +640,6 @@ export class Engine {
             templateHash,
             rendered: sourceHash !== templateHash,
             skillText,
-            blocked,
           });
       } catch (e: any) {
         errors.push(`${skill.name}: ${e.message}`);
@@ -651,8 +649,7 @@ export class Engine {
     for (const receipt of state.receipts) {
       if (
         (options.onlySkillId && receipt.sourceId !== options.onlySkillId) ||
-        wanted.has(receipt.path) ||
-        (receipt.sourceId !== undefined && blockedSkills.has(receipt.sourceId))
+        wanted.has(receipt.path)
       )
         continue;
       if (

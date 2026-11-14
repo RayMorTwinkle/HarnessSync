@@ -108,62 +108,41 @@ test("变量改变使旧计划失效并更新技能，无漂移误报，回滚�
   assert.match(engine.plan().changes[0].reason, /外部修改/);
 });
 
-test("缺变量逐技能跳过且保留收据，阻断自动部署但手动部署其他路径", async (t) => {
+test("缺变量保留占位符原文照常部署，只给不阻断的提醒；补齐后更新", async (t) => {
   const { store, engine } = await fixture(t);
-  await store.saveDevice({ name: "设备", variables: { REQUIRED: "已有值" } });
-  const broken = await store.saveSkill({
+  const skill = await store.saveSkill({
     name: "missing",
     description: "缺变量",
-    body: "{{vars.REQUIRED}}",
+    body: "示例语法 {{vars.KEY}}，工作目录 {{vars.ROOT}}",
     scope,
   });
-  await engine.apply(engine.plan().id);
-  const receipt = store.state().receipts[0];
-  const before = bundleDiskHash(receipt.path);
-  await store.saveDevice({ name: "设备", variables: {} });
-  const clean = await store.saveSkill({
-    name: "clean",
-    description: "干净技能",
-    body: "正文",
-    scope,
-  });
-  const freshMissing = await store.saveSkill({
-    name: "fresh-missing",
-    description: "缺变量",
-    body: "{{vars.ABSENT}}",
-    scope,
-  });
+  await store.saveDevice({ name: "设备", variables: { ROOT: "/work" } });
   const plan = engine.plan();
   assert.deepEqual(plan.errors, []);
-  assert.equal(
-    plan.changes.find((c) => c.sourceId === broken.id)!.status,
-    "skipped",
-  );
-  const notice = plan.notices.find((n) => n.path === receipt.path)!;
-  assert.equal(notice.code, "skill-missing-variable");
-  assert.equal(notice.blocking, true);
-  assert.match(notice.message, /REQUIRED.*设备设置.*device set REQUIRED/);
+  const change = plan.changes.find((c) => c.sourceId === skill.id)!;
+  assert.equal(change.status, "create");
+  const notice = plan.notices.find((n) => n.code === "skill-missing-variable")!;
+  assert.equal(notice.blocking, false);
+  assert.match(notice.message, /missing.*KEY.*device set KEY/);
   assert.ok(
-    autoDeployBlockers(engine, plan).some(
+    !autoDeployBlockers(engine, plan).some(
       (b) => b.code === "skill-missing-variable",
     ),
   );
   await engine.apply(plan.id);
-  assert.equal(bundleDiskHash(receipt.path), before);
-  assert.deepEqual(
-    store.state().receipts.find((r) => r.sourceId === broken.id),
-    receipt,
-  );
-  assert.ok(store.state().receipts.some((r) => r.sourceId === clean.id));
-  assert.ok(
-    !store.state().receipts.some((r) => r.sourceId === freshMissing.id),
+  const receipt = store.state().receipts.find((r) => r.sourceId === skill.id)!;
+  const text = fs.readFileSync(path.join(receipt.path, "SKILL.md"), "utf8");
+  assert.match(text, /示例语法 \{\{vars\.KEY\}\}，工作目录 \/work/);
+  assert.equal(
+    engine.plan().changes.find((c) => c.sourceId === skill.id)!.status,
+    "unchanged",
   );
   await store.saveDevice({
     name: "设备",
-    variables: { REQUIRED: "新值", ABSENT: "补齐" },
+    variables: { ROOT: "/work", KEY: "值" },
   });
   assert.equal(
-    engine.plan().changes.find((c) => c.sourceId === broken.id)!.status,
+    engine.plan().changes.find((c) => c.sourceId === skill.id)!.status,
     "update",
   );
 });

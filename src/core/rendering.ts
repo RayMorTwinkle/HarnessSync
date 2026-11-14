@@ -81,13 +81,11 @@ export function renderSkillText(
   text: string,
   projectId?: string,
 ) {
-  const rendered = renderParts(store, text, projectId, {
-    skill: true,
-    partial: true,
-  });
-  if (rendered.errors.length)
-    throw new AppError("MISSING_VARIABLE", rendered.errors.join("；"));
-  return partsText(rendered.parts);
+  // A missing variable keeps its placeholder: skills often quote the syntax
+  // in prose, and a new device should still get every skill.
+  return partsText(
+    renderParts(store, text, projectId, { skill: true, partial: true }).parts,
+  );
 }
 
 export function matchesScope(
