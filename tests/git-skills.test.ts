@@ -430,7 +430,7 @@ test("并发检查按仓库合并 ls-remote；并发安装只成功一次；下�
   assert.ok(fs.existsSync(started));
   fs.appendFileSync(path.join(f.store.skillPath(id), "SKILL.md"), "external");
   fs.unlinkSync(gate);
-  await assert.rejects(pending, /配置已被其他/);
+  await assert.rejects(pending, /下载期间被修改/);
   assert.ok(
     fs
       .readFileSync(path.join(f.store.skillPath(id), "SKILL.md"), "utf8")

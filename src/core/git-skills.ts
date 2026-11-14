@@ -14,7 +14,9 @@ import { skillSource } from "./skill-sources.ts";
 import { skillCommitMessage } from "./skill-messages.ts";
 import {
   AppError,
+  bundleDiskHash,
   bundleHash,
+  hash,
   exists,
   json,
   noSymlink,
@@ -695,8 +697,19 @@ export async function updateGitSkills(
   force = false,
 ) {
   if (!ids.length) throw new AppError("INVALID_ARGUMENT", "请选择要更新的技能");
-  const revision = store.revision();
   const entries = gitEntries(store, ids);
+  // Only the selected entries matter: a deployment writing state.json during
+  // the download is not a conflicting edit.
+  const stamp = () =>
+    hash(
+      JSON.stringify(
+        ids.map((id) => {
+          const entry = store.manifest().skills.find((s) => s.id === id);
+          return [entry, entry ? bundleDiskHash(store.skillPath(id)) : null];
+        }),
+      ),
+    );
+  const before = stamp();
   for (const entry of entries)
     if (
       !force &&
@@ -722,8 +735,14 @@ export async function updateGitSkills(
       "更新 Git 技能",
       entries.map((entry) => entry.name),
     ),
-    (m) =>
-      entries.map((entry, i) => {
+    (m) => {
+      if (stamp() !== before)
+        throw new AppError(
+          "STALE_REVISION",
+          "技能在下载期间被修改，请刷新后重试",
+          409,
+        );
+      return entries.map((entry, i) => {
         const current = m.skills.find((s) => s.id === entry.id)!;
         const next = latest[i];
         const files = bundleDiff(
@@ -745,8 +764,8 @@ export async function updateGitSkills(
           files,
           note: "已更新源库，请预览部署",
         };
-      }),
-    revision,
+      });
+    },
   );
 }
 export async function detachGitSkill(store: Store, id: string) {
