@@ -112,9 +112,10 @@ Instructions support `{{device.name}}`, `{{device.id}}`, `{{device.home}}`, `{{p
 
 ## Sync
 
-Connect your own private, dedicated Git repository. Git authentication uses your SSH setup or credential helper; keep credentials out of URLs.
+Connect your own private, dedicated Git repository. Credentials come from your existing `gh` login, SSH setup, or system Git credential helper. GitHub HTTPS commands temporarily use `gh auth git-credential` without changing global Git configuration. HarnessSync never accepts or stores tokens: authentication stays with these local tools, keeping secrets out of shared configuration and Git history. Never put credentials in files or URLs. Run `hsync sync check` first, then check your chosen URL or creation option before setup. If login is needed, run `gh auth login` yourself in a terminal and follow the browser authorization flow (in Claude Code, use `! gh auth login`).
 
 ```sh
+hsync sync check --url git@github.com:USER/config.git
 hsync sync setup --url git@github.com:USER/config.git
 hsync sync status --json
 hsync sync now --json

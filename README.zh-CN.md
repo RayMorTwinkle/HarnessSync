@@ -112,9 +112,10 @@ hsync rollback DEPLOYMENT_ID
 
 ## 同步
 
-连接自己拥有的私有专用 Git 仓库。认证由 SSH 或 Git 凭证助手管理，不要把凭证放进 URL。
+连接自己拥有的私有专用 Git 仓库。凭证来自本机已有的 gh 登录、SSH 或系统 Git 凭证助手。GitHub HTTPS 命令临时借用 `gh auth git-credential`，不改全局 Git 配置。HarnessSync 不接收、不保存 token：认证留给本机工具，避免密钥进入共享配置与 Git 历史。不要把凭证写进文件或 URL。先运行 `hsync sync check`，再按选用的 URL 或创建选项检查后连接。需要登录时，由你本人在终端运行 `gh auth login` 并按浏览器提示授权（Claude Code 中可用 `! gh auth login`）。
 
 ```sh
+hsync sync check --url git@github.com:USER/config.git
 hsync sync setup --url git@github.com:USER/config.git
 hsync sync status --json
 hsync sync now --json
