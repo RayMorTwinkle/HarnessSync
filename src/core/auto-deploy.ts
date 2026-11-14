@@ -1,3 +1,7 @@
+import {
+  activeOnboarding,
+  onboardingPauseReason,
+} from "./onboarding-session.ts";
 import path from "node:path";
 import type { Engine } from "./engine.ts";
 import type { Plan } from "../shared/types.ts";
@@ -19,13 +23,35 @@ export type AutoDeployResult = {
 export function lastAutoDeploy(store: Store): AutoDeployResult | null {
   const file = path.join(store.root, "auto-deploy.json");
   noSymlink(file);
-  return exists(file) ? json(file) : null;
+  const session = activeOnboarding(store);
+  const saved = exists(file) ? json<AutoDeployResult>(file) : null;
+  if (session)
+    return {
+      at: session.startedAt,
+      reason: "onboarding",
+      outcome: "needs-review",
+      changes: { create: 0, update: 0, remove: 0 },
+      blockers: [
+        { path: "", status: "onboarding", reason: onboardingPauseReason },
+      ],
+    } satisfies AutoDeployResult;
+  if (saved?.blockers?.some((b) => b.status === "onboarding")) {
+    saved.blockers = saved.blockers.filter((b) => b.status !== "onboarding");
+    if (!saved.blockers.length && saved.outcome === "needs-review") return null;
+  }
+  return saved;
 }
 // Status names alone do not capture initialization replacements or adopted links.
 export function autoDeployBlockers(engine: Engine, plan: Plan) {
   const state = engine.store.state();
   const consents = engine.instructionConsents();
   const blockers: NonNullable<AutoDeployResult["blockers"]> = [];
+  if (activeOnboarding(engine.store))
+    blockers.push({
+      path: "",
+      status: "onboarding",
+      reason: onboardingPauseReason,
+    });
   const sync = new Sync(engine.store);
   if (sync.recoveryPending())
     blockers.push({

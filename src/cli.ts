@@ -1,3 +1,8 @@
+import {
+  activeOnboarding,
+  cancelOnboarding,
+} from "./core/onboarding-session.ts";
+import { credentialPaths } from "./core/credentials.ts";
 import { Backups } from "./core/backup.ts";
 import { Uninstaller } from "./core/uninstall.ts";
 import {
@@ -254,6 +259,7 @@ cli
       if (!healthy) process.exitCode = 1;
       return {
         healthy,
+        onboarding: activeOnboarding(engine.store),
         autoDeploy: lastAutoDeploy(engine.store),
         sourceUpdates: sourceStatus(await getStore()).filter(
           (s) => s.changed || s.note.startsWith("源目录无法读取"),
@@ -386,6 +392,10 @@ onboard
   .command("unstage-instructions")
   .description("取消尚未发布的全局指令替换登记")
   .action(run(async () => unstageInstructions(await getStore())));
+onboard
+  .command("cancel <id>")
+  .description("放弃初始化会话，恢复自动部署原有设置（保留源配置）")
+  .action(run(async (id) => cancelOnboarding(await getStore(), id)));
 const sync = cli.command("sync").description("通过用户私有 Git 仓库同步源配置");
 sync
   .command("check")
@@ -589,6 +599,7 @@ skills.command("show <id>").action(
     const key = findId(s.manifest().skills, id);
     return {
       ...listedSkills(s).find((x) => x.id === key),
+      credentials: credentialPaths(s.skillPath(key)),
       ...parseSkill(
         fs.readFileSync(path.join(s.skillPath(key), "SKILL.md"), "utf8"),
       ),

@@ -113,6 +113,7 @@ export type Receipt = {
   projectId?: string;
 };
 export type DeployState = {
+  onboarding?: { id: string; startedAt: string; expiresAt: string };
   lastFullApplyAt?: string;
   receipts: Receipt[];
   instructionConsents?: { path: string; outsideHash: string }[];
@@ -189,6 +190,7 @@ export type Plan = {
   createdAt: string;
 };
 export type Snapshot = {
+  onboarding?: DeployState["onboarding"] | null;
   notices?: import("../core/notices.ts").Notice[];
   autoDeploy?: import("../core/auto-deploy.ts").AutoDeployResult | null;
   revision: string;
@@ -226,7 +228,9 @@ export type DiscoveredSkill = {
   projectIds: string[];
   linked: boolean;
   entryFile?: string;
-  origin: "user" | "platform" | "tool-managed" | "system";
+  origin: "user" | "platform" | "tool-managed" | "system" | "bundled";
+  bundledBy?: { name: string; path: string };
+  credentials: string[];
   originReason: string;
   sourceUrl?: string;
   ignored: boolean;
@@ -265,6 +269,8 @@ export type Inspection = {
     unverified: number;
   }[];
   summary: {
+    bundledSkills: number;
+    credentialSkills: number;
     importableSkills: number;
     excludedSkills: number;
     ignoredSkills: number;

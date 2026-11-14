@@ -28,6 +28,10 @@ hsync serve --background
 
 ## 自动部署边界
 
+`onboard scan`（含 prepare 和界面扫描）启动设备本地初始化会话，7 天内暂停自动部署，不修改 `deploy.auto`。`status` / `doctor` 的 `onboarding` 返回会话 ID、开始和失效时间，`autoDeploy` 显示 `needs-review` 及“初始化进行中：确认部署预览后再写入”。成功的完整手动 `apply --plan <id>`（包括无变更计划）结束会话；失败或仅部署管理技能不会结束。放弃用 `onboard cancel <会话ID>`，源配置与替换登记保留；取消或到期后恢复原设置，后续正常触发自动部署。重复扫描以最新会话为准，不接受旧 ID 取消。无需 Agent 手动关闭再打开自动部署。
+
+HarnessSync 收据管理的部署位置不是独立源目录；成功 apply 清理被接管或移除位置的本机来源及指纹。旧安装通过当前收据及已成功部署快照识别并忽略遗留记录，无需手工修 JSON。链接指向外部开发目录时保留真实来源，仍检测更新；不按目录名称猜测所有权。
+
 开启时，API 保存、删除、导入、启停技能或规则、Git 技能安装/更新/脱离、冲突选择、项目/设备绑定和源恢复会排队自动部署。服务将突发请求合并约 1.5 秒；CLI 在相关命令末尾执行一次。同步调度器发现远端合并待部署时执行；调度器启动时也补做一次。`onboard prepare/bootstrap` 保留仅部署管理技能的初始化范围；登记完整指令替换不会自动确认替换。回滚命令不会立即重新部署源库。
 
 自动部署仍经过完整 `Engine.plan()` → `Engine.apply(planId)`，使用相同收据、事务快照和回滚。仅允许：
@@ -71,7 +75,7 @@ changes 是计划中的新增/更新/删除数量；needs-review 不表示这些
 - `PUT /api/settings`：深层部分补丁，例如 `{deploy:{auto:false},updates:{intervalHours:6}}`，返回新的完整 `{settings,meta}`。未知键、类型或范围无效返回 `SETTINGS_OPTIONS`。可在 `If-Match` 请求头传入上次 `meta.revision`，不匹配返回 HTTP 409 / `STALE_REVISION`。
 - `meta = {path,revision,allowed,service}`。allowed 使用点号键；service 包含 `{supported,installed,loaded,login,file}`。不支持的系统 install/uninstall 返回 `SERVICE_UNSUPPORTED`。
 - `settings.sync = {auto,pushDelaySeconds,pullIntervalMinutes}`。原有 `GET/PUT /api/sync/auto` 的 `{enabled,debounceSeconds,pullIntervalMinutes}` 完全保留，并与新门面双向映射。
-- 成功的相关写请求在响应**外壳**追加 `autoDeployQueued`：`{ok:true,data:<原有结构>,autoDeployQueued:true}`。保留原有 data 的对象/数组形状。true 表示已排队，可显示“已保存，正在写入各工具”；最终成功与否需读取 autoDeploy。false 表示自动部署关闭。手动 preview/apply 接口不变。
+- 成功的相关写请求在响应**外壳**追加 `autoDeployQueued`：`{ok:true,data:<原有结构>,autoDeployQueued:true}`。保留原有 data 的对象/数组形状。true 表示已排队，可显示“已保存，正在写入各工具”；最终成功与否需读取 autoDeploy。false 表示自动部署关闭。初始化会话期间仍可排队，但实际执行被会话阻断。手动 preview/apply 接口不变。
 - `GET /api/skills/updates` 只读取 `skill-updates.json` 缓存，返回与 POST 相同的结果数组；过滤已经删除/脱离或源 commit 已变化的过期项，不访问网络。`POST /api/skills/updates` 保留手动立即检查（可带 `{ids:[]}`）。
 
 ## 更新检查与进程生命周期

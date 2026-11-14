@@ -60,7 +60,7 @@ bash install-harness-sync.sh --help
 
 ### 备份与卸载
 
-首次扫描或实际部署前自动保存本机基线到 `~/Downloads/HarnessSync 备份/`；没有 Downloads 时放在 HOME 下。包含已注册工具（含停用工具）及已绑定项目的技能、指令路径，不复制工具根目录、凭证和会话；符号链接只保存链接本身。
+首次扫描或实际部署前自动保存本机基线到 `~/Downloads/HarnessSync 备份/`；没有 Downloads 时放在 HOME 下。包含已注册工具（含停用工具）及已绑定项目的技能、指令路径，会包含技能目录内的凭证文件，仅保存在本机；不复制工具根目录和会话；符号链接只保存链接本身。
 
 运行 `hsync backup list` 查看位置，`hsync backup verify <目录>` 校验。`hsync backup restore` 先预览，再用 `--plan <id>` 执行。外部修改默认保留，覆盖需指定 `--overwrite <路径>`。恢复前另存副本，并关闭自动部署。
 
@@ -94,7 +94,7 @@ hsync skills import /absolute/project-skill --scope project --target PROJECT_ID
 hsync plan --json
 ```
 
-自动部署默认开启，上述源编辑可能同时把干净变更写入原生目录。如需每次部署前手动审查，请在**编辑之前**关闭：
+初始化会话会暂停自动部署；会话结束后自动部署默认开启，上述源编辑可能同时把干净变更写入原生目录。如需每次部署前手动审查，请在**编辑之前**关闭：
 
 ```sh
 hsync config set deploy.auto false
@@ -120,7 +120,7 @@ hsync rollback DEPLOYMENT_ID
 
 ## 同步
 
-连接自己拥有的私有专用 Git 仓库。凭证来自本机已有的 gh 登录、SSH 或系统 Git 凭证助手。GitHub HTTPS 命令临时借用 `gh auth git-credential`，不改全局 Git 配置。HarnessSync 不接收、不保存 token：认证留给本机工具，避免密钥进入共享配置与 Git 历史。不要把凭证写进文件或 URL。先运行 `hsync sync check`，再按选用的 URL 或创建选项检查后连接。需要登录时，由你本人在终端运行 `gh auth login` 并按浏览器提示授权（Claude Code 中可用 `! gh auth login`）。
+连接自己拥有的私有专用 Git 仓库。凭证来自本机已有的 gh 登录、SSH 或系统 Git 凭证助手。GitHub HTTPS 命令临时借用 `gh auth git-credential`，不改全局 Git 配置。HarnessSync 不接收同步登录 token，认证留给本机工具。用户选择的技能配置包含密钥文件时也会进入私有仓库，仓库必须保持私有；不要把凭证写进指令正文或 URL。先运行 `hsync sync check`，再按选用的 URL 或创建选项检查后连接。需要登录时，由你本人在终端运行 `gh auth login` 并按浏览器提示授权（Claude Code 中可用 `! gh auth login`）。
 
 ```sh
 hsync sync check --url git@github.com:USER/config.git
@@ -192,3 +192,15 @@ Ctrl+C 停止开发服务。CLI（`npm run cli -- plan --json`）、构建后的
 独立实现，参考 [Skills Manager](https://github.com/xingkongliang/skills-manager) 的思路。
 
 许可证：[MIT](LICENSE)。
+
+### 初始化扫描与本机来源
+
+`onboard scan`（含 prepare 和界面扫描）启动设备本地初始化会话，7 天内暂停自动部署，不修改 `deploy.auto`。`status` / `doctor` 的 `onboarding` 返回会话 ID、开始和失效时间，`autoDeploy` 显示 `needs-review` 及“初始化进行中：确认部署预览后再写入”。成功的完整手动 `apply --plan <id>`（包括无变更计划）结束会话；失败或仅部署管理技能不会结束。放弃用 `onboard cancel <会话ID>`，源配置与替换登记保留；取消或到期后恢复原设置，后续正常触发自动部署。重复扫描以最新会话为准，不接受旧 ID 取消。无需 Agent 手动关闭再打开自动部署。
+
+HarnessSync 收据管理的部署位置不是独立源目录；成功 apply 清理被接管或移除位置的本机来源及指纹。旧安装通过当前收据及已成功部署快照识别并忽略遗留记录，无需手工修 JSON。链接指向外部开发目录时保留真实来源，仍检测更新；不按目录名称猜测所有权。
+
+`origin=bundled` 表示产品附带，附 `originReason` 与 `bundledBy: {name,path}`；`inventory.summary.bundledSkills` 单独计数，也计入 `excludedSkills`。识别应用包、常见安装目录、node_modules 和链接指向的软件项目；向上查找项目不越过 HOME，最多 8 层，纯技能集合保留用户分类。默认建议不导入、不上传，说明会随产品更新；用户坚持时照常 `skills import`，并不禁止导入。
+
+扫描的 `inventory.skills[].credentials` 和 `skills show <id>` 的 `credentials` 列出技能内疑似凭证文件的相对路径，仅按文件名识别，不展示值；`inventory.summary.credentialSkills` 按真实技能目录计数。用户选择全部配置（含密钥文件）同步到私有仓库，仓库必须保持私有。不想上传的文件可用 `hsync sync ignore <技能名>/<文件>`（由同步忽略功能提供）。不得向用户索要 token、密码或私钥，不要把凭证写进指令正文或 URL。
+
+`onboard repository` 的 `absent` 表示默认名称仓库不存在，仍须确认是否用了其他名字；网络或权限错误保留 `unknown`。

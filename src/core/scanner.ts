@@ -1,3 +1,4 @@
+import { credentialPaths } from "./credentials.ts";
 import fs from "node:fs";
 import path from "node:path";
 import type { Store } from "./store.ts";
@@ -42,7 +43,7 @@ export function scanMachine(store: Store): Inspection {
     store.root,
     store.device().disabledHarnesses,
   );
-  const detectOrigin = originDetector(harnesses, warnings);
+  const detectOrigin = originDetector(harnesses, warnings, store.home);
   for (const h of harnesses) {
     for (const p of [h.skills, ...h.sharedSkills]) addRoot(p, h.id);
     for (const project of store.manifest().projects)
@@ -177,6 +178,7 @@ export function scanMachine(store: Store): Inspection {
         paths: [p],
         name: path.basename(p),
         description: "",
+        credentials: [],
         harnesses: [...root.harnesses],
         projectIds: [...root.projectIds],
         valid: false,
@@ -187,6 +189,8 @@ export function scanMachine(store: Store): Inspection {
         ignored: isIgnoredNativePath(store, p),
       };
       try {
+        if (fs.statSync(canonical).isDirectory())
+          entry.credentials = credentialPaths(canonical);
         if (!exists(file))
           throw new Error(
             "目录中缺少 SKILL.md；请添加带 name 和 description 的技能说明",
@@ -239,6 +243,8 @@ export function scanMachine(store: Store): Inspection {
     warnings,
     duplicates,
     summary: {
+      bundledSkills: skills.filter((s) => s.origin === "bundled").length,
+      credentialSkills: skills.filter((s) => s.credentials.length > 0).length,
       importableSkills: skills.filter(
         (s) => s.valid && s.origin === "user" && !s.ignored && !s.managed,
       ).length,

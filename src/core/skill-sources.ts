@@ -1,9 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { Device, DeployState } from "../shared/types.ts";
 import type { Store } from "./store.ts";
 import {
   AppError,
   bundleDiskHash,
+  exists,
+  json,
+  noSymlink,
   bundleHash,
   parseSkill,
   readBundle,
@@ -45,29 +49,118 @@ export async function ignoreNativePaths(
 
 export function skillSource(store: Store, id: string) {
   const legacy = store.manifest().skills.find((s) => s.id === id)?.source;
-  return (
-    store.device().origins?.[id] ||
-    (typeof legacy === "string" && path.isAbsolute(legacy) ? legacy : undefined)
-  );
+  const device = store.device();
+  const source =
+    device.origins?.[id] ||
+    (typeof legacy === "string" && path.isAbsolute(legacy)
+      ? legacy
+      : undefined);
+  return source &&
+    !insideSkillRoots(store, device.originRealPaths?.[id] || source)
+    ? source
+    : undefined;
 }
 
 export function resolvedSkillSource(store: Store, id: string) {
-  return store.device().originRealPaths?.[id] || skillSource(store, id);
+  const source = skillSource(store, id);
+  return source ? store.device().originRealPaths?.[id] || source : undefined;
 }
 
-// Only a receipted deployment is exempt from upstream change checks.
+// Compare lexical deployment paths: resolving a managed link would hide its independent source.
+const deploymentPaths = new Map<string, { stamp: string; paths: string[] }>();
 function insideSkillRoots(store: Store, p: string) {
-  const resolve = (p: string) => {
-    try {
-      return fs.realpathSync(p);
-    } catch {
-      return path.resolve(p);
+  const target = path.resolve(p);
+  if (
+    store
+      .state()
+      .receipts.some(
+        (r) => r.kind === "skill" && path.resolve(r.path) === target,
+      )
+  )
+    return true;
+  // v0.6 migration: a removed duplicate only survives in the successful snapshot.
+  const root = path.join(store.root, "deployments");
+  noSymlink(root);
+  if (!exists(root)) return false;
+  for (const name of fs.readdirSync(root)) {
+    if (!/^[0-9]+-[a-f0-9-]+\.json$/.test(name)) continue;
+    const file = path.join(root, name);
+    noSymlink(file);
+    const stat = fs.statSync(file);
+    const stamp = [stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs].join(":");
+    let cached = deploymentPaths.get(file);
+    if (cached?.stamp !== stamp) {
+      const record = json<{
+        status: string;
+        beforeState: DeployState;
+        files: { kind: string; path: string }[];
+      }>(file);
+      cached = {
+        stamp,
+        paths:
+          record.status === "applied"
+            ? [...record.beforeState.receipts, ...record.files]
+                .filter((r) => r.kind === "skill")
+                .map((r) => path.resolve(r.path))
+            : [],
+      };
+      if (deploymentPaths.size >= 1000) deploymentPaths.clear();
+      deploymentPaths.set(file, cached);
     }
-  };
-  const real = resolve(p);
-  return store
-    .state()
-    .receipts.some((r) => r.kind === "skill" && resolve(r.path) === real);
+    if (cached.paths.includes(target)) return true;
+  }
+  return false;
+}
+
+export type RemovedOrigin = {
+  id: string;
+  source: string;
+  realPath?: string;
+  hash?: string;
+};
+export function removeDeploymentOrigins(
+  device: Device,
+  paths: string[],
+): RemovedOrigin[] {
+  const removed: RemovedOrigin[] = [];
+  for (const [id, source] of Object.entries(device.origins || {})) {
+    const realPath = device.originRealPaths?.[id];
+    if (!paths.includes(path.resolve(realPath || source))) continue;
+    removed.push({ id, source, realPath, hash: device.originHashes?.[id] });
+    delete device.origins![id];
+    if (device.originRealPaths) delete device.originRealPaths[id];
+    if (device.originHashes) delete device.originHashes[id];
+  }
+  return removed;
+}
+export function restoreDeploymentOrigins(
+  device: Device,
+  removed: RemovedOrigin[],
+  allowUnchanged = false,
+) {
+  for (const item of removed) {
+    if (
+      allowUnchanged &&
+      device.origins?.[item.id] === item.source &&
+      device.originRealPaths?.[item.id] === item.realPath &&
+      device.originHashes?.[item.id] === item.hash
+    )
+      continue;
+    if (
+      device.origins?.[item.id] ||
+      device.originRealPaths?.[item.id] ||
+      device.originHashes?.[item.id]
+    )
+      throw new AppError("ROLLBACK_DRIFT", "技能源记录已有新修改，不能回滚");
+    device.origins = { ...device.origins, [item.id]: item.source };
+    if (item.realPath)
+      device.originRealPaths = {
+        ...device.originRealPaths,
+        [item.id]: item.realPath,
+      };
+    if (item.hash)
+      device.originHashes = { ...device.originHashes, [item.id]: item.hash };
+  }
 }
 
 export type SkillSourceStatus = {
@@ -81,11 +174,7 @@ export type SkillSourceStatus = {
 export function sourceStatus(store: Store) {
   return store.manifest().skills.flatMap<SkillSourceStatus>((skill) => {
     const source = skillSource(store, skill.id);
-    if (
-      !source ||
-      insideSkillRoots(store, resolvedSkillSource(store, skill.id)!)
-    )
-      return [];
+    if (!source) return [];
     try {
       // "Changed" means the source directory moved on since it was last read.
       // Library edits from sync, merges or the editor are not source updates.
@@ -129,7 +218,7 @@ export async function refreshSkills(store: Store, ids: string[]) {
       const entry = manifest.skills.find((s) => s.id === id);
       if (!entry) throw new AppError("NOT_FOUND", "Skill 不存在", 404);
       const source = skillSource(store, id);
-      if (!source || insideSkillRoots(store, resolvedSkillSource(store, id)!))
+      if (!source)
         throw new AppError(
           "NO_SKILL_SOURCE",
           `技能没有本机源目录：${entry.name}`,

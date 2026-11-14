@@ -1,3 +1,4 @@
+import { activeOnboarding } from "./onboarding-session.ts";
 import { Backups, backupFingerprint } from "./backup.ts";
 import {
   registry,
@@ -26,7 +27,13 @@ import {
   type NativeTree,
 } from "./native-snapshot.ts";
 import { Store } from "./store.ts";
-import { isIgnoredNativePath, sourceStatus } from "./skill-sources.ts";
+import {
+  isIgnoredNativePath,
+  sourceStatus,
+  removeDeploymentOrigins,
+  restoreDeploymentOrigins,
+  type RemovedOrigin,
+} from "./skill-sources.ts";
 import { scanMachine } from "./scanner.ts";
 import {
   AppError,
@@ -85,6 +92,7 @@ type Deployment = {
   changes: number;
   status: "pending" | "applied" | "failed" | "rolled-back";
   beforeState: DeployState;
+  removedOrigins?: RemovedOrigin[];
   files: SavedFile[];
 };
 
@@ -962,7 +970,8 @@ export class Engine {
         let cached = this.deploymentCache.get(file);
         if (cached?.key !== key) {
           // Keep metadata only: full snapshot bodies can be many MB each.
-          const { files, beforeState, ...metadata } = json<Deployment>(file);
+          const { files, beforeState, removedOrigins, ...metadata } =
+            json<Deployment>(file);
           cached = {
             key,
             value: { ...metadata, files: [], beforeState: { receipts: [] } },
@@ -1089,23 +1098,48 @@ export class Engine {
       };
       if (!changed.length) {
         const state = this.store.state();
+        const device = this.store.device();
+        const removed = removeDeploymentOrigins(
+          device,
+          state.receipts
+            .filter((r) => r.kind === "skill")
+            .map((r) => path.resolve(r.path)),
+        );
+        if (removed.length) {
+          noSymlink(path.join(this.store.root, "device.json"));
+          writeJson(path.join(this.store.root, "device.json"), device);
+        }
         writeJson(path.join(this.store.root, "state.json"), {
           ...state,
           receipts: confirmGlobalPaths(state.receipts),
           ...(!options.onlySkillId
-            ? { lastFullApplyAt: new Date().toISOString() }
+            ? {
+                lastFullApplyAt: new Date().toISOString(),
+                ...(!options.validate ? { onboarding: undefined } : {}),
+              }
             : {}),
         });
         if (!options.onlySkillId) new Sync(this.store).acknowledgeDeployment();
         return { id: null, changes: 0 };
       }
       const state = this.store.state();
+      const beforeDevice = this.store.device();
+      const device = structuredClone(beforeDevice);
+      const removedOrigins = removeDeploymentOrigins(device, [
+        ...state.receipts
+          .filter((r) => r.kind === "skill")
+          .map((r) => path.resolve(r.path)),
+        ...changed
+          .filter((c) => c.kind === "skill")
+          .map((c) => path.resolve(c.path)),
+      ]);
       const record: Deployment = {
         id: `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
         date: new Date().toISOString(),
         changes: changed.length,
         status: "pending",
         beforeState: state,
+        removedOrigins,
         files: changed.map((c) => ({
           ...(c.status === "replace" ? { native: readNative(c.path) } : {}),
           adopted: c.status === "adopt",
@@ -1149,6 +1183,7 @@ export class Engine {
       writeJson(recordPath, record);
       const done: SavedFile[] = [];
       const instructionConsents = this.instructionConsents();
+      let originsWritten = false;
       try {
         for (const change of changed) {
           const adoption = state.receipts.find(
@@ -1258,18 +1293,30 @@ export class Engine {
           ...state,
           receipts: confirmGlobalPaths(receipts),
           ...(!options.onlySkillId
-            ? { lastFullApplyAt: new Date().toISOString() }
+            ? {
+                lastFullApplyAt: new Date().toISOString(),
+                ...(!options.validate ? { onboarding: undefined } : {}),
+              }
             : {}),
           instructionConsents,
           instructionReplacements: state.instructionReplacements?.filter(
             (r) => !changed.some((c) => c.path === r.path),
           ),
         });
+        if (removedOrigins.length) {
+          noSymlink(path.join(this.store.root, "device.json"));
+          writeJson(path.join(this.store.root, "device.json"), device);
+          originsWritten = true;
+        }
         record.status = "applied";
         writeJson(recordPath, record);
       } catch (e) {
         for (const f of done.reverse()) this.restoreFile(f);
         writeJson(path.join(this.store.root, "state.json"), state);
+        if (originsWritten) {
+          noSymlink(path.join(this.store.root, "device.json"));
+          writeJson(path.join(this.store.root, "device.json"), beforeDevice);
+        }
         record.status = "failed";
         writeJson(recordPath, record);
         throw e;
@@ -1390,7 +1437,18 @@ export class Engine {
             409,
           );
       }
+      const device = this.store.device();
+      if (record.removedOrigins?.length) {
+        noSymlink(path.join(this.store.root, "device.json"));
+        restoreDeploymentOrigins(
+          device,
+          record.removedOrigins,
+          record.status === "pending",
+        );
+      }
       for (const f of [...record.files].reverse()) this.restoreFile(f);
+      if (record.removedOrigins?.length)
+        writeJson(path.join(this.store.root, "device.json"), device);
       writeJson(path.join(this.store.root, "state.json"), record.beforeState);
       record.status = "rolled-back";
       writeJson(p, record);
@@ -1410,6 +1468,7 @@ export class Engine {
           )
         : {};
     return {
+      onboarding: activeOnboarding(this.store),
       autoDeploy: lastAutoDeploy(this.store),
       root: this.store.root,
       revision: this.store.revision(),
