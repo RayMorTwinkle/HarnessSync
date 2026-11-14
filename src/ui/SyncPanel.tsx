@@ -9,6 +9,8 @@ import {
   Link2,
   Loader2,
   History,
+  HardDrive,
+  X,
   RefreshCw,
   ShieldCheck,
   TriangleAlert,
@@ -221,6 +223,7 @@ export function SyncPanel({
             </div>
           </form>
         </section>
+        <LocalOnlyCard api={api} busy={busy} />
         <SyncFacts />
       </div>
     );
@@ -338,6 +341,7 @@ export function SyncPanel({
           )
         }
       />
+      <LocalOnlyCard api={api} busy={busy} />
       {conflicts.length > 0 ? (
         <SyncConflicts
           conflicts={conflicts}
@@ -609,6 +613,98 @@ function SyncHistory({
   );
 }
 
+type IgnoreState = {
+  rules: string[];
+  matched: { skill: string; files: string[] | "all" }[];
+};
+
+// Upload-only exclusions: everything syncs by default, these stay on this Mac.
+function LocalOnlyCard({ api, busy }: { api: Api; busy: boolean }) {
+  const [state, setState] = useState<IgnoreState | null>(null);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    api<IgnoreState>("sync/ignore")
+      .then(setState)
+      .catch((e) => setError(e.message));
+  }, []);
+  const change = (body: { add?: string[]; remove?: string[] }) => {
+    setSaving(true);
+    setError("");
+    return api<IgnoreState>("sync/ignore", body)
+      .then((next) => {
+        setState(next);
+        setDraft("");
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setSaving(false));
+  };
+  const describe = (rule: string) => {
+    if (rule.startsWith("rule:")) return "整条指令";
+    const [skill, ...rest] = rule.split("/");
+    const hit = state?.matched.find((m) => m.skill === skill);
+    if (!hit) return "暂无匹配";
+    if (!rest.length) return "整个技能";
+    const count = hit.files === "all" ? 0 : hit.files.length;
+    return count ? `${count} 个文件` : "暂无匹配";
+  };
+  return (
+    <section className="panel settings-card local-only">
+      <div className="settings-card-title">
+        <HardDrive size={19} />
+        <div>
+          <h2>只留在本机</h2>
+          <p>
+            默认全部同步，包括技能里的密钥文件。这里列出的内容照常部署到本机各工具，只是不上传。
+          </p>
+        </div>
+      </div>
+      {state && !state.rules.length && (
+        <p className="local-only-empty">没有规则，所有内容都会同步。</p>
+      )}
+      {state && state.rules.length > 0 && (
+        <ul className="local-only-rules">
+          {state.rules.map((rule) => (
+            <li key={rule}>
+              <code>{rule}</code>
+              <span>{describe(rule)}</span>
+              <button
+                className="icon-button"
+                aria-label={`恢复同步 ${rule}`}
+                title="恢复同步"
+                disabled={busy || saving}
+                onClick={() => void change({ remove: [rule] })}
+              >
+                <X size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form
+        className="local-only-add"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (draft.trim()) void change({ add: [draft.trim()] });
+        }}
+      >
+        <input
+          aria-label="添加只留本机的规则"
+          placeholder="技能名，或 技能名/文件，例如 anysearch/.env"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+        />
+        <button className="button" disabled={busy || saving || !draft.trim()}>
+          {saving && <Loader2 size={13} className="spin" />}
+          添加
+        </button>
+      </form>
+      {error && <p className="form-error">{error}</p>}
+    </section>
+  );
+}
+
 function SyncFacts() {
   return (
     <section className="panel sync-facts">
@@ -621,6 +717,9 @@ function SyncFacts() {
         <li>两台设备有同名且内容相同的条目时，自动合成一份。</li>
         <li>
           同一条目两边内容不同时记为冲突，本机版本保留，暂停推送直到你选择。
+        </li>
+        <li>
+          技能包完整同步，包括其中的密钥文件，所以仓库必须保持私有；不想上传的内容可设为只留在本机。
         </li>
         <li>每次合并或处理冲突前保存安全点，可在「版本与部署」中恢复。</li>
         <li>

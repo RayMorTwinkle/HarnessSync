@@ -5,12 +5,7 @@ import { HarnessIcon } from "./common.tsx";
 import { api, harnessName } from "./lib.ts";
 
 type SegmentKind =
-  | "native"
-  | "shared"
-  | "harness"
-  | "device"
-  | "project"
-  | "frame";
+  "native" | "shared" | "harness" | "device" | "project" | "frame";
 type Part = { type: "text" | "variable"; text: string; key?: string };
 type Segment = {
   kind: SegmentKind;
@@ -32,12 +27,7 @@ type Output = {
   error?: string;
 };
 type SkillFileKind =
-  | "instructions"
-  | "script"
-  | "reference"
-  | "asset"
-  | "credential"
-  | "other";
+  "instructions" | "script" | "reference" | "asset" | "credential" | "other";
 type SkillComposition = {
   id: string;
   name: string;
@@ -55,14 +45,18 @@ type SkillComposition = {
 type Legend = { key: string; label: string; hint: string }[];
 
 // Bar order runs from what the user owns to what HarnessSync adds around it.
+// Marker lines and headings ("frame") are left out: the bar shows content only.
 const instructionLegend: Legend = [
-  { key: "native", label: "本机原文", hint: "文件里不归 HarnessSync 管理的文字" },
+  {
+    key: "native",
+    label: "本机原文",
+    hint: "文件里不归 HarnessSync 管理的文字",
+  },
   { key: "shared", label: "共享", hint: "所有工具都收到的片段" },
   { key: "harness", label: "工具专用", hint: "只发给部分工具的片段" },
   { key: "project", label: "项目专用", hint: "只在这个项目生效" },
   { key: "device", label: "本机专用", hint: "只在这台设备生效" },
   { key: "variable", label: "变量", hint: "每台设备各自填写的值" },
-  { key: "frame", label: "结构", hint: "标记行与片段标题" },
 ];
 const skillLegend: Legend = [
   { key: "instructions", label: "SKILL.md", hint: "技能说明正文" },
@@ -147,7 +141,9 @@ function CompositionLegend({
 
 function outputTitle(output: Output, projectName?: string) {
   const file = output.path.split("/").pop();
-  return output.projectId ? `${projectName || "项目"} · ${file}` : `全局 · ${file}`;
+  return output.projectId
+    ? `${projectName || "项目"} · ${file}`
+    : `全局 · ${file}`;
 }
 
 // What each tool actually reads: the user's own text plus HarnessSync's block,
@@ -222,9 +218,7 @@ export function InstructionComposition() {
                 </span>
                 <ChevronDown size={14} className="compo-chevron" />
               </button>
-              {expanded && (
-                <OutputDetail output={o} home={home} />
-              )}
+              {expanded && <OutputDetail output={o} home={home} />}
             </div>
           );
         })}
@@ -266,19 +260,18 @@ function OutputDetail({ output, home }: { output: Output; home: string }) {
         {output.error && <p className="compo-error">{output.error}</p>}
       </div>
       <div className="compo-file" ref={body}>
-        {output.segments.map((s, i) =>
-          s.kind === "frame" ? (
-            <pre className="compo-block k-frame" key={i}>
-              {s.parts.map((p) => p.text).join("")}
-            </pre>
-          ) : (
-            <div className={`compo-block k-${s.kind}`} key={i}>
+        {rows(output.segments).map((row, i) =>
+          row.segment ? (
+            <div className={`compo-block k-${row.segment.kind}`} key={i}>
               <span className="compo-tag">
-                {label(s)}
-                {s.title && <em>{s.title}</em>}
+                {label(row.segment)}
+                {row.segment.title && <em>{row.segment.title}</em>}
               </span>
               <pre>
-                {s.parts.map((p, j) =>
+                {row.heading && (
+                  <span className="compo-heading">{row.heading}</span>
+                )}
+                {row.segment.parts.map((p, j) =>
                   p.type === "variable" ? (
                     <mark className="compo-var" key={j} title={`{{${p.key}}}`}>
                       {p.text}
@@ -289,11 +282,38 @@ function OutputDetail({ output, home }: { output: Output; home: string }) {
                 )}
               </pre>
             </div>
+          ) : (
+            <pre className="compo-frame" key={i}>
+              {row.heading}
+            </pre>
           ),
         )}
       </div>
     </div>
   );
+}
+
+// Display rows: a rule's "## title" heading joins its body, blank separators
+// disappear, and the remaining marker lines become faint rows.
+function rows(segments: Segment[]) {
+  const out: { segment?: Segment; heading?: string }[] = [];
+  let frame = "";
+  for (const s of segments) {
+    const text = s.parts.map((p) => p.text).join("");
+    if (s.kind === "frame") {
+      frame += text;
+      continue;
+    }
+    const lines = frame.trim().split("\n");
+    const last = lines[lines.length - 1];
+    const heading = s.kind !== "native" && /^#{2,} /.test(last) ? last : "";
+    const rest = (heading ? lines.slice(0, -1) : lines).join("\n").trim();
+    if (rest) out.push({ heading: rest });
+    out.push({ segment: s, heading: heading ? `${heading}\n\n` : undefined });
+    frame = "";
+  }
+  if (frame.trim()) out.push({ heading: frame.trim() });
+  return out;
 }
 
 const kindLabel = Object.fromEntries(skillLegend.map((l) => [l.key, l.label]));
@@ -337,8 +357,7 @@ export function SkillCompositionView({ id }: { id: string }) {
       <CompositionLegend totals={value.totals} legend={skillLegend} />
       {credentials.length > 0 && (
         <p className="skill-compo-note">
-          <KeyRound size={13} />
-          含 {credentials.length} 个凭证文件，
+          <KeyRound size={13} />含 {credentials.length} 个凭证文件，
           {credentials.every((f) => f.syncIgnored)
             ? "只留在本机，不上传"
             : "会随技能同步到你的私有仓库"}
@@ -357,7 +376,10 @@ export function SkillCompositionView({ id }: { id: string }) {
         <ul className="skill-compo-files">
           {value.files.map((f) => (
             <li key={f.path}>
-              <i className={`compo-dot k-${f.kind}`} title={kindLabel[f.kind]} />
+              <i
+                className={`compo-dot k-${f.kind}`}
+                title={kindLabel[f.kind]}
+              />
               <code>{f.path}</code>
               {f.executable && <span className="compo-flag muted">可执行</span>}
               {f.kind === "credential" ? (
@@ -375,7 +397,9 @@ export function SkillCompositionView({ id }: { id: string }) {
                   {f.syncIgnored ? "只留本机" : "同步"}
                 </button>
               ) : (
-                f.syncIgnored && <span className="compo-flag muted">不上传</span>
+                f.syncIgnored && (
+                  <span className="compo-flag muted">不上传</span>
+                )
               )}
               {f.variables.map((v) => (
                 <span className="compo-flag var" key={v}>

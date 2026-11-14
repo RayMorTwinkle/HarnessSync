@@ -22,6 +22,11 @@ type Request = <T>(
   body?: unknown,
   method?: string,
 ) => Promise<T>;
+const originLabel: Record<string, string> = {
+  platform: "平台托管",
+  "tool-managed": "工具托管",
+  system: "系统内置",
+};
 export function OnboardingPanel({
   request,
   refresh,
@@ -323,7 +328,14 @@ export function OnboardingPanel({
                       {s.managed ? " · 已由 HarnessSync 管理" : ""}
                       {s.ignored ? " · 外部保留" : ""}
                       {s.origin && s.origin !== "user"
-                        ? ` · ${s.origin}（默认不导入）`
+                        ? ` · ${
+                            s.origin === "bundled"
+                              ? `随 ${s.bundledBy?.name || "其他软件"} 安装`
+                              : originLabel[s.origin] || s.origin
+                          }（建议不导入）`
+                        : ""}
+                      {s.credentials?.length
+                        ? ` · 含 ${s.credentials.length} 个凭证文件`
                         : ""}
                       {!s.valid ? " · 需要整理格式" : ""}
                     </span>

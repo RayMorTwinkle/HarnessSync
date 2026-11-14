@@ -4563,10 +4563,16 @@ button.compo-seg:focus-visible {
 .compo-block pre {
   color: var(--text-2);
 }
-.compo-block.k-frame {
-  padding-top: 4px;
-  padding-bottom: 4px;
+.compo-frame {
+  padding: 6px 14px 6px 19px;
   color: var(--text-5);
+}
+.compo-block + .compo-frame,
+.compo-frame + .compo-block {
+  border-top: 1px solid var(--border-soft);
+}
+.compo-heading {
+  color: var(--text-4);
 }
 .compo-block.k-native pre {
   color: var(--text-3);
@@ -4690,4 +4696,44 @@ button.compo-seg:focus-visible {
   .compo-detail {
     padding: 4px 16px 16px;
   }
+}
+
+.local-only-empty {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-4);
+}
+.local-only-rules {
+  display: flex;
+  flex-direction: column;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.local-only-rules li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 12px;
+}
+.local-only-rules code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-2);
+  text-overflow: ellipsis;
+}
+.local-only-rules span {
+  color: var(--text-4);
+}
+.local-only-add {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.local-only-add input {
+  flex: 1;
+  min-width: 0;
 }

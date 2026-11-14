@@ -24,32 +24,40 @@ export function DeployStatus({ auto }: { auto: boolean }) {
   const stopped =
     pending > 0 &&
     (last?.outcome === "needs-review" || last?.outcome === "failed");
-  const state = review
+  // Onboarding pauses automatic writes until the user applies the preview once.
+  const onboarding = !!data.onboarding && pending > 0;
+  const state = onboarding
     ? {
         tone: "warn",
         icon: <TriangleAlert size={15} />,
-        text: `${review} 处需要你确认`,
+        text: "初始化中，确认预览后写入",
       }
-    : stopped
+    : review
       ? {
           tone: "warn",
           icon: <TriangleAlert size={15} />,
-          text:
-            last?.outcome === "failed"
-              ? "写入失败，查看详情"
-              : `${last?.blockers?.length || pending} 处需要你确认`,
+          text: `${review} 处需要你确认`,
         }
-      : pending
+      : stopped
         ? {
-            tone: "busy",
-            icon: <Loader2 size={15} className="spin" />,
-            text: "正在写入各工具…",
+            tone: "warn",
+            icon: <TriangleAlert size={15} />,
+            text:
+              last?.outcome === "failed"
+                ? "写入失败，查看详情"
+                : `${last?.blockers?.length || pending} 处需要你确认`,
           }
-        : {
-            tone: "ok",
-            icon: <CheckCircle2 size={15} />,
-            text: "各工具已是最新",
-          };
+        : pending
+          ? {
+              tone: "busy",
+              icon: <Loader2 size={15} className="spin" />,
+              text: "正在写入各工具…",
+            }
+          : {
+              tone: "ok",
+              icon: <CheckCircle2 size={15} />,
+              text: "各工具已是最新",
+            };
   return (
     <button
       className={`deploy-status ${state.tone}`}
