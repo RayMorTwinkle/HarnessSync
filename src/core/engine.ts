@@ -179,7 +179,17 @@ export class Engine {
   }
   private instructions(rules: Rule[], projectId?: string) {
     if (!rules.length) return null;
-    const content = rules
+    // Identity reconciliation must not reorder an already deployed instruction block.
+    const order = new Map(
+      (this.store.device().ruleOrder || []).map((id, i) => [id, i]),
+    );
+    const content = [...rules]
+      .sort(
+        (a, b) =>
+          Number(a.scope.kind === "device") -
+            Number(b.scope.kind === "device") ||
+          (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity),
+      )
       .map((r) => `## ${r.title}\n\n${this.render(r.body, projectId).trim()}`)
       .join("\n\n");
     if (Buffer.byteLength(content) > 48 * 1024)

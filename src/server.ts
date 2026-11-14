@@ -173,6 +173,12 @@ export async function startServer(
           (!id || id === "status")
         )
           result = await new Sync(store).status();
+        else if (
+          resource === "sync" &&
+          req.method === "GET" &&
+          id === "conflicts"
+        )
+          result = await new Sync(store).conflicts(true);
         else if (resource === "sync" && req.method === "POST" && id === "setup")
           result = await new Sync(store).setup(
             z
@@ -204,7 +210,8 @@ export async function startServer(
         )
           result = await new Sync(store).resolve(
             z.string().parse(body.entryId),
-            z.enum(["local", "remote", "both"]).parse(body.keep),
+            z.enum(["local", "remote", "both", "merged"]).parse(body.keep),
+            z.string().optional().parse(body.from),
           );
         else if (
           resource === "sync" &&
