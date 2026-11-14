@@ -3,6 +3,7 @@ import { ArrowDownToLine, Check, Loader2, Trash2 } from "lucide-react";
 import type { Snapshot, Skill, Scope } from "../shared/types.ts";
 import { ScopeFields } from "./common.tsx";
 import { allHarnessIds } from "./lib.ts";
+import { SkillCompositionView } from "./Composition.tsx";
 export function Editor({
   type,
   item,
@@ -118,6 +119,7 @@ export function Editor({
               onChange={(e) => update("body", e.target.value)}
             />
           </label>
+          {type === "skill" && item?.id && <SkillCompositionView id={item.id} />}
           {type === "skill" && (
             <p className="hint">
               编辑正文会保留已有 Skill 的脚本、资源和额外

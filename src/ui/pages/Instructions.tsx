@@ -3,6 +3,7 @@ import { ArrowRight, ArrowUpRight, FileText, Plus, Trash2 } from "lucide-react";
 import { useApp } from "../app-context.tsx";
 import { Empty, HarnessIcon, ScopeLabel } from "../common.tsx";
 import { harnessName } from "../lib.ts";
+import { InstructionComposition } from "../Composition.tsx";
 export function Instructions() {
   const { data, busy, fire, api, setModal, remove, scopeText } = useApp();
   const { manifest } = data;
@@ -22,6 +23,7 @@ export function Instructions() {
           <ArrowUpRight size={13} />
         </button>
       </div>
+      <InstructionComposition />
       <div className="section-heading list-heading">
         <h2>
           指令片段 <span className="count-badge">{manifest.rules.length}</span>
