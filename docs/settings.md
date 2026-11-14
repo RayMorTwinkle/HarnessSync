@@ -89,3 +89,13 @@ macOS 使用 `$HOME/Library/LaunchAgents/io.github.raymortwinkle.harness-sync.pl
 日志位于配置根目录的 `logs/service.log`。启动及后台轮询检查大小，达到 5 MiB 时复制到单个 `.1` 备份并截断原文件，保留服务持有的日志文件描述符。安装、卸载在每次文件修改前重新核验 Label/内容标记、原内容、文件身份及符号链接祖先；异步状态查询或停止期间被替换的文件不会覆盖或删除。失败恢复仅在文件仍是本次写入版本时还原或删除；卸载恢复还检查路径仍空缺且父目录未替换。拒绝外部文件和符号链接。日志和源配置保留。
 
 在正在运行的登录服务中关闭 startup.login 会卸载并停止该服务，当前 HTTP 连接可能断开；服务文件会在停止进程前移除。可使用 `hsync open` 再启动前台界面。操作系统命令全部通过可注入 runner，测试只操作临时 HOME 和配置根目录。
+
+## CLI 提醒
+
+`notices.cli` 默认 `true`，保存在设备本机 `settings.json`，不跨设备同步。
+旧设置文件缺少该字段时默认开启。通过 `hsync config get notices.cli`、
+`hsync config set notices.cli false` 或 `PUT /api/settings` 的
+`{"notices":{"cli":false}}` 修改；`GET /api/settings` 返回 `settings.notices.cli`。
+`HSYNC_NO_NOTICES=1` 临时关闭当前 CLI 进程的 JSON 附加和 stderr 提醒。
+该设置不关闭 `/api/snapshot` 顶层的 `notices` 数组。
+提醒仅消费本地缓存；完整 stderr 块按指纹与 6 小时间隔去重，JSON 不去重。

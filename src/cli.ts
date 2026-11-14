@@ -13,6 +13,7 @@ import {
 import fs from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
+import { cliNoticeOutput } from "./core/notices.ts";
 import { UpdateChecker } from "./core/update-checks.ts";
 import { Settings } from "./core/settings.ts";
 import { LoginService, rotateServiceLog } from "./core/service.ts";
@@ -31,6 +32,7 @@ import { startServer } from "./server.ts";
 import { scopeSchema, harnessIds, type Scope } from "./shared/types.ts";
 import {
   createOnboarding,
+  findOnboardingRepository,
   getOnboarding,
   bootstrapOnboarding,
   stageInstructions,
@@ -46,7 +48,7 @@ const cli = new Command()
   .version("0.5.0")
   .option("--root <directory>", "配置库目录")
   .option("--json", "机器可读 JSON 输出");
-let store: Store;
+let store: Store | undefined;
 const getStore = async () =>
   (store ||= await new Store(cli.opts().root).init());
 const output = (data: unknown) =>
@@ -88,7 +90,17 @@ const run =
       if (!Array.isArray(value))
         value = { ...(value as object), autoDeploy: result };
     }
-    if (value !== undefined) output(value);
+    if (value !== undefined)
+      output(
+        store
+          ? await cliNoticeOutput(store, value, {
+              quiet:
+                (group === "hsync" && name === "status") ||
+                (group === "sync" &&
+                  ["status", "conflicts"].includes(name || "")),
+            })
+          : value,
+      );
   };
 const scopeOptions = (c: Command) =>
   c
@@ -281,6 +293,10 @@ cli
 const onboard = cli
   .command("onboard")
   .description("扫描、安装管理技能并生成 AI 初始化提示词");
+onboard
+  .command("repository")
+  .description("检查是否已连接同步或已存在默认 GitHub 同步仓库（不连接）")
+  .action(run(async () => findOnboardingRepository(await getStore())));
 onboard
   .command("scan")
   .description("保存一份可追溯的本机扫描清单")
@@ -514,13 +530,20 @@ skills.command("show <id>").action(
 scopeOptions(
   skills
     .command("import <directory>")
+    .option("--use-library", "用共享库版本接管，部署前显示替换差异")
+    .option("--replace-library", "用此目录替换共享库同名技能，需用户明确同意")
+    .option("--name <name>", "改名导入，两个版本都保留")
     .option(
       "--adopt",
       "同时接管这个已有原生目录，后续可由 HarnessSync 更新或撤下",
     ),
 ).action(
   run(async (dir, o) =>
-    (await getStore()).importSkill(dir, scope(o), undefined, o.adopt),
+    (await getStore()).importSkill(dir, scope(o), undefined, o.adopt, {
+      useLibrary: o.useLibrary,
+      replaceLibrary: o.replaceLibrary,
+      name: o.name,
+    }),
   ),
 );
 scopeOptions(
@@ -676,7 +699,7 @@ cli
     });
     if (!o.background)
       console.log(
-        `HarnessSync → ${server.url}\n配置库 → ${store.root}\n按 Ctrl+C 退出`,
+        `HarnessSync → ${server.url}\n配置库 → ${s.root}\n按 Ctrl+C 退出`,
       );
     keepRunning(server);
   });
@@ -706,8 +729,9 @@ for (const action of ["install", "uninstall", "status"] as const)
 try {
   await cli.parseAsync();
 } catch (e: any) {
+  const failure = { ok: false, code: e.code || "ERROR", message: e.message };
   console.error(
-    JSON.stringify({ ok: false, code: e.code || "ERROR", message: e.message }),
+    JSON.stringify(store ? await cliNoticeOutput(store, failure) : failure),
   );
   process.exitCode = 1;
 }

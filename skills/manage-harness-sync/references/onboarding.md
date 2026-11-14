@@ -1,10 +1,14 @@
 # 首次初始化的整理流程
 
+先运行 `sync status`。已经连接时跳过第一台判断；未连接先问“这是你第一台使用 HarnessSync 的设备吗？”。无论答案如何，gh 已登录时查 `gh repo view harness-sync-config --json name,url,visibility`（也可用 `onboard repository`）；说明可能使用了其他名字，失败不等于没有仓库。已有仓库或不是第一台时，先确认仓库 URL、`sync setup --url <url>` 拉取共享库，再比较扫描结果并导入。
+
 先读取提示词中的扫描 ID：`onboard show <id> --json`。扫描范围是已知用户技能目录、兼容目录与本机已绑定项目；不是全盘搜索，也不是模型有效上下文的完整列表。
 
 ## 技能整理
 
-使用 `inventory.skills` 中的 `hash` 比较完整目录。`paths` 表示同一真实目录的多个入口，不应重复导入；`duplicates` 中的 `variants` 大于一，表示同名但内容不同。
+`onboard show` 每次按当前共享库重算 `inventory.skills[].library`（same/differs/absent）及 `inventory.summary.library` 三类计数。same 复用已有 ID 并接管原生副本；absent 普通导入。differs 先集中说明关键差异并给建议：`skills import <目录> --use-library` 用共享库版本，`--replace-library` 替换共享库，`--name <新名称>` 两份都留。Agent 合并先写到独立目录，再用 `--replace-library` 导入。替换共享库或合并之前必须得到用户明确同意，替换会同步到其他设备。
+
+使用 `inventory.skills` 中的 `hash` 比较完整目录（普通权限规范化为 Git 可保存的 644/755，执行位参与比较）。`paths` 表示同一真实目录的多个入口，不应重复导入；`duplicates` 中的 `variants` 大于一，表示同名但内容不同。
 
 先按 `origin` 筛选：`user` 为用户来源；`platform` 为 Claude 云端同步（`skills/synced/<uuid>/`）或插件；`system` 为 `.system` 目录或 `.codex-system-skills.marker` 标记的系统内置；`tool-managed` 为技能锁文件列出的工具托管条目（含来源 URL）。后三类默认排除，说明 `originReason` / `sourceUrl`，避免复制会被其他工具覆写的内容。损坏锁文件在 warnings 中报告，分类仍可继续；无已知托管证据不等于已验证用户所有权。
 
@@ -44,4 +48,6 @@ Codex 的 `.agents/skills`、Claude 的 `.claude/skills` 可能被其他工具�
 
 ## 跨设备同步（可选）
 
-本机初始化完成后可介绍 `hsync sync setup --create` 或 `hsync sync setup --url <仓库URL>`。按可用命令帮助执行；这是可选末步，不把本地 Git 历史当作已完成跨设备同步。
+如果之后才连接已有仓库，同内容条目会自动合并，不同内容会成为冲突，用 `hsync sync conflicts` 查看 `<store>/conflicts/<entryId>/` 并处理。
+
+第一台且没有已有同步仓库时，本机初始化完成后可介绍 `hsync sync setup --create` 或 `hsync sync setup --url <仓库URL>`。按可用命令帮助执行；这是可选末步，不把本地 Git 历史当作已完成跨设备同步。

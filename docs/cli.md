@@ -232,3 +232,53 @@ unwanted receipts owned by disabled or missing tools are retained unchanged.
 Re-enabling resumes management. The original four-ID scope
 means all enabled tools, including future plugins. See [plugins.md](plugins.md)
 for contributor setup, path semantics, API contracts and security boundaries.
+
+## CLI 顺带提醒
+
+成功命令的对象输出和 AppError 错误对象，在存在提醒时附加 `reminders`；数组输出保持数组。
+每条包含 `code`、`severity`（`info` / `action`）、`message`，可选 `items`、`paths`、`command`。
+来源仅为本机缓存：同步冲突、仍有待部署变化的自动部署暂停/失败、Git 技能更新、同步失败。
+不会为提醒联网、fetch 或扫描技能内容。名称清洗、截断并限制显示数量，提醒不含技能或指令内容。
+
+stderr 在内容变化或距离上次完整提醒超过 6 小时时打印完整块，其余时间打印一行摘要。
+`status`、`sync status`、`sync conflicts` 不重复打印 stderr 块，JSON 仍完整返回提醒。
+`hsync config set notices.cli false` 或 `HSYNC_NO_NOTICES=1` 关闭 CLI 提醒；不影响界面快照。
+收到 action 提醒的 Agent 应先告诉用户，只有用户要求时处理；合并前先说明差异并取得明确同意。
+同步冲突用 `hsync sync conflicts`，文件位于 `<store>/conflicts/<entryId>/{local,remote,merged}/`。
+
+## 加入已有同步库
+
+初始化提示词先确认是否第一台设备。未连接时，无论答案如何，若 `gh auth status` 确认已登录，
+用 `gh repo view harness-sync-config --json name,url,visibility` 检查默认仓库，也询问是否使用了其他名字。
+已有仓库或并非第一台设备时，先确认 URL 并 `sync setup --url <url>`，再比较扫描清单并导入。
+已连接同步时跳过第一台判断。第一台且无已有仓库时仍可在整理后选择创建同步仓库。
+
+`onboard show [id]` 每次按当前共享库重新计算 `inventory.skills[].library`：
+`{ status: "same" | "differs" | "absent", id?, name? }`，按技能名称匹配。
+完整包内容和执行位参与比较；普通权限规范化为 Git 可保存的 644/755。
+`inventory.summary.library` 包含 `same`、`differs`、`absent` 三个计数。
+原始扫描快照不重写；本机文件变化后应重新扫描。
+
+`skills import <目录>` 对 same 复用已有 ID，匹配的原生目录进入接管计划；保留共享库范围与元数据。
+对 differs 默认返回 `LIBRARY_DIFFERS`，先说明正文、脚本和资源的关键差异，再选择：
+
+- `skills import <目录> --use-library`：保留共享库，登记原生目录替换选择；plan 展示差异，apply 才替换，原件进快照。
+- `skills import <目录> --replace-library`：完整替换共享库的同名包，保留 ID、范围、启停与显示名，改为本机来源；会同步到其他设备，必须先取得用户明确同意。
+- `skills import <目录> --name <新名称>`：以新名称导入副本，保留双方原件，不接管旧目录。
+- Agent 合并：先集中说明差异并取得明确同意，将结果写到独立目录，再用 `--replace-library` 导入。
+
+三个参数互斥；`--name` 不能搭配 `--adopt`。`--use-library` 要求原生部署目录，拒绝链接父目录、外部保留与其他条目的已管理目标。
+普通 `--adopt` 保留原有行为。后来才连接已有仓库时，同内容条目会自动合并，不同内容进入同步冲突。
+HTTP `POST /api/import` 使用 `options: { useLibrary?, replaceLibrary?, name? }`，与 CLI 共用 core。
+
+`onboard repository` 显式执行上述查询（可联网，不修改配置）；返回 `status`：
+`connected` 已连接并跳过查询，`found` 附 `repository: { name, url, visibility }`，
+`unavailable` 未登录，`unknown` 无法确认。查询失败不代表仓库不存在。
+`onboard scan/show` 本身不会调用 gh。
+
+CLI 提醒放在对象输出的 `reminders` 字段，和 `plan` 自带的部署通知 `notices` 互不影响；
+没有提醒或关闭提醒时输出保持原样。
+`/api/plan` 与 `/api/snapshot` 内的 `plan.notices` 保持原有部署通知格式。
+
+`--name` 创建独立副本，不把旧名称目录记录为可刷新源，避免产生虚假的“源目录有更新”。
+原生旧目录保持原样；如与共享库旧名称版本冲突，仍需在 plan 中明确选择如何处理。

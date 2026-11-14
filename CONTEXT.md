@@ -74,3 +74,10 @@ reader map 来自清单并集，放置使用保持旧词典序评分及子集平
 
 API 与格式详见 [plugins.md](docs/plugins.md)。UI 应使用返回的 Harness.name 和元数据，
 不再将动态 ID 用作固定四项名称表的索引。`src/ui` 由独立工作线维护。
+
+CLI 顺带提醒由 `notices.ts` 仅消费本地同步、自动部署和技能更新缓存；不联网、不执行 Git、不扫描原生技能包。
+`notices.cli` 默认开启，stderr 指纹去重记录留在 Git 外；`/api/snapshot.notices` 供 UI 展示。
+完整 apply 在 state 记录 `lastFullApplyAt`，结合自动部署缓存的 `pendingChanges` 消除已处理的暂停提醒。
+初始化加入已有库时先连接后比较；完整包比较规范化普通权限、保留执行位，same 复用 ID，differs 需显式选择。
+已有条目的原生目录接管使用本机 `conflictChoices.adoptScope` 记录范围；范围不变时保持显式选择的放置目录，
+范围变化后恢复正常放置计算。接管和替换仍由 plan → apply 登记收据、生成快照并支持回滚。

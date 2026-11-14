@@ -29,6 +29,7 @@ const updatesSchema = z
     intervalHours: z.union([z.literal(6), z.literal(24), z.literal(168)]),
   })
   .strict();
+const noticesSchema = z.object({ cli: z.boolean() }).strict();
 const startupSchema = z.object({ login: z.boolean() }).strict();
 export const settingsSchema = z
   .object({
@@ -36,10 +37,15 @@ export const settingsSchema = z
     sync: syncSchema,
     updates: updatesSchema,
     startup: startupSchema,
+    notices: noticesSchema,
   })
   .strict();
 const localSchema = z
-  .object({ deploy: deploySchema, updates: updatesSchema })
+  .object({
+    deploy: deploySchema,
+    updates: updatesSchema,
+    notices: noticesSchema.default({ cli: true }),
+  })
   .strict();
 const patchSchema = z
   .object({
@@ -47,6 +53,7 @@ const patchSchema = z
     sync: syncSchema.partial().optional(),
     updates: updatesSchema.partial().optional(),
     startup: startupSchema.partial().optional(),
+    notices: noticesSchema.partial().optional(),
   })
   .strict();
 export type SettingsValue = z.infer<typeof settingsSchema>;
@@ -71,6 +78,7 @@ export class Settings {
     noSymlink(this.file);
     if (!exists(this.file))
       return {
+        notices: { cli: true },
         deploy: { auto: true },
         updates: { check: true, intervalHours: 24 as const },
       };
@@ -155,7 +163,11 @@ export class Settings {
             },
             { locked: true },
           );
-        writeJson(this.file, { deploy: value.deploy, updates: value.updates });
+        writeJson(this.file, {
+          deploy: value.deploy,
+          updates: value.updates,
+          notices: value.notices,
+        });
         // Persist other preferences before a bootout that may stop this process.
         if (
           patch.startup?.login !== undefined &&
@@ -189,7 +201,7 @@ export class Settings {
       !group ||
       !field ||
       extra ||
-      !["deploy", "sync", "updates", "startup"].includes(group)
+      !["deploy", "sync", "updates", "startup", "notices"].includes(group)
     )
       throw new AppError(
         "SETTINGS_KEY",

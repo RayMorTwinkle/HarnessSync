@@ -21,6 +21,7 @@ test("settings defaults, strict validation, deep patch, persistence, sync compat
     sync: { auto: false, pushDelaySeconds: 120, pullIntervalMinutes: 10 },
     updates: { check: true, intervalHours: 24 },
     startup: { login: false },
+    notices: { cli: true },
   });
   assert.equal(fs.existsSync(settings.file), false);
   assert.deepEqual(first.meta.allowed["updates.intervalHours"], [6, 24, 168]);

@@ -2,7 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Store } from "./store.ts";
 import { adapters, projectTargets } from "./adapters.ts";
-import { bundleHash, exists, hash, parseSkill, readBundle } from "./files.ts";
+import {
+  skillPackageHash,
+  exists,
+  hash,
+  parseSkill,
+  readBundle,
+} from "./files.ts";
 import { originDetector } from "./skill-origins.ts";
 import { isIgnoredNativePath } from "./skill-sources.ts";
 import type { HarnessId, Inspection } from "../shared/types.ts";
@@ -189,7 +195,7 @@ export function scanMachine(store: Store): Inspection {
         let fingerprintError: Error | undefined;
         try {
           if (fs.statSync(canonical).isDirectory())
-            entry.hash = bundleHash(readBundle(canonical));
+            entry.hash = skillPackageHash(readBundle(canonical));
         } catch (e: any) {
           fingerprintError = e;
         }

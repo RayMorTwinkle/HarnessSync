@@ -516,11 +516,6 @@ test("CLI refresh --all and doctor expose source updates using a temp HOME", asy
     ...process.env,
     HOME: home,
     HARNESS_SYNC_HOME: store.root,
-    CODEX_HOME: path.join(home, ".codex"),
-    CLAUDE_CONFIG_DIR: path.join(home, ".claude"),
-    DSH_HOME: path.join(home, ".dsh"),
-    DSH_AGENTS_HOME: path.join(home, ".agents"),
-    XDG_CONFIG_HOME: path.join(home, ".config"),
   };
   const cli = (...args: string[]) =>
     JSON.parse(
