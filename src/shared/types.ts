@@ -109,6 +109,7 @@ export type Receipt = {
   projectId?: string;
 };
 export type DeployState = {
+  lastFullApplyAt?: string;
   receipts: Receipt[];
   instructionConsents?: { path: string; outsideHash: string }[];
   conflictChoices?: Record<
@@ -118,6 +119,7 @@ export type DeployState = {
       fingerprint: string;
       sourceId: string;
       sourceHash?: string;
+      adoptScope?: string;
     }
   >;
   instructionReplacements?: { path: string; hash: string }[];
@@ -183,6 +185,7 @@ export type Plan = {
   createdAt: string;
 };
 export type Snapshot = {
+  notices?: import("../core/notices.ts").Notice[];
   autoDeploy?: import("../core/auto-deploy.ts").AutoDeployResult | null;
   revision: string;
   manifest: Manifest;
@@ -223,6 +226,11 @@ export type DiscoveredSkill = {
   originReason: string;
   sourceUrl?: string;
   ignored: boolean;
+  library?: {
+    status: "same" | "differs" | "absent";
+    id?: string;
+    name?: string;
+  };
 };
 export type Inspection = {
   skills: DiscoveredSkill[];
@@ -262,6 +270,7 @@ export type Inspection = {
     instructionFiles: number;
     instructionVariants: number;
     nameConflicts: number;
+    library?: { same: number; differs: number; absent: number };
   };
 };
 

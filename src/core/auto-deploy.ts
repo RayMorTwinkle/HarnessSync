@@ -12,6 +12,7 @@ export type AutoDeployResult = {
   outcome: "applied" | "nothing" | "needs-review" | "failed" | "disabled";
   changes: { create: number; update: number; remove: number };
   deploymentId?: string;
+  pendingChanges?: boolean;
   blockers?: { path: string; status: string; reason: string; code?: string }[];
   error?: string;
 };
@@ -108,6 +109,9 @@ export async function autoDeploy(
       const plan = await store.lock(() => {
         engine.pruneInstructionConsents();
         const p = engine.plan();
+        result.pendingChanges =
+          p.errors.length > 0 ||
+          p.changes.some((c) => !["unchanged", "skipped"].includes(c.status));
         result.blockers = autoDeployBlockers(engine, p);
         return p;
       });

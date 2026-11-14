@@ -19,8 +19,10 @@ import {
   writeBundle,
   bundleHash,
   bundleDiskHash,
+  skillPackageHash,
   type Bundle,
 } from "./files.ts";
+import { nativeHash, readNative } from "./native-snapshot.ts";
 import { isIgnoredNativePath } from "./skill-sources.ts";
 import {
   adapters,
@@ -369,29 +371,68 @@ export class Store {
     scope: Scope,
     revision?: string,
     adopt = false,
+    options: {
+      useLibrary?: boolean;
+      replaceLibrary?: boolean;
+      name?: string;
+    } = {},
   ) {
+    if (
+      [
+        options.useLibrary,
+        options.replaceLibrary,
+        options.name !== undefined,
+      ].filter(Boolean).length > 1
+    )
+      throw new AppError(
+        "IMPORT_OPTIONS",
+        "请选择 --use-library、--replace-library 或 --name 其中一个",
+      );
+    if (options.name && adopt)
+      throw new AppError("IMPORT_OPTIONS", "改名导入不能同时接管原目录");
     const original = path.resolve(source);
     const absolute = fs.realpathSync(original);
     const bundle = readBundle(absolute);
     if (!bundle["SKILL.md"])
       throw new AppError("INVALID_SKILL", "目录中没有 SKILL.md");
-    const parsed = parseSkill(
+    let parsed = parseSkill(
       Buffer.from(bundle["SKILL.md"].content, "base64").toString("utf8"),
     );
+    if (options.name !== undefined) {
+      const text = skillMarkdown(
+        options.name,
+        parsed.description,
+        parsed.body,
+        parsed.metadata,
+      );
+      parsed = parseSkill(text);
+      bundle["SKILL.md"].content = Buffer.from(text).toString("base64");
+    }
     return this.mutate(
       `导入技能：${parsed.name}`,
       (m) => {
         this.validateScope(scope, m);
         const existing = m.skills.find((s) => s.name === parsed.name);
-        if (
-          existing &&
-          (!adopt ||
-            bundleHash(readBundle(this.skillPath(existing.id))) !==
-              bundleHash(bundle))
-        )
+        if (options.name !== undefined && existing)
           throw new AppError(
             "DUPLICATE_NAME",
-            `技能库已有 ${parsed.name}；接管已有目录要求完整内容与库中一致`,
+            "改名后的技能名称已存在，请选择新名称",
+            409,
+          );
+        if ((options.useLibrary || options.replaceLibrary) && !existing)
+          throw new AppError(
+            "NOT_FOUND",
+            "共享库中没有同名技能，请普通导入",
+            404,
+          );
+        const same =
+          existing &&
+          skillPackageHash(readBundle(this.skillPath(existing.id))) ===
+            skillPackageHash(bundle);
+        if (existing && !same && !options.useLibrary && !options.replaceLibrary)
+          throw new AppError(
+            "LIBRARY_DIFFERS",
+            "共享库已有同名技能，完整包内容不同。请先说明差异并选择：用共享库版本：skills import <目录> --use-library（plan 显示替换差异）；用这台的版本替换共享库：skills import <目录> --replace-library（会同步到其他设备，须明确同意）；两个都保留：skills import <目录> --name <新名称>；让 Agent 合并：先说明差异并取得明确同意，将合并结果写入单独目录，再 skills import <合并目录> --replace-library。",
             409,
           );
         const entry = existing || {
@@ -423,6 +464,10 @@ export class Store {
               })),
           ])
           .filter((t) => exists(t.p) && fs.realpathSync(t.p) === absolute);
+        adopt =
+          adopt ||
+          Boolean(options.useLibrary) ||
+          Boolean(existing && native.length && !options.replaceLibrary);
         if (adopt && !native.length)
           throw new AppError(
             "NOT_NATIVE_TARGET",
@@ -491,6 +536,23 @@ export class Store {
                 "NOT_PLACEMENT_TARGET",
                 "链接不在当前技能放置目标中；请普通导入并保留原链接，或调整 Harness 选择后再接管",
               );
+            if (existing) {
+              // Stage a fingerprint-bound choice; plan/apply owns native writes and receipts.
+              if (options.useLibrary) readNative(target.p);
+              state.conflictChoices = {
+                ...state.conflictChoices,
+                [target.p]: {
+                  use: options.useLibrary ? "library" : "native",
+                  fingerprint: nativeHash(target.p),
+                  sourceId: entry.id,
+                  sourceHash: options.replaceLibrary
+                    ? bundleHash(bundle)
+                    : bundleDiskHash(this.skillPath(entry.id)),
+                  adoptScope: JSON.stringify(entry.scope),
+                },
+              };
+              continue;
+            }
             state.receipts.push({
               adoptedLink,
               kind: "skill",
@@ -511,13 +573,30 @@ export class Store {
           }
           writeJson(path.join(this.root, "state.json"), state);
         }
-        if (!existing) {
+        if (existing && options.replaceLibrary) {
+          noSymlink(this.skillPath(entry.id));
           writeBundle(this.skillPath(entry.id), bundle);
-          m.skills.push(entry);
+          entry.description = parsed.description;
+          entry.source = "local-import";
           d.origins = { ...d.origins, [entry.id]: original };
+          if (d.originRealPaths) delete d.originRealPaths[entry.id];
           if (original !== absolute)
             d.originRealPaths = { ...d.originRealPaths, [entry.id]: absolute };
           writeJson(path.join(this.root, "device.json"), d);
+        }
+        if (!existing) {
+          writeBundle(this.skillPath(entry.id), bundle);
+          m.skills.push(entry);
+          // A renamed copy has a different SKILL.md and cannot be refreshed from the old name.
+          if (options.name === undefined) {
+            d.origins = { ...d.origins, [entry.id]: original };
+            if (original !== absolute)
+              d.originRealPaths = {
+                ...d.originRealPaths,
+                [entry.id]: absolute,
+              };
+            writeJson(path.join(this.root, "device.json"), d);
+          }
         }
         return entry;
       },

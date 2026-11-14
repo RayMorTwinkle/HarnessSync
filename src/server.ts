@@ -12,6 +12,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { Engine, publicPlan } from "./core/engine.ts";
+import { collectNotices } from "./core/notices.ts";
 import { Settings } from "./core/settings.ts";
 import { LoginService, type ServiceOptions } from "./core/service.ts";
 import {
@@ -149,6 +150,7 @@ export async function startServer(
             ...s,
             plan: publicPlan(s.plan),
             sync: new Sync(store).local(),
+            notices: collectNotices(store),
           };
         } else if (resource === "settings" && req.method === "GET")
           result = await settings.get();
@@ -294,6 +296,14 @@ export async function startServer(
             scopeSchema.parse(body.scope || {}),
             body.revision,
             z.boolean().default(false).parse(body.adopt),
+            z
+              .object({
+                useLibrary: z.boolean().optional(),
+                replaceLibrary: z.boolean().optional(),
+                name: z.string().optional(),
+              })
+              .strict()
+              .parse(body.options || {}),
           );
         else if (req.method === "GET" && resource === "plan")
           result = publicPlan(engine.plan());

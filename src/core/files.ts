@@ -139,6 +139,17 @@ export const bundleHash = (b: Bundle) =>
         .digest("hex"),
     ]),
   );
+// Cross-device comparison follows Git's permission model without changing packages.
+export function skillPackageHash(bundle: Bundle) {
+  return bundleHash(
+    Object.fromEntries(
+      Object.entries(bundle).map(([name, file]) => [
+        name,
+        { ...file, mode: file.mode & 0o111 ? 0o755 : 0o644 },
+      ]),
+    ),
+  );
+}
 export function bundleDiskHash(root: string) {
   noSymlink(root);
   if (!fs.statSync(root).isDirectory())

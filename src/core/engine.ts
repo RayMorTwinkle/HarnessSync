@@ -607,13 +607,35 @@ export class Engine {
         const sourcePath = this.store.skillPath(skill.id);
         const sourceHash = bundleDiskHash(sourcePath);
         parseSkill(fs.readFileSync(path.join(sourcePath, "SKILL.md"), "utf8"));
-        const placement = placeSkills(
-          select(skill.scope.harnesses),
-          skillReaders(this.store.home, projectDir, this.store.root, disabled),
-          listManifests(this.store.home, this.store.root)
-            .filter((m) => m.skills.sameNameCopies === "collapse")
-            .map((m) => m.id),
+        const readers = skillReaders(
+          this.store.home,
+          projectDir,
+          this.store.root,
+          disabled,
         );
+        // Explicit onboarding adoption keeps its native directory while this scope is unchanged.
+        const pinned = readers.filter((reader) => {
+          const target = path.join(reader.dir, skill.name);
+          const choice = state.conflictChoices?.[target];
+          return (
+            choice?.sourceId === skill.id &&
+            choice.adoptScope === JSON.stringify(skill.scope) &&
+            reader.readers.some((id) =>
+              select(skill.scope.harnesses).includes(id),
+            )
+          );
+        });
+        const covered = new Set(pinned.flatMap((reader) => reader.readers));
+        const placement = [
+          ...pinned,
+          ...placeSkills(
+            select(skill.scope.harnesses).filter((id) => !covered.has(id)),
+            readers,
+            listManifests(this.store.home, this.store.root)
+              .filter((m) => m.skills.sameNameCopies === "collapse")
+              .map((m) => m.id),
+          ),
+        ];
         const exposure = [
           ...new Set(placement.flatMap((d) => d.readers)),
         ].filter((h) => !select(skill.scope.harnesses).includes(h));
@@ -1058,6 +1080,9 @@ export class Engine {
         writeJson(path.join(this.store.root, "state.json"), {
           ...state,
           receipts: confirmGlobalPaths(state.receipts),
+          ...(!options.onlySkillId
+            ? { lastFullApplyAt: new Date().toISOString() }
+            : {}),
         });
         if (!options.onlySkillId) new Sync(this.store).acknowledgeDeployment();
         return { id: null, changes: 0 };
@@ -1219,6 +1244,9 @@ export class Engine {
         writeJson(path.join(this.store.root, "state.json"), {
           ...state,
           receipts: confirmGlobalPaths(receipts),
+          ...(!options.onlySkillId
+            ? { lastFullApplyAt: new Date().toISOString() }
+            : {}),
           instructionConsents,
           instructionReplacements: state.instructionReplacements?.filter(
             (r) => !changed.some((c) => c.path === r.path),
