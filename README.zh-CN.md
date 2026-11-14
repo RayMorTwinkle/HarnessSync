@@ -204,3 +204,5 @@ HarnessSync 收据管理的部署位置不是独立源目录；成功 apply 清�
 扫描的 `inventory.skills[].credentials` 和 `skills show <id>` 的 `credentials` 列出技能内疑似凭证文件的相对路径，仅按文件名识别，不展示值；`inventory.summary.credentialSkills` 按真实技能目录计数。用户选择全部配置（含密钥文件）同步到私有仓库，仓库必须保持私有。不想上传的文件可用 `hsync sync ignore <技能名>/<文件>`（由同步忽略功能提供）。不得向用户索要 token、密码或私钥，不要把凭证写进指令正文或 URL。
 
 `onboard repository` 的 `absent` 表示默认名称仓库不存在，仍须确认是否用了其他名字；网络或权限错误保留 `unknown`。
+
+本机上传忽略：`hsync sync ignore add anysearch/.env genbox`，取消用 `sync ignore remove anysearch/.env`，查看用 `sync ignore list --json`。支持整技能、文件路径、加引号的 `*`/`**`/`?` 通配符及 `rule:<ID或标题>`。规则只属于当前设备，不影响本机保存和部署；已上传版本保留远端，忽略后的本机变化不上传，拉取不覆盖本机忽略文件。取消后恢复正常合并。启用忽略后上传使用独立历史，既有远端历史不清除。[完整语义、API 与显式远端移除](docs/cli.md#本机上传忽略规则)。`sync check` 对含未忽略凭证的公开仓库报失败，可见性未知报警告，私有仓库显示文件数量。

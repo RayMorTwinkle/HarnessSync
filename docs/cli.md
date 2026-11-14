@@ -360,3 +360,15 @@ HarnessSync 收据管理的部署位置不是独立源目录；成功 apply 清�
 `origin=bundled` 表示产品附带，附 `originReason` 与 `bundledBy: {name,path}`；`inventory.summary.bundledSkills` 单独计数，也计入 `excludedSkills`。识别应用包、常见安装目录、node_modules 和链接指向的软件项目；向上查找项目不越过 HOME，最多 8 层，纯技能集合保留用户分类。默认建议不导入、不上传，说明会随产品更新；用户坚持时照常 `skills import`，并不禁止导入。
 
 扫描的 `inventory.skills[].credentials` 和 `skills show <id>` 的 `credentials` 列出技能内疑似凭证文件的相对路径，仅按文件名识别，不展示值；`inventory.summary.credentialSkills` 按真实技能目录计数。用户选择全部配置（含密钥文件）同步到私有仓库，仓库必须保持私有。不想上传的文件可用 `hsync sync ignore <技能名>/<文件>`（由同步忽略功能提供）。不得向用户索要 token、密码或私钥，不要把凭证写进指令正文或 URL。
+
+## 本机上传忽略规则
+
+默认同步完整技能包，包括凭证文件。`hsync sync ignore add anysearch/.env genbox` 添加规则，`hsync sync ignore remove anysearch/.env` 取消，`hsync sync ignore list --json` 查看。规则保存到配置根的 `sync-ignore.json`，不进入共享 Git；每台设备独立设置，不影响本机源库、部署、快照和回滚。整技能用名称，文件用 `技能名/相对路径`，支持 `*`（不跨目录）、`**`（跨目录）、`?`（单字符），目录规则匹配其所有子文件；含 glob 的参数请加引号。`rule:<指令ID或完整标题>` 排除整条指令。暂不支持否定、注释、字符组；不能单独排除 `SKILL.md`，需要时忽略整个技能。
+
+合并和身份比较排除忽略内容，拉取后保留本机忽略文件；若远端删除了包含本机忽略文件的技能，保留本机完整技能以维持有效包。新忽略的技能不会上传。已经上传过的内容保留远端最新版本，之后不发送本机变化，也不从远端覆盖本机忽略内容。其他设备仍可看到或修改远端既有版本。取消忽略后重新参与合并和上传；双方都有修改时仍需正常解决冲突。
+
+启用后上传提交只继承远端历史，不推送包含忽略内容的本机提交历史；即使取消所有规则仍保留此隔离。请勿删除本机 `sync-ignore.json` 来取消规则，使用 remove。已上传的旧提交不会被清除。显式从远端最新版本移除：先在持有本机副本的设备添加忽略规则，再用独立 Git 克隆删除 `skills/<ID>/<文件>` 并提交推送；整技能同时删除 `entries/skills/<ID>.json` 和 `skills/<ID>/`，指令删除 `entries/rules/<ID>.json`。随后运行 `sync now`。其他未忽略设备可能重新上传，请同步设置其规则。彻底清除已泄露凭证需另行清理远端历史并更换凭证；本功能不改写历史。
+
+`sync status` 返回 `ignoreCount` 和 `ignore: { rules, matched }`；snapshot 的 sync 字段包含 ignore。`GET /api/sync/ignore` 与 `POST /api/sync/ignore`（`{ add?: string[], remove?: string[] }`）返回 `{ rules: string[], matched: { skill: string, files: string[] | "all" }[] }`，沿用本机 API 令牌和来源校验。matched 仅列技能，指令规则在 rules 中显示。
+
+`sync check` 默认检查已连接仓库，也可用 `--url <URL>` 指定；按文件名检查未忽略凭证：公开仓库为 fail，可见性未知为 warn，已确认私有为 ok 并说明文件数。非 GitHub 或无法查询时不把可读等同于私有。`sync setup --create` 始终用 `--private` 创建仓库；check 是连接前诊断，不是每次推送的强制闸门。

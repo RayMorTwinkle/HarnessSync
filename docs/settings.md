@@ -103,3 +103,7 @@ macOS 使用 `$HOME/Library/LaunchAgents/io.github.raymortwinkle.harness-sync.pl
 `HSYNC_NO_NOTICES=1` 临时关闭当前 CLI 进程的 JSON 附加和 stderr 提醒。
 该设置不关闭 `/api/snapshot` 顶层的 `notices` 数组。
 提醒仅消费本地缓存；完整 stderr 块按指纹与 6 小时间隔去重，JSON 不去重。
+
+## 上传忽略规则
+
+`sync-ignore.json` 是设备本地设置，独立于 `config` 键，不进入源 Git。通过 `sync ignore add|remove|list` 或 `/api/sync/ignore` 管理；规则只改变上传及拉取合并，不改变本机部署。默认无忽略，技能内凭证也同步。详见 [CLI 上传忽略规则](cli.md#本机上传忽略规则)。
