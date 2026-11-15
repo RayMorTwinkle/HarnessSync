@@ -360,6 +360,19 @@ export class LoginService {
     }
     return this.status();
   }
+  async restart() {
+    const original = this.verify();
+    const status = await this.status();
+    this.unchanged(original);
+    if (!status.installed || !status.loaded) return status;
+    await this.run(
+      this.platform === "darwin"
+        ? ["kickstart", "-k", `${this.domain}/${serviceLabel}`]
+        : ["--user", "restart", "harness-sync.service"],
+    );
+    this.unchanged(original);
+    return this.status();
+  }
   async uninstall() {
     if (!this.supported)
       throw new AppError("SERVICE_UNSUPPORTED", "当前系统不支持登录启动");

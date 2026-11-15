@@ -5,7 +5,7 @@ import { Backups, backupFingerprint, copyBackupTree } from "./backup.ts";
 import { AppError, exists, hash, json, noSymlink, writeJson } from "./files.ts";
 import { LoginService } from "./service.ts";
 import { Settings } from "./settings.ts";
-import { processStartTime } from "./sync-scheduler.ts";
+import { stopOwnedScheduler } from "./scheduler-process.ts";
 export type UninstallOptions = {
   mode: "restore" | "keep-files";
   deleteLibrary?: boolean;
@@ -131,51 +131,7 @@ export class Uninstaller {
     if (hash(JSON.stringify(this.snapshot(options))) !== planId)
       throw new AppError("STALE_PLAN", "文件或配置已变化，请重新预览", 409);
     await this.runtime.stopScheduler?.();
-    const ownerFile = path.join(this.store.root, "scheduler-owner.json");
-    noSymlink(ownerFile);
-    if (exists(ownerFile)) {
-      const owner = json<{ pid: number; startTime: string }>(ownerFile);
-      const actual = await processStartTime(owner.pid);
-      if (actual && actual === owner.startTime) {
-        if (owner.pid === process.pid)
-          throw new AppError("SCHEDULER_RUNNING", "请先停止本进程的调度器");
-        (this.runtime.kill || ((pid: number) => process.kill(pid, "SIGTERM")))(
-          owner.pid,
-        );
-        // Do not delete a library while a scheduler may still be writing it.
-        for (
-          let i = 0;
-          i < 50 && (await processStartTime(owner.pid)) === actual;
-          i++
-        )
-          await new Promise((r) => setTimeout(r, 100));
-        if ((await processStartTime(owner.pid)) === actual)
-          throw new AppError(
-            "SCHEDULER_RUNNING",
-            "后台服务尚未退出，请稍后重试",
-          );
-      } else if (!actual) {
-        let alive = true;
-        try {
-          process.kill(owner.pid, 0);
-        } catch (e: any) {
-          if (e.code === "ESRCH") alive = false;
-        }
-        if (alive)
-          throw new AppError(
-            "SCHEDULER_IDENTITY",
-            "无法核实后台进程，请先停止后台服务",
-          );
-      }
-      await this.store.lock(() => {
-        noSymlink(ownerFile);
-        if (
-          exists(ownerFile) &&
-          JSON.stringify(json(ownerFile)) === JSON.stringify(owner)
-        )
-          fs.rmSync(ownerFile, { force: true });
-      });
-    }
+    await stopOwnedScheduler(this.store, { kill: this.runtime.kill });
 
     return this.store.lock(async () => {
       const plan = this.snapshot(options);

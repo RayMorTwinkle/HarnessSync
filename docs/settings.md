@@ -80,7 +80,7 @@ changes 是计划中的新增/更新/删除数量；needs-review 不表示这些
 
 ## 更新检查与进程生命周期
 
-调度器每 5 秒读取本机设置，按 updates.intervalHours 检查 Git 技能上游；检查只提示更新，不自动安装更新。完整手动检查也会推迟下次后台检查。失败从 30 秒开始指数退避，最多 6 小时，保存于 `update-check-state.json`；后台不重复打印网络错误。改变设置在下次轮询生效。检查和同步异步工作都由 close 等待，关闭时取消所有周期及 debounce 计时器。
+调度器每 5 秒读取本机设置，`updates.check` 同时控制 Git 技能上游和 HarnessSync 自身的后台检查，均按 `updates.intervalHours` 执行；检查只提示更新，不自动安装更新。HarnessSync 自身仅在安装器布局核实成功时检查，使用 origin 仓库的严格 `vX.Y.Z` 稳定标签；缓存为 Git 外的 `self-update.json`，失败记录 error、不打扰用户。CLI reminders 只读缓存，提示确认后运行 `hsync upgrade`；`hsync upgrade --check` 可随时手动检查。升级成功会重启已有本机服务，源码运行使用 git pull。完整手动检查也会推迟下次后台检查。失败从 30 秒开始指数退避，最多 6 小时，保存于 `update-check-state.json`；后台不重复打印网络错误。改变设置在下次轮询生效。检查和同步异步工作都由 close 等待，关闭时取消所有周期及 debounce 计时器。
 
 `serve`、`open` 新服务、`sync watch` 共享同一调度器。`scheduler-owner.json` 用 PID、进程启动时间与随机 token 做配置库级独占；通过 execFile 调用 ps 读取启动时间，Linux 在 ps 不可用时回退到 /proc 的启动时钟和启动 ID。系统限制无法查询时，使用仅监听 127.0.0.1 的随机端口与 token 探活，防止把复用 PID 的无关进程认作调度器。身份匹配时其他调度器返回 `SCHEDULER_RUNNING`；已退出、PID 被复用或缺少进程身份的旧记录可接管，关闭时只清理自己 token 的记录并关闭探活端口。`open` 优先复用默认端口上已验证身份的同库服务，后台实例也适用；指定另一个端口不会绕过同库独占。
 

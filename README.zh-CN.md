@@ -48,7 +48,7 @@ GUI、CLI 提示和内置技能目前使用简体中文，欢迎参与国际化�
 curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.6.0/install.sh | bash
 ```
 
-默认安装到 `~/.local/share/harness-sync`，启动器为 `~/.local/bin/hsync`。无需 sudo，不修改 shell 配置，只安装程序。按提示把启动器目录加入 PATH，或直接运行 `~/.local/bin/hsync`。升级时重新运行安装器；已有服务需重启才能使用新构建。配置库 `~/.harness-sync` 与程序安装目录分开保存。
+默认安装到 `~/.local/share/harness-sync`，启动器为 `~/.local/bin/hsync`。无需 sudo，不修改 shell 配置，只安装程序。按提示把启动器目录加入 PATH，或直接运行 `~/.local/bin/hsync`。运行 `hsync upgrade --check` 检查稳定版本，确认后用 `hsync upgrade` 升级并重启已有本机服务；后台检查只提醒。也可重新运行目标版本的安装命令（或给下载的安装脚本传入 `--ref <标签>`），再自行重启服务。配置库 `~/.harness-sync` 与程序安装目录分开保存。
 
 也可以先查看脚本：
 

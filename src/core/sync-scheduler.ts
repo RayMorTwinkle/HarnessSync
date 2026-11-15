@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { execFile } from "node:child_process";
 import net from "node:net";
+import { processStartTime } from "./scheduler-process.ts";
+export { processStartTime } from "./scheduler-process.ts";
 import { Settings } from "./settings.ts";
 import { Engine } from "./engine.ts";
 import { Store } from "./store.ts";
@@ -11,40 +12,6 @@ import { rotateServiceLog } from "./service.ts";
 import { UpdateChecker } from "./update-checks.ts";
 import { AppError, exists, json, noSymlink, writeJson } from "./files.ts";
 import { Sync } from "./sync.ts";
-
-const runtimeStart = `runtime:${process.pid}:${crypto.randomUUID()}`;
-
-export async function processStartTime(pid: number): Promise<string | null> {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return null;
-  try {
-    const start = await new Promise<string | null>((resolve) => {
-      execFile(
-        "ps",
-        ["-o", "lstart=", "-p", String(pid)],
-        {
-          encoding: "utf8",
-          timeout: 5000,
-          env: { PATH: process.env.PATH, LC_ALL: "C" },
-        },
-        (error, stdout) =>
-          resolve(!error && stdout.trim() ? `ps:${stdout.trim()}` : null),
-      );
-    }).then((start) => {
-      if (start || process.platform !== "linux") return start;
-      // Minimal Linux systems may lack ps. Include the boot identity as well.
-      const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
-      const ticks = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
-      const boot = fs
-        .readFileSync("/proc/sys/kernel/random/boot_id", "utf8")
-        .trim();
-      return ticks && boot ? `proc:${boot}:${ticks}` : null;
-    });
-    if (start) return start;
-  } catch {
-    /* Fall through to the identity available inside this process. */
-  }
-  return pid === process.pid ? runtimeStart : null;
-}
 
 async function schedulerProbe(token: string) {
   const sockets = new Set<net.Socket>();

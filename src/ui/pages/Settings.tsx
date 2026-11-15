@@ -12,6 +12,7 @@ import {
 import type { Harness } from "../../shared/types.ts";
 import { AppearanceOptions } from "../Appearance.tsx";
 import { BackupSettings } from "../BackupSettings.tsx";
+import { SelfUpdateRow } from "../SelfUpdate.tsx";
 import { useApp } from "../app-context.tsx";
 import { HarnessIcon } from "../common.tsx";
 import type { SettingsData, SettingsPatch } from "../lib.ts";
@@ -319,9 +320,10 @@ export function SettingsPage({
             </Row>
           </>
         )}
+        <SelfUpdateRow Row={Row} />
         <Row
-          title="检查技能更新"
-          text="定期查看从 Git 安装的技能是否有新版本。只提示，不会自动更新。"
+          title="检查更新"
+          text="定期查看 HarnessSync 和从 Git 安装的技能有没有新版本。只提示，不会自动安装。"
         >
           {s && (
             <>
@@ -348,7 +350,7 @@ export function SettingsPage({
               )}
               <Toggle
                 on={s.updates.check}
-                label="检查技能更新"
+                label="检查更新"
                 disabled={saving === "updates"}
                 onChange={(on) => change("updates", { updates: { check: on } })}
               />

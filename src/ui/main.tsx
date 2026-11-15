@@ -40,6 +40,7 @@ import { OnboardingPanel } from "./OnboardingPanel.tsx";
 import { PlanDrawer } from "./PlanDrawer.tsx";
 import { gitSource, type UpdateCheck } from "./SkillSources.tsx";
 import { SyncPanel } from "./SyncPanel.tsx";
+import { useSelfUpdate } from "./SelfUpdate.tsx";
 import { DeployStatus } from "./DeployStatus.tsx";
 import { SettingsPage } from "./pages/Settings.tsx";
 import { HistoryPage } from "./pages/History.tsx";
@@ -61,6 +62,7 @@ const navigation: { id: Page; title: string; icon: typeof Box }[] = [
 function App() {
   const [data, setData] = useState<Snapshot | null>(null);
   const [page, setPage] = useState<Page>("overview");
+  const [selfUpdate] = useSelfUpdate();
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
   const [busy, setBusy] = useState(false);
@@ -287,7 +289,17 @@ function App() {
             <div className="local-status">
               <span className="status-dot" />
               <span>本地服务运行中</span>
-              <span className="version">v{__APP_VERSION__}</span>
+              {selfUpdate?.available ? (
+                <button
+                  className="version update"
+                  title={`当前 v${__APP_VERSION__}，有新版本 ${selfUpdate.latest}，在设置中查看`}
+                  onClick={() => setPage("settings")}
+                >
+                  ↑ {selfUpdate.latest}
+                </button>
+              ) : (
+                <span className="version">v{__APP_VERSION__}</span>
+              )}
             </div>
             <button className="device-mini" onClick={() => setPage("settings")}>
               <span className="device-avatar">

@@ -48,7 +48,7 @@ Requires Node.js **22.12+**, npm, and Git. The installer supports macOS and Linu
 curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.6.0/install.sh | bash
 ```
 
-The installer uses `~/.local/share/harness-sync` and creates `~/.local/bin/hsync`. It needs no sudo, leaves shell configuration alone, and only installs the application. Add the launcher directory to PATH as directed, or use `~/.local/bin/hsync` directly. Re-run the installer for an upgrade; restart a running service to use the new build. Your library in `~/.harness-sync` is separate from the installation.
+The installer uses `~/.local/share/harness-sync` and creates `~/.local/bin/hsync`. It needs no sudo, leaves shell configuration alone, and only installs the application. Add the launcher directory to PATH as directed, or use `~/.local/bin/hsync` directly. Run `hsync upgrade --check` to check for a stable release, then `hsync upgrade` to install it and restart an existing local service. Background checks only show reminders. Alternatively, re-run the installation command for the desired release (or pass `--ref <tag>` to the downloaded installer), then restart the service yourself. Your library in `~/.harness-sync` is separate from the installation.
 
 To inspect the installer first:
 

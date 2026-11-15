@@ -2,6 +2,22 @@
 
 所有命令以 `hsync` 开头。`--root <目录>` 指定配置库，默认使用 `HARNESS_SYNC_HOME` 或 `~/.harness-sync`；`--json` 输出紧凑 JSON，便于 AI 与脚本使用。`--help` 查看对应层级帮助，`--version` 查看版本。失败返回非零退出码和 JSON 错误。
 
+## HarnessSync 自身更新
+
+```sh
+hsync upgrade --check --json
+hsync upgrade
+hsync upgrade --ref vX.Y.Z
+```
+
+`upgrade --check` 立即查询安装仓库的稳定标签，只检查、不安装；不受后台 `updates.check` 开关限制。`upgrade` 安装高于当前版本的最新 `vX.Y.Z` 标签，已是最新时退出 0；`--ref` 显式选择稳定标签，也可回退版本。预发布版、没有 v 前缀和非三段版本标签不参与选择。源码运行返回“当前从源码运行，请用 git pull 更新”。`--json` 可用于所有形式；安装器进度仍继承终端输出。
+
+升级复用当前发布目录的 `install.sh`，沿用核实的安装目录、origin 仓库和启动器目录。找不到标记匹配的启动器时拒绝安装，需重新运行安装命令。安装失败保留安装器非零退出码，不执行服务重启。成功后重启已安装且已加载的登录服务；否则只对 PID 和启动时间核实成功的后台服务先停止、等待退出，再通过稳定启动器启动，并传入当前非默认 `--root`。没有运行中的服务就不启动。升级会短暂中断本机服务。
+
+成功后保留 `current` 指向的版本及另一个按时间戳排序最新的版本；只清理 `releases/` 内名称符合安装器规则的真实目录，其他文件、目录和符号链接保留。配置库与管理技能的稳定 `current` 路径不变。源码更新仍使用 `git pull` 后重新构建。
+
+API 沿用本地会话 token 和 Origin 校验及 `{ok,data}` 响应封装：`GET /api/self-update` 返回 `{installed,current,latest?,available,checkedAt?,error?}`；`POST /api/self-update/check`（JSON `{}`）立即检查后返回同一结构。GET 只读更新缓存和本机安装信息，不联网；检查失败在 `error` 中返回。不提供界面升级接口，界面只显示 `hsync upgrade` 命令。
+
 ## 状态、部署和版本
 
 | 命令                    | 功能                                                           |
@@ -42,12 +58,12 @@
 | 命令                                                 | 功能                                               |
 | ---------------------------------------------------- | -------------------------------------------------- |
 | `onboard prepare`                                    | 扫描、保存快照并仅部署管理技能，生成中文交接提示词 |
-| `onboard scan`                                       | 保存扫描快照与提示词，暂停初始化期间自动部署                             |
+| `onboard scan`                                       | 保存扫描快照与提示词，暂停初始化期间自动部署       |
 | `onboard show [id]`                                  | 读取指定清单；省略 ID 时读取最新清单               |
 | `onboard bootstrap <id>`                             | 只向已检测到的 Harness 部署管理技能                |
 | `onboard stage-instructions <id> --keys <key1,key2>` | 登记已扫描主全局指令的完整替换，原件暂不变         |
 | `onboard unstage-instructions`                       | 取消尚未发布的完整替换登记                         |
-| `onboard cancel <id>`                                | 放弃当前初始化会话，恢复自动部署原有设置             |
+| `onboard cancel <id>`                                | 放弃当前初始化会话，恢复自动部署原有设置           |
 
 `onboard scan`（含 prepare 和界面扫描）启动设备本地初始化会话，7 天内暂停自动部署，不修改 `deploy.auto`。`status` / `doctor` 的 `onboarding` 返回会话 ID、开始和失效时间，`autoDeploy` 显示 `needs-review` 及“初始化进行中：确认部署预览后再写入”。成功的完整手动 `apply --plan <id>`（包括无变更计划）结束会话；失败或仅部署管理技能不会结束。放弃用 `onboard cancel <会话ID>`，源配置与替换登记保留；取消或到期后恢复原设置，后续正常触发自动部署。重复扫描以最新会话为准，不接受旧 ID 取消。无需 Agent 手动关闭再打开自动部署。
 
@@ -140,7 +156,7 @@ DeepSeek、OpenCode、Codex 共用项目 `AGENTS.md`，其项目指令必须同�
 
 | 命令                                                    | 功能                                                                                          |
 | ------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `sync check [--url <git-url>] [--create [name]]` | 只读检查 Git、gh 登录、repo scope、仓库读取与推送权限、SSH；不创建仓库 |
+| `sync check [--url <git-url>] [--create [name]]`        | 只读检查 Git、gh 登录、repo scope、仓库读取与推送权限、SSH；不创建仓库                        |
 | `sync setup --url <git-url> [--branch <分支>]`          | 连接远端；新机器恢复、空远端推送、双方已有数据则合并；默认使用远端 HEAD 分支，空远端使用 main |
 | `sync setup --create [name]`                            | 通过已登录的 gh 创建私有 GitHub 仓库，默认 harness-sync-config                                |
 | `sync status`                                           | 离线显示最近 fetch 的 ahead/behind、自动设置、调度记录、待部署标记及冲突                      |
@@ -372,14 +388,14 @@ HOME 外的项目用 `files/_projects/` 保存，实际路径见 manifest。备�
 
 沿用本机会话 token、Host/Origin 检查及 `{ok:true,data:...}` 响应封装。
 
-| 方法与路径 | 请求 | data |
-| --- | --- | --- |
-| GET /api/backups | 无 | `[{dir,createdAt}]`，最早基线在前 |
-| POST /api/backups | `{confirmLarge?:boolean}` | `{dir,createdAt}` |
-| POST /api/backups/restore-plan | `{dir?:string}` | `{id,dir,revision,settings,changes}` |
-| POST /api/backups/restore | `{planId,overwrite?:string[]}` | `{backupDir,beforeDir,restored:string[],conflicts:string[],autoDeploy:false,message}` |
-| POST /api/uninstall-plan | `{mode:"restore"\|"keep-files",deleteLibrary?:boolean}` | `{id,mode,deleteLibrary?,backupDir,restore?,selfSkills,installation,serviceFile,serviceHash,revision,settings,nativeFingerprint}` |
-| POST /api/uninstall | `{planId}` | `{mode,backupDir,beforeDir,libraryDir,restored?,libraryDeleted,programRemoved,launcherRemoved,autoDeploy:false,serviceStopDeferred,message}` |
+| 方法与路径                     | 请求                                                    | data                                                                                                                                         |
+| ------------------------------ | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET /api/backups               | 无                                                      | `[{dir,createdAt}]`，最早基线在前                                                                                                            |
+| POST /api/backups              | `{confirmLarge?:boolean}`                               | `{dir,createdAt}`                                                                                                                            |
+| POST /api/backups/restore-plan | `{dir?:string}`                                         | `{id,dir,revision,settings,changes}`                                                                                                         |
+| POST /api/backups/restore      | `{planId,overwrite?:string[]}`                          | `{backupDir,beforeDir,restored:string[],conflicts:string[],autoDeploy:false,message}`                                                        |
+| POST /api/uninstall-plan       | `{mode:"restore"\|"keep-files",deleteLibrary?:boolean}` | `{id,mode,deleteLibrary?,backupDir,restore?,selfSkills,installation,serviceFile,serviceHash,revision,settings,nativeFingerprint}`            |
+| POST /api/uninstall            | `{planId}`                                              | `{mode,backupDir,beforeDir,libraryDir,restored?,libraryDeleted,programRemoved,launcherRemoved,autoDeploy:false,serviceStopDeferred,message}` |
 
 `changes[]` 包含 `path,relative,type,fingerprint,absent,current,status,message`；status 为 `unchanged / restore / remove / conflict`。`remove` 表示撤下备份中没有且仍由 HarnessSync 完整拥有的子项。
 `selfSkills[]` 包含 `path,current,owned`；`installation` 包含 `dir,launcher,removeProgram,removeLauncher,marker,launcherHash,message`。

@@ -47,7 +47,7 @@ GUI 不直接操作文件；CLI 和 HTTP 调用同一个 core。
 
 自动部署默认开启，仍经过完整 plan → apply，只是干净计划无需点击。干净计划仅含 unchanged、指纹有效的显式 skipped、新建不存在目标，有收据且无外部修改的 update/remove，以及区块外指纹有效的逐路径授权指令插入。任何错误或 notices 中 blocking=true 的通知、未授权且未托管的已有文件更新、adopt/replace/conflict、链接接管、初始化完整指令替换登记、未完成部署、未恢复的源操作或同步冲突均转 needs-review，不自动确认。warnings 保留兼容显示，按必填 code/blocking 的 notices 派生；插件清单错误、未知工具、停用/缺失工具保留路径、共享可见性和外部保留为信息提示，不阻断；暂存残留、本机源目录变化或无法读取仍阻断。通知策略参与计划 ID。持有 apply 锁后再次核对开关和冲突；过期计划不强制执行。自动与手动部署共用收据、快照、回滚和跨进程 Store 锁。API 修改合并排队、CLI 修改末尾执行、同步拉取和调度器启动补做；回滚不立即重部署。详见 docs/settings.md。
 
-设置、自动部署结果、调度器独占和检查缓存都留在 Git 外。登录开关读取真实服务状态；服务只固化配置根、PATH 及当前已设置的原生路径变量（包含注册清单 root.env 和路径模板引用），状态返回固化环境和当前差异。服务文件在异步系统调用后、每次修改前重新验证内容、文件身份及符号链接祖先；失败恢复只修改仍属于本次操作的文件。同库只能有一个 serve/open/watch 调度器；PID 连同启动时间验证，ps 不可用时用 Linux /proc 或随机 token 的回环探活验证身份，不凭 PID 阻止接管；关闭取消全部计时器、探活监听并等待在途工作。Git 技能后台只检查更新，不自动更新源技能。
+设置、自动部署结果、调度器独占和检查缓存都留在 Git 外。登录开关读取真实服务状态；服务只固化配置根、PATH 及当前已设置的原生路径变量（包含注册清单 root.env 和路径模板引用），状态返回固化环境和当前差异。服务文件在异步系统调用后、每次修改前重新验证内容、文件身份及符号链接祖先；失败恢复只修改仍属于本次操作的文件。同库只能有一个 serve/open/watch 调度器；PID 连同启动时间验证，ps 不可用时用 Linux /proc 或随机 token 的回环探活验证身份，不凭 PID 阻止接管；关闭取消全部计时器、探活监听并等待在途工作。Git 技能和安装器安装的 HarnessSync 自身共用 updates.check 与检查间隔，后台只检查、不自动升级。自身版本缓存 self-update.json 留在 Git 外；严格 vX.Y.Z 稳定标签按数字比较。self-update.ts 核验 marker、current→releases 链接和启动器归属；hsync upgrade 复用现有安装器，成功后通过 LoginService 重启已加载的登录服务，或用 scheduler-process.ts 共用的 PID/启动时间核验停止并重启后台调度器。失败不执行重启；成功清理只保留当前及另一个按时间戳最新的安装器版本目录。
 
 初始化已有配置库不应写文件，否则只读命令会被 Harness 的工作区沙箱拒绝。实际修改依然遵守原生权限。
 
@@ -82,7 +82,7 @@ reader map 来自清单并集，放置使用保持旧词典序评分及子集平
 API 与格式详见 [plugins.md](docs/plugins.md)。UI 应使用返回的 Harness.name 和元数据，
 不再将动态 ID 用作固定四项名称表的索引。`src/ui` 由独立工作线维护。
 
-CLI 顺带提醒由 `notices.ts` 仅消费本地同步、自动部署和技能更新缓存；不联网、不执行 Git、不扫描原生技能包。
+CLI 顺带提醒由 `notices.ts` 仅消费本地同步、自动部署、技能更新和程序自身更新缓存；不联网、不执行 Git、不扫描原生技能包。
 `notices.cli` 默认开启，stderr 指纹去重记录留在 Git 外；`/api/snapshot.notices` 供 UI 展示。
 完整 apply 在 state 记录 `lastFullApplyAt`，结合自动部署缓存的 `pendingChanges` 消除已处理的暂停提醒。
 初始化加入已有库时先连接后比较；完整包比较规范化普通权限、保留执行位，same 复用 ID，differs 需显式选择。

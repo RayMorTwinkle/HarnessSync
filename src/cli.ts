@@ -55,11 +55,13 @@ import {
 import { AppError, parseSkill } from "./core/files.ts";
 import { installSelfSkill } from "./core/self-skill.ts";
 import { openWebUi, parsePort } from "./web-ui.ts";
+import { upgrade } from "./core/self-update.ts";
+import { version } from "./core/version.ts";
 
 const cli = new Command()
   .name("hsync")
   .description("HarnessSync · 统一管理四种 AI Harness 的指令与技能")
-  .version("0.6.0")
+  .version(version)
   .option("--root <directory>", "配置库目录")
   .option("--json", "机器可读 JSON 输出");
 let store: Store | undefined;
@@ -344,14 +346,12 @@ backup
 backup
   .command("list")
   .action(run(async () => new Backups(await getStore()).list()));
-backup
-  .command("verify <dir>")
-  .action(
-    run(async (dir) => ({
-      valid: true,
-      manifest: new Backups(await getStore()).verify(dir),
-    })),
-  );
+backup.command("verify <dir>").action(
+  run(async (dir) => ({
+    valid: true,
+    manifest: new Backups(await getStore()).verify(dir),
+  })),
+);
 backup
   .command("restore [dir]")
   .option("--plan <id>", "执行已预览的计划")
@@ -840,6 +840,18 @@ config
   .command("set <key> <value>")
   .action(
     run(async (key, value) => new Settings(await getStore()).set(key, value)),
+  );
+cli
+  .command("upgrade")
+  .description("检查或升级 HarnessSync 自身，成功后重启已有服务")
+  .option("--check", "立即检查新版本，不安装")
+  .option("--ref <tag>", "安装指定稳定版本标签")
+  .action(
+    run(async (options) => {
+      const result = await upgrade(await getStore(), options);
+      process.exitCode = result.code;
+      return result;
+    }),
   );
 const service = cli.command("service").description("管理登录启动服务");
 for (const action of ["install", "uninstall", "status"] as const)

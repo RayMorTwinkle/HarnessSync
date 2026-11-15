@@ -394,6 +394,7 @@ nav button.active svg {
   gap: 7px;
   font-size: 11.5px;
   color: var(--text-3);
+  white-space: nowrap;
 }
 .status-dot {
   display: inline-block;
@@ -409,6 +410,18 @@ nav button.active svg {
   border: 1px solid var(--border);
   padding: 2px 4px;
   border-radius: 4px;
+}
+button.version.update {
+  font: inherit;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: var(--accent-text);
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+  cursor: pointer;
+}
+button.version.update:hover {
+  border-color: var(--accent);
 }
 .device-mini {
   display: flex;
@@ -4736,4 +4749,21 @@ button.compo-seg:focus-visible {
 .local-only-add input {
   flex: 1;
   min-width: 0;
+}
+
+.setting-copy strong .tool-badge {
+  margin-left: 8px;
+  vertical-align: 1px;
+}
+.tool-badge.self-update-new {
+  color: var(--accent-text);
+  background: var(--accent-bg);
+}
+.self-update-command {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text-2) !important;
 }

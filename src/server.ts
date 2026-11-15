@@ -24,6 +24,7 @@ import { Engine, publicPlan } from "./core/engine.ts";
 import { collectNotices } from "./core/notices.ts";
 import { Settings } from "./core/settings.ts";
 import { LoginService, type ServiceOptions } from "./core/service.ts";
+import { selfUpdateStatus } from "./core/self-update.ts";
 import {
   cachedSkillUpdates,
   type UpdateChecker,
@@ -53,6 +54,7 @@ export async function startServer(
     autoDeployDelayMs?: number;
     updateChecker?: UpdateChecker;
     syncCheck?: SyncCheckOptions;
+    selfUpdate?: Parameters<typeof selfUpdateStatus>[2];
   } = {},
 ) {
   const engine = new Engine(store);
@@ -155,6 +157,19 @@ export async function startServer(
           parts.length === 4
         )
           result = skillComposition(store, decodeURIComponent(parts[3]));
+        else if (
+          resource === "self-update" &&
+          req.method === "GET" &&
+          parts.length === 2
+        )
+          result = await selfUpdateStatus(store, false, options.selfUpdate);
+        else if (
+          resource === "self-update" &&
+          req.method === "POST" &&
+          id === "check" &&
+          parts.length === 3
+        )
+          result = await selfUpdateStatus(store, true, options.selfUpdate);
         else if (resource === "backups" && req.method === "GET" && !id)
           result = new Backups(store).list();
         else if (resource === "backups" && req.method === "POST" && !id)

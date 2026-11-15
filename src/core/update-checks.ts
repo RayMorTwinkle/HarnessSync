@@ -3,6 +3,13 @@ import { Store } from "./store.ts";
 import { Settings } from "./settings.ts";
 import { checkGitSkillUpdates } from "./git-skills.ts";
 import { exists, json, noSymlink, writeJson } from "./files.ts";
+import {
+  installInfo,
+  checkSelfUpdate,
+  cachedSelfUpdate,
+  type InstallInfo,
+} from "./self-update.ts";
+import type { CommandRunner } from "./service.ts";
 
 type Checks = Awaited<ReturnType<typeof checkGitSkillUpdates>>;
 type Runtime = {
@@ -31,6 +38,10 @@ export class UpdateChecker {
   constructor(
     readonly store: Store,
     readonly check = checkGitSkillUpdates,
+    readonly self: {
+      info?: () => Promise<InstallInfo | undefined>;
+      runner?: CommandRunner;
+    } = {},
   ) {}
   private state(): Runtime {
     const file = path.join(this.store.root, "update-check-state.json");
@@ -68,6 +79,23 @@ export class UpdateChecker {
         if (e.checks) return e.checks as Checks;
         throw e;
       } finally {
+        if (!ids.length) {
+          try {
+            const info = await (this.self.info ?? (() => installInfo()))();
+            if (info) {
+              const cache = cachedSelfUpdate(this.store, info.version);
+              const hours = new Settings(this.store).preferences().updates
+                .intervalHours;
+              if (
+                !cache.checkedAt ||
+                at - Date.parse(cache.checkedAt) >= hours * 3600_000
+              )
+                await checkSelfUpdate(this.store, info, this.self.runner);
+            }
+          } catch {
+            /* Self checks never interrupt skill checks. */
+          }
+        }
         await this.store.lock(() => {
           const file = path.join(this.store.root, "update-check-state.json");
           noSymlink(file);

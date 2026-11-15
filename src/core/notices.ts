@@ -3,6 +3,8 @@ import type { Store } from "./store.ts";
 import type { SyncConfig, SyncRuntime } from "../shared/types.ts";
 import { lastAutoDeploy } from "./auto-deploy.ts";
 import { cachedSkillUpdates } from "./update-checks.ts";
+import { cachedSelfUpdate } from "./self-update.ts";
+import { version } from "./version.ts";
 import { Settings } from "./settings.ts";
 import { exists, hash, json, noSymlink, writeJson } from "./files.ts";
 
@@ -47,6 +49,14 @@ function tilde(store: Store, file: string) {
 // Cache-only: no Engine.plan(), native skill traversal, Git or network calls.
 export function collectNotices(store: Store): Notice[] {
   const result: Notice[] = [];
+  const self = cachedSelfUpdate(store, version);
+  if (self.available)
+    result.push({
+      code: "SELF_UPDATE",
+      severity: "action",
+      message: `HarnessSync 有新版本 ${self.latest}（当前 ${version}），确认后运行 hsync upgrade 升级`,
+      command: "hsync upgrade",
+    });
   // A damaged optional cache must not hide other reminders or fail a CLI command.
   const read = <T>(fn: () => T): T | undefined => {
     try {
