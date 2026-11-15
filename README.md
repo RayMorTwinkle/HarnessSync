@@ -45,7 +45,7 @@ Project skills use `.dsh/skills`, `.opencode/skills`, `.agents/skills`, and `.cl
 Requires Node.js **22.12+**, npm, and Git. The installer supports macOS and Linux. Use **WSL on Windows**; native Windows is not supported. Recorded real-session verification covers macOS only; see the [acceptance record](docs/local-acceptance.md) and [adapter evidence](docs/adapters.md).
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.5.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.6.0/install.sh | bash
 ```
 
 The installer uses `~/.local/share/harness-sync` and creates `~/.local/bin/hsync`. It needs no sudo, leaves shell configuration alone, and only installs the application. Add the launcher directory to PATH as directed, or use `~/.local/bin/hsync` directly. Re-run the installer for an upgrade; restart a running service to use the new build. Your library in `~/.harness-sync` is separate from the installation.
@@ -53,7 +53,7 @@ The installer uses `~/.local/share/harness-sync` and creates `~/.local/bin/hsync
 To inspect the installer first:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.5.0/install.sh -o install-harness-sync.sh
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.6.0/install.sh -o install-harness-sync.sh
 bash install-harness-sync.sh --help
 ```
 
