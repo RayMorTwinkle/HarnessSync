@@ -308,6 +308,9 @@ test("upgrade passes exact installer args, restarts an installed loaded service 
   assert.equal(result.removed, 1);
   assert.ok(fs.existsSync(f.info.releaseDir));
   assert.equal(fs.existsSync(obsolete), false);
+  // The pre-upgrade process must stop reminding about the release it installed.
+  assert.equal(cachedSelfUpdate(f.store, version).available, false);
+  assert.ok(!collectNotices(f.store).some((n) => n.code === "SELF_UPDATE"));
   events.length = 0;
   const failed = await upgrade(f.store, {
     info: f.getInfo,

@@ -206,6 +206,10 @@ export async function checkSelfUpdate(
   } catch (e: any) {
     cache.error = e.message || "检查更新失败";
   }
+  await writeCache(store, cache);
+  return { ...cache, available: !!cache.latest };
+}
+async function writeCache(store: Store, cache: SelfUpdateCache) {
   try {
     await store.lock(() => {
       const file = path.join(store.root, "self-update.json");
@@ -215,7 +219,6 @@ export async function checkSelfUpdate(
   } catch {
     /* Optional cache may be read-only. */
   }
-  return { ...cache, available: !!cache.latest };
 }
 export async function selfUpdateStatus(
   store: Store,
@@ -338,6 +341,11 @@ export async function upgrade(
     info.repo,
   ]);
   if (code) return { code, message: `安装失败，退出码 ${code}；未重启服务` };
+  // The installed release is now current; the old cache would still remind.
+  await writeCache(store, {
+    checkedAt: new Date().toISOString(),
+    current: target.slice(1),
+  });
   let restarted = "none";
   try {
     const service = options.service ?? new LoginService(store);
