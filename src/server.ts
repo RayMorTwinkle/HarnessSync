@@ -75,7 +75,12 @@ export async function startServer(
     );
   const vite = options.dev
     ? await (
-        await import("vite")
+        await import("vite").catch(() => {
+          throw new AppError(
+            "DEV_UNAVAILABLE",
+            "前端热更新只能在源码仓库中使用（安装版不含构建工具）",
+          );
+        })
       ).createServer({
         root: projectRoot,
         server: { middlewareMode: true },

@@ -92,6 +92,10 @@ printf '正在安装依赖并构建 CLI 与 GUI…\n'
   node dist/cli.js --help >/dev/null
   [ -f dist/ui/index.html ] || die '构建未生成 GUI。'
   [ -f harnesses/codex.json ] && [ -f schema/harness.schema.json ] || die '缺少 Harness 清单或 JSON Schema。'
+  # 构建工具和已打包进界面的依赖运行时用不到，删掉后每个版本约 15 MB。
+  npm prune --omit=dev --no-audit --no-fund
+  node dist/cli.js --version >/dev/null
+  node dist/cli.js --help >/dev/null
 )
 commit="$(git -C "$stage" rev-parse HEAD)"
 release="${commit}-$(date +%Y%m%d%H%M%S)-$$"
