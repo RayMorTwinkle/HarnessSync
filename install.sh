@@ -3,7 +3,7 @@
 set -euo pipefail
 
 repo="${HSYNC_REPO:-https://github.com/RayMorTwinkle/HarnessSync.git}"
-ref="${HSYNC_REF:-v0.6.1}"
+ref="${HSYNC_REF:-}"
 install_dir="${HSYNC_INSTALL_DIR:-${HOME}/.local/share/harness-sync}"
 bin_dir="${HSYNC_BIN_DIR:-${HOME}/.local/bin}"
 stage=""
@@ -16,7 +16,7 @@ usage() {
 HarnessSync 安装器
 
 用法：bash install.sh [选项]
-  --ref <tag或分支>       安装版本，默认 v0.6.1
+  --ref <tag或分支>       安装版本，默认最新正式版本（vX.Y.Z 标签）
   --install-dir <目录>    程序目录，默认 ~/.local/share/harness-sync
   --bin-dir <目录>        hsync 启动器目录，默认 ~/.local/bin
   --repo <Git地址>        源仓库，也可使用本地 Git 仓库进行验证
@@ -43,7 +43,23 @@ done
 case "$(uname -s)" in Darwin|Linux) ;; *) die '仅支持 macOS、Linux；Windows 请使用 WSL。' ;; esac
 for tool in node npm git; do command -v "$tool" >/dev/null 2>&1 || die "缺少 $tool，请先安装。"; done
 node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit(a>22 || (a===22 && b>=12) ? 0 : 1)' || die '需要 Node.js 22.12 或更高版本。'
-[ -n "$repo" ] && [ -n "$ref" ] || die '仓库与版本不能为空。'
+[ -n "$repo" ] || die '仓库不能为空。'
+if [ -z "$ref" ]; then
+  case "$repo" in -*) die '仓库不能以 - 开头。' ;; esac
+  printf '正在查找最新正式版本…\n'
+  tags="$(git ls-remote --tags --refs "$repo")" || die "无法读取版本标签：$repo"
+  ref="$(printf '%s\n' "$tags" | node -e '
+let best;
+for (const line of require("node:fs").readFileSync(0, "utf8").split("\n")) {
+  const m = line.match(/\trefs\/tags\/v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/);
+  if (!m) continue;
+  const v = m.slice(1).map(BigInt);
+  if (!best || v[0] > best[0] || (v[0] === best[0] && (v[1] > best[1] || (v[1] === best[1] && v[2] > best[2])))) best = v;
+}
+if (best) console.log("v" + best.join("."));
+')"
+  [ -n "$ref" ] || die '没有找到 vX.Y.Z 正式版本标签；可用 --ref 指定分支或标签。'
+fi
 case "$ref" in -*) die '版本不能以 - 开头。' ;; esac
 install_dir="$(node -e 'console.log(require("node:path").resolve(process.argv[1]))' "$install_dir")"
 bin_dir="$(node -e 'console.log(require("node:path").resolve(process.argv[1]))' "$bin_dir")"

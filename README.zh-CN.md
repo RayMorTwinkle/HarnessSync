@@ -45,15 +45,15 @@ GUI、CLI 提示和内置技能目前使用简体中文，欢迎参与国际化�
 需要 Node.js **22.12+**、npm、Git。安装器支持 macOS 和 Linux；**Windows 请使用 WSL**，不支持原生 Windows。目前有记录的真实会话验收仅覆盖 macOS，见[本机验收](docs/local-acceptance.md)和[适配证据](docs/adapters.md)。
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.6.1/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/main/install.sh | bash
 ```
 
-默认安装到 `~/.local/share/harness-sync`，启动器为 `~/.local/bin/hsync`。无需 sudo，不修改 shell 配置，只安装程序。按提示把启动器目录加入 PATH，或直接运行 `~/.local/bin/hsync`。运行 `hsync upgrade --check` 检查稳定版本，确认后用 `hsync upgrade` 升级并重启已有本机服务；后台检查只提醒。也可重新运行目标版本的安装命令（或给下载的安装脚本传入 `--ref <标签>`），再自行重启服务。配置库 `~/.harness-sync` 与程序安装目录分开保存。
+默认安装到 `~/.local/share/harness-sync`，启动器为 `~/.local/bin/hsync`。无需 sudo，不修改 shell 配置，只安装程序。按提示把启动器目录加入 PATH，或直接运行 `~/.local/bin/hsync`。运行 `hsync upgrade --check` 检查稳定版本，确认后用 `hsync upgrade` 升级并重启已有本机服务；后台检查只提醒。也可重新运行上面的安装命令（默认安装最新正式版本，传入 `--ref <标签>` 可指定版本），再自行重启服务。配置库 `~/.harness-sync` 与程序安装目录分开保存。
 
 也可以先查看脚本：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.6.1/install.sh -o install-harness-sync.sh
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/main/install.sh -o install-harness-sync.sh
 bash install-harness-sync.sh --help
 ```
 

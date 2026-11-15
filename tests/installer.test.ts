@@ -56,15 +56,18 @@ function fixture(t: test.TestContext) {
     );
   };
   commit("one");
-  const run = (env: Record<string, string> = {}, args: string[] = []) =>
+  const run = (
+    env: Record<string, string> = {},
+    args: string[] = [],
+    ref: string | null = "main",
+  ) =>
     spawnSync(
       "bash",
       [
         installer,
         "--repo",
         repo,
-        "--ref",
-        "main",
+        ...(ref === null ? [] : ["--ref", ref]),
         "--install-dir",
         install,
         "--bin-dir",
@@ -76,7 +79,7 @@ function fixture(t: test.TestContext) {
         encoding: "utf8",
       },
     );
-  return { root, repo, install, bin, run, commit };
+  return { root, repo, install, bin, run, commit, git };
 }
 
 test("installer preserves quoted paths and arguments, upgrades and retains previous releases", (t) => {
@@ -108,6 +111,30 @@ test("installer preserves quoted paths and arguments, upgrades and retains previ
   );
   assert.ok(!fs.existsSync(path.join(x.install, ".install-lock")));
   assert.ok(!fs.existsSync(path.join(x.install, "device.json")));
+});
+
+test("without --ref the installer picks the newest stable vX.Y.Z tag", (t) => {
+  const x = fixture(t);
+  assert.notEqual(x.run({}, [], null).status, 0, "no stable tag must fail");
+  for (const [version, tag] of [
+    ["nine", "v0.9.0"],
+    ["ten", "v0.10.0"],
+    ["beta", "v1.0.0-beta"],
+    ["bare", "2.0.0"],
+  ]) {
+    x.commit(version);
+    x.git("tag", tag);
+  }
+  x.commit("unreleased main");
+  const result = x.run({ HSYNC_REF: "" }, [], null);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.match(result.stdout, /v0\.10\.0/);
+  assert.equal(
+    JSON.parse(
+      execFileSync(path.join(x.bin, "hsync"), [], { encoding: "utf8" }),
+    ).version,
+    "ten",
+  );
 });
 
 test("failed build leaves the working launcher and current release intact and cleans staging", (t) => {

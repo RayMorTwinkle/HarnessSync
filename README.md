@@ -45,15 +45,15 @@ Project skills use `.dsh/skills`, `.opencode/skills`, `.agents/skills`, and `.cl
 Requires Node.js **22.12+**, npm, and Git. The installer supports macOS and Linux. Use **WSL on Windows**; native Windows is not supported. Recorded real-session verification covers macOS only; see the [acceptance record](docs/local-acceptance.md) and [adapter evidence](docs/adapters.md).
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.6.1/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/main/install.sh | bash
 ```
 
-The installer uses `~/.local/share/harness-sync` and creates `~/.local/bin/hsync`. It needs no sudo, leaves shell configuration alone, and only installs the application. Add the launcher directory to PATH as directed, or use `~/.local/bin/hsync` directly. Run `hsync upgrade --check` to check for a stable release, then `hsync upgrade` to install it and restart an existing local service. Background checks only show reminders. Alternatively, re-run the installation command for the desired release (or pass `--ref <tag>` to the downloaded installer), then restart the service yourself. Your library in `~/.harness-sync` is separate from the installation.
+The installer uses `~/.local/share/harness-sync` and creates `~/.local/bin/hsync`. It needs no sudo, leaves shell configuration alone, and only installs the application. Add the launcher directory to PATH as directed, or use `~/.local/bin/hsync` directly. Run `hsync upgrade --check` to check for a stable release, then `hsync upgrade` to install it and restart an existing local service. Background checks only show reminders. Alternatively, re-run the installation command (it installs the newest stable release by default; pass `--ref <tag>` to pick one), then restart the service yourself. Your library in `~/.harness-sync` is separate from the installation.
 
 To inspect the installer first:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.6.1/install.sh -o install-harness-sync.sh
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/main/install.sh -o install-harness-sync.sh
 bash install-harness-sync.sh --help
 ```
 

@@ -11,14 +11,14 @@ description: 安装或升级 HarnessSync 的 CLI 与本机管理界面，并引�
 
 先检查 `node --version`、`npm --version`、`git --version` 和 `command -v hsync`。依赖不足时说明缺少什么；不要擅自更换用户的 Node 版本管理器。
 
-下载并查看同一固定版本的安装脚本，然后运行。默认安装到 `~/.local/share/harness-sync`，启动器为 `~/.local/bin/hsync`；用户指定目录时传入对应选项。
+下载并查看安装脚本，然后运行；不带 `--ref` 时安装器自动安装最新的 vX.Y.Z 正式版本。默认安装到 `~/.local/share/harness-sync`，启动器为 `~/.local/bin/hsync`；用户指定目录时传入对应选项。
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/v0.6.1/install.sh -o /tmp/harness-sync-install.sh
-bash /tmp/harness-sync-install.sh --ref v0.6.1
+curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/main/install.sh -o /tmp/harness-sync-install.sh
+bash /tmp/harness-sync-install.sh
 ```
 
-实际执行时使用唯一临时文件，避免覆盖其他任务的 `/tmp` 文件。安装器支持 `--install-dir`、`--bin-dir`、`--ref`（标签或分支）和 `--repo`。升级可重复运行同一脚本并指定所需版本。构建失败不会切换当前版本；旧程序版本保留，配置库独立保存。
+实际执行时使用唯一临时文件，避免覆盖其他任务的 `/tmp` 文件。安装器支持 `--install-dir`、`--bin-dir`、`--ref`（标签或分支）和 `--repo`。已安装的设备用 `hsync upgrade` 升级；也可重新运行安装脚本，需要特定版本时加 `--ref <标签>`。构建失败不会切换当前版本；旧程序版本保留，配置库独立保存。
 
 安装完成后使用安装器报告的启动器绝对路径验证 `--version` 和 `--help`。不要假设 PATH 中的同名命令就是新安装版本，也不要修改 shell 配置或覆盖其他启动器来掩盖冲突。
 
