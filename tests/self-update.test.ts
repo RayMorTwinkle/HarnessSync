@@ -30,7 +30,11 @@ const remote = async () => ({
   code: 0,
   stdout: "https://example.invalid/hsync.git\n",
 });
-const latest = async () => ({ code: 0, stdout: tags("v0.7.0", "v0.6.1") });
+// Derived from the package version so a release bump never makes them current.
+const [major, minor, patch] = version.split(".").map(Number);
+const newer = `v${major}.${minor + 1}.0`;
+const pinned = `v${major}.${minor}.${patch + 1}`;
+const latest = async () => ({ code: 0, stdout: tags(newer, pinned) });
 async function installed(t: Parameters<typeof fixture>[0]) {
   const f = await fixture(t);
   const installDir = path.join(f.home, "program with spaces");
@@ -187,7 +191,7 @@ test("checks cache results and failures, damaged and old-version caches are igno
       return latest();
     },
   );
-  assert.equal(result.latest, "v0.7.0");
+  assert.equal(result.latest, newer);
   assert.equal(cachedSelfUpdate(f.store, version).available, true);
   const notice = collectNotices(f.store).find((n) => n.code === "SELF_UPDATE")!;
   assert.equal(notice.command, "hsync upgrade");
@@ -205,7 +209,7 @@ test("checks cache results and failures, damaged and old-version caches are igno
     current: version,
     available: false,
   });
-  writeJson(file, { current: version, latest: "v0.7.0", checkedAt: "invalid" });
+  writeJson(file, { current: version, latest: newer, checkedAt: "invalid" });
   assert.equal(cachedSelfUpdate(f.store, version).available, false);
   fs.unlinkSync(file);
   fs.symlinkSync(path.join(f.info.releaseDir, "package.json"), file);
@@ -282,7 +286,7 @@ test("upgrade passes exact installer args, restarts an installed loaded service 
       assert.deepEqual(args, [
         path.join(f.info.releaseDir, "install.sh"),
         "--ref",
-        "v0.7.0",
+        newer,
         "--install-dir",
         f.info.installDir,
         "--bin-dir",
@@ -307,7 +311,7 @@ test("upgrade passes exact installer args, restarts an installed loaded service 
   events.length = 0;
   const failed = await upgrade(f.store, {
     info: f.getInfo,
-    ref: "v0.6.1",
+    ref: pinned,
     service,
     installer: async () => {
       events.push("install");
@@ -324,7 +328,7 @@ test("successful install reports restart failure explicitly and leaves all relea
   await assert.rejects(
     upgrade(f.store, {
       info: f.getInfo,
-      ref: "v0.6.1",
+      ref: pinned,
       installer: async () => 0,
       service: {
         ...idleService(),
@@ -333,7 +337,7 @@ test("successful install reports restart failure explicitly and leaves all relea
         },
       },
     }),
-    /已安装 v0.6.1，但服务重启未完成/,
+    new RegExp(`已安装 ${pinned}，但服务重启未完成`),
   );
   assert.ok(fs.existsSync(old));
 });
@@ -396,7 +400,7 @@ test("upgrade stops verified scheduler and starts the stable launcher with custo
   const events: string[] = [];
   const options = {
     info: f.getInfo,
-    ref: "v0.6.1",
+    ref: pinned,
     installer: async () => 0,
     service: idleService(),
     scheduler: {
@@ -478,7 +482,7 @@ test("default-root background restart omits --root and missing launcher refuses 
   let alive = true;
   const options = {
     info: f.getInfo,
-    ref: "v0.6.1",
+    ref: pinned,
     installer: async () => 0,
     service: idleService(),
     scheduler: {
@@ -596,7 +600,7 @@ test("self-update API authenticates requests, GET is cache-only, check uses fake
       body: "{}",
     })
   ).json();
-  assert.equal(result.data.latest, "v0.7.0");
+  assert.equal(result.data.latest, newer);
   assert.equal(result.data.available, true);
   assert.equal(calls, 1);
   assert.equal((await (await get()).json()).data.available, true);
