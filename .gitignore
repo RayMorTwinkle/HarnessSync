@@ -3,6 +3,8 @@ dist/
 .DS_Store
 .harness-sync/
 artifacts/
+# Track the synthetic fixtures and logs shipped with the evaluation report.
+!docs/evals/artifacts/
 .dsh/skills/
 .opencode/skills/
 

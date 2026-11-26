@@ -1,0 +1,48 @@
+
+> harness-sync@0.2.2 test
+> tsx --test tests/*.test.ts
+
+✔ global templates deploy to both native files; preserve existing text and idempotence (242.847208ms)
+✔ edits outside managed blocks are retained; edits inside are refused (295.969416ms)
+✔ skills retain resources, unknown frontmatter and executable bits across edits and deployment (340.124917ms)
+✔ foreign skills are never overwritten, even when they have identical contents (232.37725ms)
+✔ explicit adoption can manage an existing native skill without replacing its content (300.5905ms)
+✔ adoption refuses shared or arbitrary directories and does not leave a partial source entry (147.535917ms)
+✔ project skills and variables stay isolated from globals and other concurrent projects (513.766667ms)
+✔ harness-specific global selection does not leak to the other harness (235.207333ms)
+✔ unbound projects, missing variables, and incompatible project instructions block deployment (508.093334ms)
+✔ a reviewed plan is invalidated by a subsequent native file change (196.395416ms)
+✔ optimistic revisions prevent concurrent GUI and CLI source updates from silently overwriting (260.287291ms)
+✔ disable removes managed skills and deployment rollback restores the exact bundle (299.925ms)
+✔ rollback refuses later native edits and restores exact original unmanaged instructions (194.681083ms)
+✔ symlink native targets and symlink bundle resources are refused (216.831542ms)
+✔ source restore creates history and keeps device bindings and native files separate (341.147084ms)
+✔ self management skill resolves the real CLI path and updates in place (237.277667ms)
+✔ opening an initialized store and running doctor work when its directory is read-only (134.711042ms)
+✔ local HTTP API requires session token and rejects cross-site writes; GUI and API share state (233.458166ms)
+✔ installer preserves quoted paths and arguments, upgrades and retains previous releases (1892.326041ms)
+✔ failed build leaves the working launcher and current release intact and cleans staging (865.0595ms)
+✔ installer refuses foreign files, symlink launchers and unowned program directories (376.932833ms)
+✔ installer rejects an existing install lock without clearing another install's lock (1204.7465ms)
+✔ a broken symlink is reported without aborting the remaining skills in that directory (171.688041ms)
+✔ a bundle without a complete fingerprint remains unverified rather than being asserted a different version (155.711166ms)
+✔ scanner deduplicates physical symlink aliases and distinguishes equal copies from changed resources (156.079ms)
+✔ scanner inventories Codex override and Claude user rules without claiming runtime observation (156.191709ms)
+✔ bootstrap installs Chinese management bundle to all four and leaves native instructions and unrelated pending changes intact (341.139417ms)
+✔ Chinese handoff references the immutable inventory, prevents silent conflict choices and does not execute scanned content (148.2315ms)
+✔ staged primary instruction replacement shows full diff, preserves originals until apply, and rolls back bytes (224.431ms)
+✔ staging rejects stale scan files and applying rejects edits after staging; cancellation is reversible (211.378625ms)
+✔ Claude project instructions can be separate while shared AGENTS requires all three readers (326.646167ms)
+✔ open starts a local GUI and launches its actual URL, then reuses the same store server (170.699125ms)
+✔ open refuses another configuration store rather than opening the wrong GUI (300.51775ms)
+✔ open refuses an unrelated HTTP listener and leaves it running (156.063958ms)
+✔ open can reuse older HarnessSync servers after verifying their session API and store (143.111041ms)
+✔ browser launch failure keeps the GUI accessible and reports its URL (146.736625ms)
+ℹ tests 36
+ℹ suites 0
+ℹ pass 36
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5210.31325

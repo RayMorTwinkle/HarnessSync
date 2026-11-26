@@ -1,0 +1,17 @@
+
+> harness-sync@0.6.2 build
+> tsc --noEmit && vite build && esbuild src/cli.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/cli.js --banner:js='#!/usr/bin/env node'
+
+vite v7.3.8 building client environment for production...
+transforming...
+✓ 1602 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/ui/index.html                   0.62 kB │ gzip:   0.42 kB
+dist/ui/assets/index-BhGItbcX.css   68.95 kB │ gzip:  12.97 kB
+dist/ui/assets/index-CCRpn5sF.js   345.03 kB │ gzip: 107.22 kB
+✓ built in 1.13s
+
+  dist/cli.js  437.0kb
+
+⚡ Done in 17ms

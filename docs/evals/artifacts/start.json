@@ -1,0 +1,182 @@
+{
+  "probeSha256": "1750acdd2527461f8619638a215a3a32f9f68683f2600dafe7cb0bab4b35e564",
+  "dependencies": {
+    "tsx": "4.23.15",
+    "zod": "4.6.7",
+    "diff": "8.0.4",
+    "yaml": "2.9.1"
+  },
+  "commit": "2dcab47a0606dbe5d34851892a0fd864cfdec25a",
+  "node": "v24.15.0",
+  "os": "darwin",
+  "arch": "arm64",
+  "fixture": "schemaVersion 1, global rules, four built-ins, no skills or plugins",
+  "samples": [
+    {
+      "rules": 1,
+      "sample": 1,
+      "reads": {
+        "manifest": 7,
+        "device": 23,
+        "state": 3
+      },
+      "elapsedMs": 9.193583999999987,
+      "outputSha256": "295f756de1d4700b444d841e6817be12b08fd72754f75233327cfa35fd64a465"
+    },
+    {
+      "rules": 1,
+      "sample": 2,
+      "reads": {
+        "manifest": 7,
+        "device": 23,
+        "state": 3
+      },
+      "elapsedMs": 13.818624999999997,
+      "outputSha256": "295f756de1d4700b444d841e6817be12b08fd72754f75233327cfa35fd64a465"
+    },
+    {
+      "rules": 1,
+      "sample": 3,
+      "reads": {
+        "manifest": 7,
+        "device": 23,
+        "state": 3
+      },
+      "elapsedMs": 12.756665999999996,
+      "outputSha256": "295f756de1d4700b444d841e6817be12b08fd72754f75233327cfa35fd64a465"
+    },
+    {
+      "rules": 1,
+      "sample": 4,
+      "reads": {
+        "manifest": 7,
+        "device": 23,
+        "state": 3
+      },
+      "elapsedMs": 30.859916999999996,
+      "outputSha256": "295f756de1d4700b444d841e6817be12b08fd72754f75233327cfa35fd64a465"
+    },
+    {
+      "rules": 1,
+      "sample": 5,
+      "reads": {
+        "manifest": 7,
+        "device": 23,
+        "state": 3
+      },
+      "elapsedMs": 7.4894579999999,
+      "outputSha256": "295f756de1d4700b444d841e6817be12b08fd72754f75233327cfa35fd64a465"
+    },
+    {
+      "rules": 12,
+      "sample": 1,
+      "reads": {
+        "manifest": 51,
+        "device": 155,
+        "state": 3
+      },
+      "elapsedMs": 40.549334000000044,
+      "outputSha256": "46623efb5dd9fa18a8aaa69b4c7489e19b9b9387d2b43c0ee89f89591a73b5b6"
+    },
+    {
+      "rules": 12,
+      "sample": 2,
+      "reads": {
+        "manifest": 51,
+        "device": 155,
+        "state": 3
+      },
+      "elapsedMs": 40.38737500000002,
+      "outputSha256": "46623efb5dd9fa18a8aaa69b4c7489e19b9b9387d2b43c0ee89f89591a73b5b6"
+    },
+    {
+      "rules": 12,
+      "sample": 3,
+      "reads": {
+        "manifest": 51,
+        "device": 155,
+        "state": 3
+      },
+      "elapsedMs": 41.23949999999991,
+      "outputSha256": "46623efb5dd9fa18a8aaa69b4c7489e19b9b9387d2b43c0ee89f89591a73b5b6"
+    },
+    {
+      "rules": 12,
+      "sample": 4,
+      "reads": {
+        "manifest": 51,
+        "device": 155,
+        "state": 3
+      },
+      "elapsedMs": 46.50566700000013,
+      "outputSha256": "46623efb5dd9fa18a8aaa69b4c7489e19b9b9387d2b43c0ee89f89591a73b5b6"
+    },
+    {
+      "rules": 12,
+      "sample": 5,
+      "reads": {
+        "manifest": 51,
+        "device": 155,
+        "state": 3
+      },
+      "elapsedMs": 47.59641600000009,
+      "outputSha256": "46623efb5dd9fa18a8aaa69b4c7489e19b9b9387d2b43c0ee89f89591a73b5b6"
+    },
+    {
+      "rules": 48,
+      "sample": 1,
+      "reads": {
+        "manifest": 195,
+        "device": 587,
+        "state": 3
+      },
+      "elapsedMs": 157.8758329999996,
+      "outputSha256": "d0f181aa75aea91fd02c403d2af9bfcd90af110c318a94b8bf1abe1bc79c2dd6"
+    },
+    {
+      "rules": 48,
+      "sample": 2,
+      "reads": {
+        "manifest": 195,
+        "device": 587,
+        "state": 3
+      },
+      "elapsedMs": 224.50033299999996,
+      "outputSha256": "d0f181aa75aea91fd02c403d2af9bfcd90af110c318a94b8bf1abe1bc79c2dd6"
+    },
+    {
+      "rules": 48,
+      "sample": 3,
+      "reads": {
+        "manifest": 195,
+        "device": 587,
+        "state": 3
+      },
+      "elapsedMs": 159.00441699999965,
+      "outputSha256": "d0f181aa75aea91fd02c403d2af9bfcd90af110c318a94b8bf1abe1bc79c2dd6"
+    },
+    {
+      "rules": 48,
+      "sample": 4,
+      "reads": {
+        "manifest": 195,
+        "device": 587,
+        "state": 3
+      },
+      "elapsedMs": 188.18941700000005,
+      "outputSha256": "d0f181aa75aea91fd02c403d2af9bfcd90af110c318a94b8bf1abe1bc79c2dd6"
+    },
+    {
+      "rules": 48,
+      "sample": 5,
+      "reads": {
+        "manifest": 195,
+        "device": 587,
+        "state": 3
+      },
+      "elapsedMs": 159.3109159999999,
+      "outputSha256": "d0f181aa75aea91fd02c403d2af9bfcd90af110c318a94b8bf1abe1bc79c2dd6"
+    }
+  ],
+  "assertions": "exact bytes for every target, create actions, read-only preview, device freshness, stale apply rejected before writes"
+}
