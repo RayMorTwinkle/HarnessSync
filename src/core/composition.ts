@@ -11,6 +11,8 @@ import {
   matchesScope,
   partsText,
   renderParts,
+  renderContext,
+  type RenderContext,
   segmentsText,
   textSegment,
 } from "./rendering.ts";
@@ -56,7 +58,7 @@ export type SkillComposition = {
   }[];
 };
 
-function instructionTargets(store: Store) {
+function instructionTargets(store: Store, context: RenderContext) {
   const targets = new Map<
     string,
     { path: string; harnesses: string[]; projectId?: string }
@@ -73,11 +75,11 @@ function instructionTargets(store: Store) {
   for (const harness of adapters(
     store.home,
     store.root,
-    store.device().disabledHarnesses,
+    context.device.disabledHarnesses,
   ).filter((h) => h.enabled)) {
     add(harness.instructions, harness.id);
-    for (const project of store.manifest().projects) {
-      const dir = store.device().bindings[project.id];
+    for (const project of context.manifest.projects) {
+      const dir = context.device.bindings[project.id];
       if (dir)
         add(
           projectTargets(harness.id, dir, store.home, store.root).instructions,
@@ -92,6 +94,7 @@ function instructionTargets(store: Store) {
 function composeInstruction(
   store: Store,
   target: ReturnType<typeof instructionTargets>[number],
+  context: RenderContext,
 ): InstructionComposition {
   const errors: string[] = [];
   const totals: Totals = {
@@ -116,14 +119,19 @@ function composeInstruction(
   } catch (e: any) {
     errors.push(e.message);
   }
-  const manifest = store.manifest();
+  const { manifest } = context;
   let generated: Segment[] = [];
   const blocks = target.harnesses.map((harness) => {
     const rules = manifest.rules.filter(
       (r) =>
-        r.enabled && matchesScope(store, r.scope, harness, target.projectId),
+        r.enabled && matchesScope(context, r.scope, harness, target.projectId),
     );
-    const rendered = instructionSegments(store, rules, target.projectId, true);
+    const rendered = instructionSegments(
+      context,
+      rules,
+      target.projectId,
+      true,
+    );
     errors.push(...rendered.errors);
     return rendered.segments;
   });
@@ -202,19 +210,21 @@ function composeInstruction(
 export function instructionCompositions(
   store: Store,
 ): InstructionComposition[] {
-  return instructionTargets(store).map((target) =>
-    composeInstruction(store, target),
+  const context = renderContext(store);
+  return instructionTargets(store, context).map((target) =>
+    composeInstruction(store, target, context),
   );
 }
 export function instructionComposition(
   store: Store,
   file: string,
 ): InstructionComposition {
-  const target = instructionTargets(store).find(
+  const context = renderContext(store);
+  const target = instructionTargets(store, context).find(
     (t) => t.path === path.resolve(file),
   );
   if (!target) throw new AppError("NOT_FOUND", "未找到本机指令输出路径", 404);
-  return composeInstruction(store, target);
+  return composeInstruction(store, target, context);
 }
 
 function skillFileKind(relative: string, executable: boolean): SkillFileKind {
@@ -269,8 +279,10 @@ function skillFileKind(relative: string, executable: boolean): SkillFileKind {
 }
 
 export function skillComposition(store: Store, id: string): SkillComposition {
-  const skill = store.manifest().skills.find((s) => s.id === id);
+  const manifest = store.manifest();
+  const skill = manifest.skills.find((s) => s.id === id);
   if (!skill) throw new AppError("NOT_FOUND", "Skill 不存在", 404);
+  const context = renderContext(store, manifest);
   const root = store.skillPath(id);
   noSymlink(root);
   const ignore = new SyncIgnore(store);
@@ -312,7 +324,7 @@ export function skillComposition(store: Store, id: string): SkillComposition {
       let variables: string[] = [];
       if (kind === "instructions") {
         const rendered = renderParts(
-          store,
+          context,
           fs.readFileSync(file, "utf8"),
           skill.scope.kind === "project" ? skill.scope.target : undefined,
           { skill: true, partial: true },

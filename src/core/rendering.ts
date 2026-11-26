@@ -1,7 +1,6 @@
 import type { Store } from "./store.ts";
-import type { Rule, Scope } from "../shared/types.ts";
+import { harnessIds, type Rule, type Scope } from "../shared/types.ts";
 import type { Part, Segment } from "./composition.ts";
-import { adapters } from "./adapters.ts";
 import { selectedHarnesses } from "./harness-registry.ts";
 import { AppError, noSymlink, readBundle, type Bundle } from "./files.ts";
 
@@ -11,24 +10,60 @@ export const partsText = (parts: Part[]) => parts.map((p) => p.text).join("");
 export const segmentsText = (segments: Segment[]) =>
   segments.map((s) => partsText(s.parts)).join("");
 
-export function renderParts(
+// A context belongs to one read operation. Never retain it on Engine or Store.
+export function renderContext(
   store: Store,
+  manifest = store.manifest(),
+  device = store.device(),
+) {
+  const projects = new Map<string, string>();
+  for (const project of manifest.projects)
+    if (!projects.has(project.id)) projects.set(project.id, project.name);
+  const variables = new Map<string, string>([
+    ["device.name", device.name],
+    ["device.id", device.id],
+    ["device.home", device.home],
+  ]);
+  for (const [key, value] of Object.entries(device.variables))
+    variables.set(`vars.${key}`, value);
+
+  const selections = new Map<string, string[]>();
+  function select(ids: string[]) {
+    const key = JSON.stringify(ids);
+    let selected = selections.get(key);
+    if (!selected) {
+      selected = selectedHarnesses(
+        ids,
+        store.home,
+        store.root,
+        device.disabledHarnesses,
+      );
+      selections.set(key, selected);
+    }
+    return selected;
+  }
+  return {
+    device,
+    manifest,
+    order: new Map((device.ruleOrder || []).map((id, i) => [id, i])),
+    select,
+    value(key: string, projectId?: string) {
+      if (key === "project.name")
+        return projectId ? projects.get(projectId) : undefined;
+      if (key === "project.path")
+        return projectId ? device.bindings[projectId] : undefined;
+      return variables.get(key);
+    },
+  };
+}
+export type RenderContext = ReturnType<typeof renderContext>;
+
+export function renderParts(
+  context: RenderContext,
   text: string,
   projectId?: string,
   options: { skill?: boolean; partial?: boolean } = {},
 ) {
-  const device = store.device();
-  const project = store.manifest().projects.find((p) => p.id === projectId);
-  const values: Record<string, string | undefined> = {
-    "device.name": device.name,
-    "device.id": device.id,
-    "device.home": device.home,
-    "project.name": project?.name,
-    "project.path": projectId ? device.bindings[projectId] : undefined,
-    ...Object.fromEntries(
-      Object.entries(device.variables).map(([k, v]) => [`vars.${k}`, v]),
-    ),
-  };
   const parts: Part[] = [];
   const errors: string[] = [];
   const pattern = options.skill
@@ -40,7 +75,7 @@ export function renderParts(
     if (options.skill && !projectId && key.startsWith("project.")) continue;
     if (match.index > offset)
       parts.push({ type: "text", text: text.slice(offset, match.index) });
-    const value = Object.hasOwn(values, key) ? values[key] : undefined;
+    const value = context.value(key, projectId);
     if (value === undefined) {
       const message = `缺少变量 {{${key}}}，请在设备设置中添加${key.startsWith("vars.") ? `变量 ${key.slice(5)}（hsync device set ${key.slice(5)} <值>）` : "对应的设备信息或项目绑定"}`;
       if (!options.partial) throw new AppError("MISSING_VARIABLE", message);
@@ -84,29 +119,24 @@ export function renderSkillText(
   // A missing variable keeps its placeholder: skills often quote the syntax
   // in prose, and a new device should still get every skill.
   return partsText(
-    renderParts(store, text, projectId, { skill: true, partial: true }).parts,
+    renderParts(renderContext(store), text, projectId, {
+      skill: true,
+      partial: true,
+    }).parts,
   );
 }
 
 export function matchesScope(
-  store: Store,
+  context: RenderContext,
   scope: Scope,
   harness: string,
   projectId?: string,
 ) {
-  if (
-    !selectedHarnesses(
-      scope.harnesses,
-      store.home,
-      store.root,
-      store.device().disabledHarnesses,
-    ).includes(harness)
-  )
-    return false;
+  if (!context.select(scope.harnesses).includes(harness)) return false;
   return projectId
     ? scope.kind === "project" && scope.target === projectId
     : scope.kind === "global" ||
-        (scope.kind === "device" && scope.target === store.device().id);
+        (scope.kind === "device" && scope.target === context.device.id);
 }
 
 export function segment(
@@ -148,23 +178,15 @@ function trimParts(parts: Part[]) {
 }
 
 export function instructionSegments(
-  store: Store,
+  context: RenderContext,
   rules: Rule[],
   projectId?: string,
   partial = false,
 ) {
   if (!rules.length)
     return { segments: [] as Segment[], errors: [] as string[] };
-  const order = new Map(
-    (store.device().ruleOrder || []).map((id, i) => [id, i]),
-  );
-  const enabled = adapters(
-    store.home,
-    store.root,
-    store.device().disabledHarnesses,
-  )
-    .filter((h) => h.enabled)
-    .map((h) => h.id);
+  const { order } = context;
+  const enabled = context.select([...harnessIds]);
   const sorted = [...rules].sort(
     (a, b) =>
       Number(a.scope.kind === "device") - Number(b.scope.kind === "device") ||
@@ -178,14 +200,9 @@ export function instructionSegments(
     segments.push(
       textSegment("frame", `${i ? "\n\n" : ""}## ${rule.title}\n\n`),
     );
-    const rendered = renderParts(store, rule.body, projectId, { partial });
+    const rendered = renderParts(context, rule.body, projectId, { partial });
     errors.push(...rendered.errors);
-    const selected = selectedHarnesses(
-      rule.scope.harnesses,
-      store.home,
-      store.root,
-      store.device().disabledHarnesses,
-    );
+    const selected = context.select(rule.scope.harnesses);
     const kind =
       rule.scope.kind === "device"
         ? "device"

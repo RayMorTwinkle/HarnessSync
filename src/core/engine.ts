@@ -3,6 +3,7 @@ import {
   managedBlock,
   replaceBlock,
   matchesScope,
+  renderContext,
   instructionSegments,
   segmentsText,
   renderedSkillBundle,
@@ -10,11 +11,7 @@ import {
   partsText,
 } from "./rendering.ts";
 import { Backups, backupFingerprint } from "./backup.ts";
-import {
-  registry,
-  selectedHarnesses,
-  listManifests,
-} from "./harness-registry.ts";
+import { registry, listManifests } from "./harness-registry.ts";
 import { lastAutoDeploy } from "./auto-deploy.ts";
 import fs from "node:fs";
 import path from "node:path";
@@ -75,7 +72,6 @@ import type {
   Receipt,
   DeployState,
   Rule,
-  Scope,
   Snapshot,
 } from "../shared/types.ts";
 
@@ -137,13 +133,6 @@ export class Engine {
     string,
     { key: string; value: Deployment }
   >();
-  private matches(scope: Scope, harness: HarnessId, projectId?: string) {
-    return matchesScope(this.store, scope, harness, projectId);
-  }
-  private instructions(rules: Rule[], projectId?: string) {
-    const segments = instructionSegments(this.store, rules, projectId).segments;
-    return segments.length ? segmentsText(segments) : null;
-  }
   plan(options: { onlySkillId?: string } = {}): Plan {
     const source = this.store.manifest();
     const manifest = options.onlySkillId
@@ -156,6 +145,11 @@ export class Engine {
       : source;
     const state = this.store.state();
     const device = this.store.device();
+    const context = renderContext(this.store, source, device);
+    const instructions = (rules: Rule[], projectId?: string) => {
+      const { segments } = instructionSegments(context, rules, projectId);
+      return segments.length ? segmentsText(segments) : null;
+    };
     const changes: Change[] = [];
     const errors: string[] = [];
     const notices: PlanNotice[] = [];
@@ -193,8 +187,7 @@ export class Engine {
         false,
       );
     const allHarnesses = adapters(this.store.home, this.store.root);
-    const select = (ids: string[]) =>
-      selectedHarnesses(ids, this.store.home, this.store.root, disabled);
+    const { select } = context;
     for (const receipt of state.receipts.filter((r) => !r.projectId)) {
       const harness = allHarnesses.find((h) => h.id === receipt.harness);
       if (!harness || disabled.includes(harness.id)) continue;
@@ -488,14 +481,14 @@ export class Engine {
         this.store.root,
       ).filter((id) => !disabled.includes(id));
       const rules = manifest.rules
-        .filter((r) => r.enabled && this.matches(r.scope, harness.id))
+        .filter((r) => r.enabled && matchesScope(context, r.scope, harness.id))
         .sort(
           (a, b) =>
             Number(a.scope.kind === "device") -
             Number(b.scope.kind === "device"),
         );
       try {
-        const block = this.instructions(rules);
+        const block = instructions(rules);
         if (block)
           add({
             path: harness.instructions,
@@ -509,10 +502,12 @@ export class Engine {
       for (const project of manifest.projects) {
         const dir = device.bindings[project.id];
         const rules = manifest.rules.filter(
-          (r) => r.enabled && this.matches(r.scope, harness.id, project.id),
+          (r) =>
+            r.enabled && matchesScope(context, r.scope, harness.id, project.id),
         );
         const skills = manifest.skills.filter(
-          (s) => s.enabled && this.matches(s.scope, harness.id, project.id),
+          (s) =>
+            s.enabled && matchesScope(context, s.scope, harness.id, project.id),
         );
         if (!dir) {
           if (rules.length || skills.length)
@@ -545,7 +540,7 @@ export class Engine {
               "SHARED_PROJECT_INSTRUCTIONS",
               `共用项目 ${path.basename(targets.instructions)} 的 Harness 需同时选择：${peers.join("、")}`,
             );
-          const block = this.instructions(rules, project.id);
+          const block = instructions(rules, project.id);
           if (block)
             add({
               path: targets.instructions,
@@ -612,7 +607,7 @@ export class Engine {
             `${skill.name}：共享技能目录也会被 ${exposure.join("、")} 读取，不能保证仅对所选 Harness 可见`,
             false,
           );
-        const rendered = renderParts(this.store, template, projectId, {
+        const rendered = renderParts(context, template, projectId, {
           skill: true,
           partial: true,
         });
