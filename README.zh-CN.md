@@ -1,10 +1,8 @@
 # HarnessSync
 
-在一个库中管理 AI 编程工具的技能和指令。
+在一个 Git 库里维护 AI 编程工具的技能和指令。
 
-HarnessSync 把共享技能和指令写入各工具的原生目录。源配置保存在你自己的私有 Git 仓库中，可以跨设备同步；设备路径和部署状态留在本机。本机 Web GUI 和 CLI 使用同一套核心。
-
-[English](README.md)
+[中文主文档与演示](README.md) · [English](README_EN.md)
 
 ![HarnessSync 工作台：技能、指令及其写入的 AI 工具](docs/images/overview.png)
 
@@ -119,9 +117,9 @@ hsync rollback DEPLOYMENT_ID
 
 自动部署使用相同的规划器、收据和快照。相关 CLI/API 编辑、同步拉取和调度器启动都可能触发。它允许在不存在的目标上新建，以及更新或撤下未被外部修改的已托管内容；显式跳过选择必须仍匹配原生指纹。计划错误、冲突、接管、覆盖、初始化指令替换登记、未完成恢复，以及需要确认的提示（暂存残留、本机导入源已变化或无法读取）会停止整次自动部署，等待审查。仅供参考的提示不会阻止，例如某个工具已停用、文件保持原样，或共享目录也会被其他工具读取。它不代选冲突方案，也不自动安装上游技能更新。读取 `hsync doctor --json` 的 `autoDeploy`；出现 `needs-review` 时检查新计划，解决阻碍后手动应用。详见[本机设置](docs/settings.md)。
 
-指令支持 `{{device.name}}`、`{{device.id}}`、`{{device.home}}`、`{{project.name}}`、`{{project.path}}`、`{{vars.KEY}}`。技能仅渲染顶层 `SKILL.md` 中已识别的变量，项目变量仅适用于项目技能；其他模板语法、脚本和资源原样保留。源库和同步保存模板，部署哈希与接管比较使用渲染结果，修改设备变量会产生更新，不会因此误报外部修改。技能缺变量时跳过该技能部署路径并保留已有副本，手动应用仍可处理其他干净路径；阻断通知会暂停整次自动部署。用 `hsync device set KEY 值` 补齐后重新预览。变量会渲染到原生文件中，不要用来保存凭证。
+指令支持 `{{device.name}}`、`{{device.id}}`、`{{device.home}}`、`{{project.name}}`、`{{project.path}}`、`{{vars.KEY}}`。技能仅渲染顶层 `SKILL.md` 中已识别的变量，项目变量仅适用于项目技能；其他模板语法、脚本和资源原样保留。源库和同步保存模板，部署哈希与接管比较使用渲染结果，修改设备变量会产生更新，不会因此误报外部修改。技能缺变量时保留占位符原文，部署计划给出非阻断提醒。用 `hsync device set KEY 值` 补齐后重新预览。变量会渲染到原生文件中，不要用来保存凭证。
 
-`hsync compose instructions [--json]` 查看全部已启用工具的全局指令和已绑定项目输出，共用文件只列一次；`hsync compose skill ID [--json]` 查看技能文件类别。文本输出含 40 字符组成条、图例和字节数。JSON 单独统计变量的 UTF-8 字节，按顺序拼接指令片段可还原计划全文，包含管理区块外的用户文字。`pending` 表示源计算结果与磁盘不同，`error` 标明指令预览仍有阻碍；技能组成缺变量时报错。这些只读查询不读取凭证内容，也不证明会话已加载。详见 [CLI/API 契约](docs/cli.md#内容组成只读)。
+`hsync compose instructions [--json]` 查看全部已启用工具的全局指令和已绑定项目输出，共用文件只列一次；`hsync compose skill ID [--json]` 查看技能文件类别。文本输出含 40 字符组成条、图例和字节数。JSON 单独统计变量的 UTF-8 字节，按顺序拼接指令片段可还原计划全文，包含管理区块外的用户文字。`pending` 表示源计算结果与磁盘不同，`error` 标明指令预览仍有阻碍；技能组成保留未解析的占位符。这些只读查询不读取凭证内容，也不证明会话已加载。详见 [CLI/API 契约](docs/cli.md#内容组成只读)。
 
 ## 同步
 
@@ -208,7 +206,7 @@ HarnessSync 收据管理的部署位置不是独立源目录；成功 apply 清�
 
 `origin=bundled` 表示产品附带，附 `originReason` 与 `bundledBy: {name,path}`；`inventory.summary.bundledSkills` 单独计数，也计入 `excludedSkills`。识别应用包、常见安装目录、node_modules 和链接指向的软件项目；向上查找项目不越过 HOME，最多 8 层，纯技能集合保留用户分类。默认建议不导入、不上传，说明会随产品更新；用户坚持时照常 `skills import`，并不禁止导入。
 
-扫描的 `inventory.skills[].credentials` 和 `skills show <id>` 的 `credentials` 列出技能内疑似凭证文件的相对路径，仅按文件名识别，不展示值；`inventory.summary.credentialSkills` 按真实技能目录计数。用户选择全部配置（含密钥文件）同步到私有仓库，仓库必须保持私有。不想上传的文件可用 `hsync sync ignore <技能名>/<文件>`（由同步忽略功能提供）。不得向用户索要 token、密码或私钥，不要把凭证写进指令正文或 URL。
+扫描的 `inventory.skills[].credentials` 和 `skills show <id>` 的 `credentials` 列出技能内疑似凭证文件的相对路径，仅按文件名识别，不展示值；`inventory.summary.credentialSkills` 按真实技能目录计数。用户选择全部配置（含密钥文件）同步到私有仓库，仓库必须保持私有。不想上传的文件可用 `hsync sync ignore add <技能名>/<文件>`（由同步忽略功能提供）。不得向用户索要 token、密码或私钥，不要把凭证写进指令正文或 URL。
 
 `onboard repository` 的 `absent` 表示默认名称仓库不存在，仍须确认是否用了其他名字；网络或权限错误保留 `unknown`。
 

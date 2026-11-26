@@ -1,81 +1,90 @@
 # HarnessSync
 
-One library of skills and instructions for your AI coding tools.
+**在一个 Git 库里维护 AI 编程工具的技能和指令，在每台设备上预览它们实际会写到哪里。**
 
-HarnessSync writes shared skills and instructions into each tool's native folders. Keep the source library in your own private Git repository and sync it across devices, while device paths and deployment state stay local. A local web GUI and CLI use the same core.
+同一份协作规范，Codex 读取 `AGENTS.md`，Claude Code 读取 `CLAUDE.md`。如果两个文件已经有自己的内容，HarnessSync 会先读原文，生成逐项差异，再把共享指令写入受管理区块。项目在不同电脑上的路径由本机绑定，配置库保留可移植的模板。
 
-[简体中文](README.zh-CN.md)
+[中文交互演示](https://raymortwinkle.github.io/HarnessSync/) · [本地打开展示页](docs/index.html) · [中文短片](docs/media/promo.mp4) · [重构评测与原始记录](docs/evals/refactor-1126-report.md) · [English](README_EN.md)
 
-![HarnessSync overview: skills, instructions and the tools they are written to](docs/images/overview.png)
+## 从哪里开始
 
-The GUI, CLI messages, and bundled skills are currently in Simplified Chinese. Contributions to internationalization are welcome.
+| 你想做什么 | 入口 |
+| --- | --- |
+| 先看一条规则怎样变成原生文件 | 下载后用浏览器打开 `docs/index.html`，切换工具与设备，重新生成示例预览 |
+| 在已有工作环境接入 | 阅读[安装](#安装)与[备份与卸载](#备份与卸载)，运行 `hsync open` 进入本机工作台 |
+| 先人工审阅再写入 | 在修改源配置之前执行 `hsync config set deploy.auto false`，再用 `hsync plan --json` 查看计划 |
+| 为新工具写适配 | 阅读[工具插件指南](docs/plugins.md)和[架构地图](docs/architecture.md) |
 
-## Features
+![HarnessSync 工作台：技能、指令及其写入的 AI 工具](docs/images/overview.png)
 
-- Unified skill library: import complete packages, including scripts, assets, and executable permissions.
-- Instructions and top-level skill `SKILL.md` files with device, project, and custom variables.
-- Read-only instruction and skill composition through the CLI and local API.
-- Global, device, and per-project configuration with stable project IDs and local directory bindings.
-- Automatic deployment of clean changes, with snapshots, failure recovery, and rollback.
-- Conflict choices: use the library version, import the native version, or skip a target.
-- Git skill sources: install packages, check upstream changes, inspect diffs, update, or detach.
-- Cross-device sync through your own private Git repository: identical entries merge themselves, differing ones become side-by-side conflicts you or your Agent can resolve.
-- Declarative tool plugins: add discovery paths in JSON.
-- Settings page and login service for macOS and Linux with systemd user services.
-- CLI ≡ GUI: both call the same core for configuration and deployment.
-- AI-manageable through the bundled [`manage-harness-sync` skill](skills/manage-harness-sync/SKILL.md).
+GUI、CLI 提示和内置技能目前使用简体中文，欢迎参与国际化。
 
-## Supported tools
+## 功能
 
-Default native paths from [`harnesses/*.json`](harnesses/). The planner may choose shared skill directories to reduce duplicate copies.
+- 统一技能库：导入完整包，保留脚本、资源和执行权限。
+- 指令与技能顶层 `SKILL.md` 支持设备、项目和自定义变量。
+- CLI 与本机 API 可只读查看指令片段和技能文件组成。
+- 全局、设备和项目作用域；项目使用稳定 ID，目录由各设备单独绑定。
+- 自动部署干净变更，保留快照，支持失败恢复和回滚。
+- 同名冲突逐项选择：使用库版本、原生版本收库或跳过目标。
+- Git 技能来源：安装、检查上游变化、查看差异、更新或脱离上游。
+- 通过自己的私有 Git 仓库跨设备同步：相同条目自动合并，不同的并排对比，由你或你的 Agent 处理。
+- 声明式工具插件：用 JSON 描述发现路径即可添加工具。
+- 设置页及登录启动服务，支持 macOS 和具有 systemd 用户服务的 Linux。
+- CLI ≡ GUI：配置和部署均调用同一套核心。
+- 内置 [`manage-harness-sync` 管理技能](skills/manage-harness-sync/SKILL.md)，可交给 AI 管理配置。
 
-| Tool             | Global skills directory     | Global instructions file                                             |
-| ---------------- | --------------------------- | -------------------------------------------------------------------- |
-| DeepSeek Harness | `~/.dsh/skills`             | `~/.dsh/AGENTS.md`                                                   |
-| OpenCode         | `~/.config/opencode/skills` | `~/.config/opencode/AGENTS.md`                                       |
-| Codex            | `~/.agents/skills`          | `~/.codex/AGENTS.md`; nonempty `AGENTS.override.md` takes precedence |
-| Claude Code      | `~/.claude/skills`          | `~/.claude/CLAUDE.md`                                                |
+## 支持的工具
 
-Roots respect `DSH_HOME`, `XDG_CONFIG_HOME`, `CODEX_HOME`, and `CLAUDE_CONFIG_DIR`. DeepSeek also reads shared paths under `DSH_AGENTS_HOME` (default `~/.agents`). Codex's native skill directory remains `~/.agents/skills` when `CODEX_HOME` changes. See [plugin path semantics](docs/plugins.md#path-templates) for the full reader map.
+下表来自 [`harnesses/*.json`](harnesses/)，列出默认原生路径。规划器可能选择共享技能目录以减少重复副本。
 
-Project skills use `.dsh/skills`, `.opencode/skills`, `.agents/skills`, and `.claude/skills`, respectively. DeepSeek, OpenCode, and Codex share project `AGENTS.md`; project instructions for one must select all enabled peers sharing that file. Claude uses `CLAUDE.md`. Tool selection is not an access-control boundary: other tools may read shared directories.
+| 工具             | 全局技能目录                | 全局指令文件                                         |
+| ---------------- | --------------------------- | ---------------------------------------------------- |
+| DeepSeek Harness | `~/.dsh/skills`             | `~/.dsh/AGENTS.md`                                   |
+| OpenCode         | `~/.config/opencode/skills` | `~/.config/opencode/AGENTS.md`                       |
+| Codex            | `~/.agents/skills`          | `~/.codex/AGENTS.md`；非空 `AGENTS.override.md` 优先 |
+| Claude Code      | `~/.claude/skills`          | `~/.claude/CLAUDE.md`                                |
 
-## Install
+根目录遵循 `DSH_HOME`、`XDG_CONFIG_HOME`、`CODEX_HOME`、`CLAUDE_CONFIG_DIR`。DeepSeek 还读取 `DSH_AGENTS_HOME` 下的共享路径，默认 `~/.agents`。修改 `CODEX_HOME` 不会改变 Codex 的原生技能目录 `~/.agents/skills`。完整 reader map 见[插件路径语义](docs/plugins.md#path-templates)。
 
-Requires Node.js **22.12+**, npm, and Git. The installer supports macOS and Linux. Use **WSL on Windows**; native Windows is not supported. Recorded real-session verification covers macOS only; see the [acceptance record](docs/local-acceptance.md) and [adapter evidence](docs/adapters.md).
+项目技能依次使用 `.dsh/skills`、`.opencode/skills`、`.agents/skills`、`.claude/skills`。DeepSeek、OpenCode、Codex 共用项目 `AGENTS.md`；面向其中之一的项目指令必须同时选择共用该文件的所有已启用工具。Claude 使用 `CLAUDE.md`。工具选择不是访问控制边界，其他工具仍可能读取共享目录。
+
+## 安装
+
+需要 Node.js **22.12+**、npm、Git。安装器支持 macOS 和 Linux；**Windows 请使用 WSL**，不支持原生 Windows。目前有记录的真实会话验收仅覆盖 macOS，见[本机验收](docs/local-acceptance.md)和[适配证据](docs/adapters.md)。
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/main/install.sh | bash
 ```
 
-The installer uses `~/.local/share/harness-sync` and creates `~/.local/bin/hsync`. It needs no sudo, leaves shell configuration alone, and only installs the application. Add the launcher directory to PATH as directed, or use `~/.local/bin/hsync` directly. Run `hsync upgrade --check` to check for a stable release, then `hsync upgrade` to install it and restart an existing local service. Background checks only show reminders. Alternatively, re-run the installation command (it installs the newest stable release by default; pass `--ref <tag>` to pick one), then restart the service yourself. Your library in `~/.harness-sync` is separate from the installation.
+默认安装到 `~/.local/share/harness-sync`，启动器为 `~/.local/bin/hsync`。无需 sudo，不修改 shell 配置，只安装程序。按提示把启动器目录加入 PATH，或直接运行 `~/.local/bin/hsync`。运行 `hsync upgrade --check` 检查稳定版本，确认后用 `hsync upgrade` 升级并重启已有本机服务；后台检查只提醒。也可重新运行上面的安装命令（默认安装最新正式版本，传入 `--ref <标签>` 可指定版本），再自行重启服务。配置库 `~/.harness-sync` 与程序安装目录分开保存。
 
-To inspect the installer first:
+也可以先查看脚本：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/RayMorTwinkle/HarnessSync/main/install.sh -o install-harness-sync.sh
 bash install-harness-sync.sh --help
 ```
 
-The bundled [installation skill](skills/harness-sync-install/SKILL.md) can also guide an AI through installation and onboarding.
+内置[安装技能](skills/harness-sync-install/SKILL.md)也可指导 AI 安装和初始化。
 
-### Backup and uninstall
+### 备份与卸载
 
-Before the first scan or deployment, HarnessSync saves a local baseline under `~/Downloads/HarnessSync 备份/` (or HOME when Downloads is absent). It includes registered skill/instruction paths, including disabled tools and bound projects; it includes credential files inside skill directories and stays local, while excluding tool roots and session history. Links are preserved without following them.
+首次扫描或实际部署前自动保存本机基线到 `~/Downloads/HarnessSync 备份/`；没有 Downloads 时放在 HOME 下。包含已注册工具（含停用工具）及已绑定项目的技能、指令路径，会包含技能目录内的凭证文件，仅保存在本机；不复制工具根目录和会话；符号链接只保存链接本身。
 
-Use `hsync backup list`, `hsync backup verify <dir>`, and `hsync backup restore` to inspect and preview recovery. Execute with `--plan <id>`; external edits stay untouched unless explicitly selected with `--overwrite`. Recovery saves another snapshot and disables automatic deployment.
+运行 `hsync backup list` 查看位置，`hsync backup verify <目录>` 校验。`hsync backup restore` 先预览，再用 `--plan <id>` 执行。外部修改默认保留，覆盖需指定 `--overwrite <路径>`。恢复前另存副本，并关闭自动部署。
 
-Preview `hsync uninstall --restore` (recommended) or `hsync uninstall --keep-files`, then execute `hsync uninstall --plan <id>`. The library is exported into the backup; local library deletion requires `--delete-library` in the preview. Remote repositories remain intact. Source runs skip program removal. See [CLI details](docs/cli.md#备份恢复与卸载v06).
+卸载先运行 `hsync uninstall --restore`（推荐）或 `hsync uninstall --keep-files` 预览，再运行 `hsync uninstall --plan <id>`。配置库导出到备份的 `library/`，预览加 `--delete-library` 才删除本机库；远端仓库不删除。从源码运行不会删除程序。详见 [CLI 文档](docs/cli.md)。
 
-## Quick start
+## 快速开始
 
 ```sh
 hsync open
 ```
 
-This opens the local GUI at `http://127.0.0.1:47821`. It reuses a verified service for the same library, or starts one in the current terminal. Keep that terminal open; Ctrl+C stops a newly started service. `hsync serve` runs without opening a browser.
+默认打开 `http://127.0.0.1:47821`。同库已有经过身份核验的服务时直接复用，否则在当前终端启动；新服务需保持终端运行，Ctrl+C 停止。`hsync serve` 只启动服务，不打开浏览器。
 
-Use the onboarding panel, or prepare the management skill and a Chinese handoff prompt:
+在 GUI 使用初始化面板，或运行以下命令准备管理技能和中文交接提示词：
 
 ```sh
 hsync onboard prepare --json
@@ -83,11 +92,11 @@ hsync onboard show --json
 hsync doctor --json
 ```
 
-Onboarding scans known tool locations and deploys only the management skill to detected tools. It preserves existing global instructions. Hand the generated prompt to your chosen tool to organize the rest of your library.
+初始化扫描已知工具位置，只向检测到的工具部署管理技能，保留原有全局指令。把生成的提示词交给所选工具，继续整理其余技能与指令。
 
-The management skill uses the installer's verified `current/dist/cli.js` entry and stores paths under HOME as `{{device.home}}/...`; deployment renders local absolute paths. New `serve`/`open` services and `onboard prepare` refresh an existing, unmodified generated skill in place, preserving scope, enabled state and display name. Refreshes create source commits and service startup follows `deploy.auto`; onboarding still deploys only this skill. Startup never installs a missing skill. Modified skills and older copies without a generation fingerprint are preserved with a `SELF_SKILL_UPDATE` reminder in `status`. After reviewing, run `hsync self-skill` to explicitly replace their content and resources. Fingerprints travel with the source skill; reminder caches stay local. Paths outside HOME or different relative installation locations can still need coordination across devices.
+管理技能使用安装器经核实的 `current/dist/cli.js` 稳定入口，HOME 下的路径保存为 `{{device.home}}/...`，部署时渲染为本机绝对路径。新启动 `serve/open` 服务及 `onboard prepare` 会原位刷新已有且未手改的生成版本，保留作用域、启停和显示名，生成源提交；服务随后按 `deploy.auto` 部署，初始化仍只部署管理技能。启动服务不会安装缺少的技能。手改版本或缺少生成指纹的旧副本会保留，`status` 提醒 `SELF_SKILL_UPDATE`；确认替换正文和资源后运行 `hsync self-skill`。指纹随技能同步，提醒缓存留在本机；HOME 外路径或不同相对安装位置仍可能需要跨设备人工协调。
 
-Examples for an existing skill package and project (replace the paths; use the project ID returned by `projects add`):
+已有技能包与项目的操作示例（替换路径，使用 `projects add` 返回的项目 ID）：
 
 ```sh
 hsync skills import /absolute/my-skill
@@ -97,7 +106,7 @@ hsync skills import /absolute/project-skill --scope project --target PROJECT_ID
 hsync plan --json
 ```
 
-Outside an active onboarding session, automatic deployment is on by default, so these source edits may also write clean changes to native folders. For a workflow that requires manual review before deployment, disable it **before editing**:
+初始化会话会暂停自动部署；会话结束后自动部署默认开启，上述源编辑可能同时把干净变更写入原生目录。如需每次部署前手动审查，请在**编辑之前**关闭：
 
 ```sh
 hsync config set deploy.auto false
@@ -107,25 +116,25 @@ hsync history
 hsync rollback DEPLOYMENT_ID
 ```
 
-Use the IDs returned by `plan` and `history`. See [CLI reference](docs/cli.md) (Chinese); each command also has `--help`.
+使用 `plan` 和 `history` 返回的 ID。完整命令见 [CLI 文档](docs/cli.md)，各命令也提供 `--help`。
 
-## How it works
+## 工作原理
 
-The flow is **library → plan → apply**. Source entries and complete skill packages live in `~/.harness-sync/repo/`, a plain Git repository. Device identity, variables, project directory bindings, settings, receipts, and snapshots live outside that repository. Set `HARNESS_SYNC_HOME` or use `hsync --root /absolute/store plan` to choose another store.
+流程为 **配置库 → plan → apply**。源条目和完整技能包保存在 `~/.harness-sync/repo/`，这是普通 Git 仓库。设备身份、变量、项目目录绑定、设置、收据和快照保存在仓库之外。可用 `HARNESS_SYNC_HOME` 或 `hsync --root /absolute/store plan` 指定其他配置库根目录。
 
-The planner reads existing native files, renders instructions, and computes paths, diffs, conflicts, and a plan ID. Apply recalculates that plan under the store lock and refuses stale IDs. Skills are copied as complete packages. Ownership receipts record managed paths and fingerprints; deployments do not silently overwrite unowned skill collisions or external edits.
+规划器读取已有原生文件、渲染指令，计算路径、差异、冲突和计划 ID。应用时持有配置库锁并重新计算，拒绝过期 ID。技能按完整包复制；所有权收据记录托管路径与指纹，不会静默覆盖未托管的同名技能或外部修改。
 
-Instruction updates preserve content outside the managed block. The exception is an explicit onboarding replacement staged from a verified scan: it shows the full diff and saves the original in the deployment snapshot. Snapshots also support failure recovery and rollback of the latest valid deployment. Rollback refuses later edits, keeps the source library unchanged, and does not immediately redeploy it.
+指令更新保留管理区块外的内容。例外是基于已验证扫描显式登记的初始化完整替换：计划展示完整差异，部署快照保留原件。快照也用于失败恢复和最近一次有效部署的回滚。回滚拒绝覆盖部署后的新修改，不改变源库，也不会立即重新部署。
 
-Automatic deployment uses the same planner, receipts, and snapshots. Related CLI/API edits, pulled changes, and scheduler startup can trigger it. It accepts absent targets for creation and owned targets without external edits for updates/removal; an explicit skip must still match its fingerprint. Plan errors, conflicts, adoptions, replacements, staged instruction replacements, unfinished recovery, and blocking notices (leftover staging directories, a changed or unreadable local import source) stop the whole attempt for review. Informational notices, such as a disabled tool keeping its files or a shared directory that other tools also read, do not. It does not choose conflict resolutions or install upstream skill updates. Read `autoDeploy` in `hsync doctor --json`; for `needs-review`, inspect a fresh plan and apply it manually after resolving blockers. Details: [settings](docs/settings.md) (Chinese).
+自动部署使用相同的规划器、收据和快照。相关 CLI/API 编辑、同步拉取和调度器启动都可能触发。它允许在不存在的目标上新建，以及更新或撤下未被外部修改的已托管内容；显式跳过选择必须仍匹配原生指纹。计划错误、冲突、接管、覆盖、初始化指令替换登记、未完成恢复，以及需要确认的提示（暂存残留、本机导入源已变化或无法读取）会停止整次自动部署，等待审查。仅供参考的提示不会阻止，例如某个工具已停用、文件保持原样，或共享目录也会被其他工具读取。它不代选冲突方案，也不自动安装上游技能更新。读取 `hsync doctor --json` 的 `autoDeploy`；出现 `needs-review` 时检查新计划，解决阻碍后手动应用。详见[本机设置](docs/settings.md)。
 
-Instructions support `{{device.name}}`, `{{device.id}}`, `{{device.home}}`, `{{project.name}}`, `{{project.path}}`, and `{{vars.KEY}}`. Skills render only these recognized variables in the top-level `SKILL.md` (`project.*` only for project skills); other template syntax, scripts, and resources stay unchanged. The library and sync keep the template. Deployment hashes and adoption comparisons use rendered bytes, so changing a device variable produces an update without reporting external drift. A missing skill variable skips that skill's paths and retains existing copies; manual apply can continue with other clean paths, while the blocking notice pauses automatic deployment. Set values with `hsync device set KEY value`, then preview again. Variables are written to native files; do not use them for credentials.
+指令支持 `{{device.name}}`、`{{device.id}}`、`{{device.home}}`、`{{project.name}}`、`{{project.path}}`、`{{vars.KEY}}`。技能仅渲染顶层 `SKILL.md` 中已识别的变量，项目变量仅适用于项目技能；其他模板语法、脚本和资源原样保留。源库和同步保存模板，部署哈希与接管比较使用渲染结果，修改设备变量会产生更新，不会因此误报外部修改。技能缺变量时保留占位符原文，部署计划给出非阻断提醒。用 `hsync device set KEY 值` 补齐后重新预览。变量会渲染到原生文件中，不要用来保存凭证。
 
-`hsync compose instructions [--json]` shows every enabled tool's global output and bound project outputs, deduplicating shared files. `hsync compose skill ID [--json]` shows skill file categories. Text output includes a 40-character bar, legend, and byte counts. JSON reports UTF-8 bytes, variables separately, and ordered instruction segments that reconstruct the planned file, including user text outside managed blocks. Instruction `pending` compares source output with disk; `error` marks incomplete or blocked previews. Skill composition reports missing variables as an error. These read-only queries never read credential contents and do not prove session loading. See the [CLI/API contract](docs/cli.md#内容组成只读).
+`hsync compose instructions [--json]` 查看全部已启用工具的全局指令和已绑定项目输出，共用文件只列一次；`hsync compose skill ID [--json]` 查看技能文件类别。文本输出含 40 字符组成条、图例和字节数。JSON 单独统计变量的 UTF-8 字节，按顺序拼接指令片段可还原计划全文，包含管理区块外的用户文字。`pending` 表示源计算结果与磁盘不同，`error` 标明指令预览仍有阻碍；技能组成保留未解析的占位符。这些只读查询不读取凭证内容，也不证明会话已加载。详见 [CLI/API 契约](docs/cli.md#内容组成只读)。
 
-## Sync
+## 同步
 
-Connect your own private, dedicated Git repository. Credentials come from your existing `gh` login, SSH setup, or system Git credential helper. GitHub HTTPS commands temporarily use `gh auth git-credential` without changing global Git configuration. HarnessSync does not accept sync login tokens; authentication stays with these local tools. Selected skill packages, including credential files, are synchronized to your private repository, which must remain private. Never put credential values in instruction text or URLs. Run `hsync sync check` first, then check your chosen URL or creation option before setup. If login is needed, run `gh auth login` yourself in a terminal and follow the browser authorization flow (in Claude Code, use `! gh auth login`).
+连接自己拥有的私有专用 Git 仓库。凭证来自本机已有的 gh 登录、SSH 或系统 Git 凭证助手。GitHub HTTPS 命令临时借用 `gh auth git-credential`，不改全局 Git 配置。HarnessSync 不接收同步登录 token，认证留给本机工具。用户选择的技能配置包含密钥文件时也会进入私有仓库，仓库必须保持私有；不要把凭证写进指令正文或 URL。先运行 `hsync sync check`，再按选用的 URL 或创建选项检查后连接。需要登录时，由你本人在终端运行 `gh auth login` 并按浏览器提示授权（Claude Code 中可用 `! gh auth login`）。
 
 ```sh
 hsync sync check --url git@github.com:USER/config.git
@@ -134,15 +143,15 @@ hsync sync status --json
 hsync sync now --json
 ```
 
-Alternatively, `hsync sync setup --create` creates a private GitHub repository using an installed, authenticated `gh`. On another device, connect the same URL before or after onboarding; onboarding asks whether this is your first device and compares local skills with the shared library. Entries merge by object, and same-named entries with identical content on two devices become one automatically. When content differs, `hsync sync conflicts` lists each conflict with diffs and folders under `~/.harness-sync/conflicts/<id>/` (`local/`, `remote/`, `merged/`). Choose `hsync sync resolve ENTRY_ID --keep local|remote|both`, or let an Agent combine them: the listing includes a prompt that makes it explain the differences and get your agreement before writing `merged/` and running `--keep merged`. Unresolved conflicts block pushing and automatic deployment.
+也可以用 `hsync sync setup --create`，通过已安装并登录的 `gh` 创建私有 GitHub 仓库。新设备在初始化之前或之后连接同一 URL 都可以；初始化会先问这是不是你的第一台设备，再把本机技能和共享库逐个比较。源配置按对象合并，两台设备上同名且内容相同的条目自动合成一份。内容不同时，`hsync sync conflicts` 列出每个冲突的差异，文件放在 `~/.harness-sync/conflicts/<id>/`（`local/`、`remote/`、`merged/`）。可以用 `hsync sync resolve ENTRY_ID --keep local|remote|both` 选择，也可以交给 Agent 合并：列表里附带的提示词要求它先说明差异、得到你同意，才写入 `merged/` 并执行 `--keep merged`。未解决冲突阻止推送和自动部署。
 
-Every CLI command attaches `reminders` (sync conflicts, paused deployments, skill updates, sync failures) so an Agent that calls `hsync` learns about them; turn this off with `hsync config set notices.cli false`.
+每个 CLI 命令都会附带 `reminders`（同步冲突、暂停的部署、技能更新、同步失败），调用 `hsync` 的 Agent 因此能及时知道；用 `hsync config set notices.cli false` 关闭。
 
-After setup, automatic sync defaults to pushing after 120 seconds without edits and pulling every 10 minutes. It runs while `hsync open`, `hsync serve`, or `hsync sync watch` is running. Pulled changes can deploy automatically when `deploy.auto` is enabled and the entire plan is clean. Device paths, variables, snapshots, local plugins, and settings do not sync.
+连接成功后，自动同步默认在停止编辑 120 秒后推送，每 10 分钟拉取一次；需要 `hsync open`、`hsync serve` 或 `hsync sync watch` 持续运行。开启 `deploy.auto` 且完整计划干净时，拉取的变更可自动部署。设备路径、变量、快照、本机插件和设置不参与同步。
 
-Package `.gitignore`, `.gitattributes`, and other ordinary `.git*` files are stored as data. Commits, sync, history comparisons, and source restore preserve raw bytes (including CRLF and binary files) and executable bits. Only device-local `sync ignore` rules restrict uploads; package `.git` internals remain excluded during import. The next commit automatically includes previously omitted files still present in the worktree. Bytes already lost and never committed cannot be recovered from old history. Files are saved in batches, avoiding a Git process per file.
+技能包中的 `.gitignore`、`.gitattributes` 和其他 `.git*` 普通文件按包数据保存，不作为配置库的忽略或转换规则；文件原始字节（含 CRLF、二进制）和执行位参与提交、同步、历史比较与源恢复。只有本机 `sync ignore` 规则控制上传范围，包内 `.git` 仍按原有导入规则排除。下次提交会自动补收工作区仍存在、旧版本漏提交的文件；已丢失且从未进入提交的内容无法从旧历史恢复。技能文件批量保存，避免逐文件启动 Git 进程。
 
-Git skills are a separate source mechanism:
+Git 技能是另一种来源机制：
 
 ```sh
 hsync skills install owner/repo --skill research
@@ -152,27 +161,27 @@ hsync skills update research
 hsync skills detach research
 ```
 
-Replace the repository and skill name. Background checks report available updates; installation requires an explicit update. Local library edits block an upstream update unless explicitly overridden. Install/update source edits follow the automatic deployment setting.
+替换仓库和技能名。后台检查只提示更新，安装需显式执行 update。本地库版本有修改时拒绝上游更新，除非显式覆盖。安装和更新源库后遵循自动部署设置。
 
-## Adding a tool
+## 添加工具
 
-Add a JSON manifest in the directory printed by `hsync harness dir`, validate it with `hsync harness validate /absolute/tool.json`, then inspect a deployment plan. Built-in contributions go in `harnesses/`. Follow the [plugin guide](docs/plugins.md) for fields, discovery evidence, testing, and shared-directory behavior.
+在 `hsync harness dir` 打印的目录中放入 JSON 清单，用 `hsync harness validate /absolute/tool.json` 校验，再检查部署计划。内置工具贡献放入 `harnesses/`。字段、发现证据、测试和共享目录行为见[插件指南](docs/plugins.md)。
 
-Each device can turn tools on or off in Settings. A disabled tool keeps its files as they are.
+每台设备都可以在「设置」里单独开关工具。停用的工具已有文件保持原样。
 
-![HarnessSync settings: automatic deployment, login startup and per-device tools](docs/images/settings.png)
+![HarnessSync 设置：自动写入、登录后运行与按设备开关工具](docs/images/settings.png)
 
-## Safety model
+## 安全模型
 
-- Read native configuration before planning. Check ownership and fingerprints before writing or removing managed content.
-- Reject malformed instruction markers, stale plans, and writes through symlinks. Explicit adoption/replacement can replace a final symlink with a copy, preserving the original link in a snapshot; it never writes through the link.
-- Keep deployment snapshots locally. Refuse rollback that would overwrite newer edits.
-- Serve HTTP only on `127.0.0.1`, with Host, Origin, and session-token checks.
-- Report filesystem state honestly. `doctor` and the GUI cannot prove a running tool session loaded the deployed configuration.
+- 规划前读取原生配置；写入或撤下托管内容前核对所有权与指纹。
+- 拒绝损坏的指令标记、过期计划和通过符号链接写入。显式接管或覆盖可把末级链接替换为副本，快照保留原链接；始终不写入链接目标。
+- 快照只存本机；回滚拒绝覆盖后续新修改。
+- HTTP 仅监听 `127.0.0.1`，检查 Host、Origin 和会话 token。
+- 如实报告文件系统状态；`doctor` 和 GUI 不能证明运行中的工具会话已加载部署结果。
 
-Current limits: one local directory per project per device; unique skill names across the library; no desktop installer. Scans cover known locations, not all configuration a tool might load. Natural-language instruction conflicts require human or AI review.
+当前限制：每个项目每台设备只绑定一个目录；整个库中的技能名必须唯一；没有桌面安装包。扫描覆盖已知位置，不代表工具可能加载的全部配置。自然语言指令冲突需人工或 AI 审查。
 
-## Development
+## 开发
 
 ```sh
 git clone https://github.com/RayMorTwinkle/HarnessSync.git
@@ -181,7 +190,7 @@ npm ci
 npm run build
 ```
 
-Use a fake HOME and store for local CLI/GUI work:
+本地 CLI/GUI 开发使用临时 HOME 和配置库：
 
 ```sh
 sandbox=$(mktemp -d)
@@ -190,26 +199,26 @@ env -u DSH_HOME -u DSH_AGENTS_HOME -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u XDG_CON
   HOME="$sandbox/home" HARNESS_SYNC_HOME="$sandbox/store" npm run dev
 ```
 
-Ctrl+C stops the development server. Use the same isolation for CLI commands (`npm run cli -- plan --json`), built CLI/GUI (`npm start`), and tests. `npm run typecheck` checks types; `npm test` runs the full suite; `npm run build` checks types and builds CLI/UI. See [CONTRIBUTING.md](CONTRIBUTING.md) for targeted tests and the reusable sandbox helper. Core changes require both the full suite and build.
+Ctrl+C 停止开发服务。CLI（`npm run cli -- plan --json`）、构建后的 CLI/GUI（`npm start`）和测试也应使用相同隔离。`npm run typecheck` 检查类型；`npm test` 运行完整测试；`npm run build` 检查类型并构建 CLI/UI。定向测试和可复用的沙箱函数见 [CONTRIBUTING.md](CONTRIBUTING.md)。核心改动必须通过完整测试与构建。
 
-## Contributing
+## 参与贡献
 
-Start with [CONTRIBUTING.md](CONTRIBUTING.md) and the [architecture map](docs/architecture.md). Tool plugins, documentation, internationalization, tests, and UI improvements are welcome. Detailed operational docs are currently mostly Chinese.
+从[贡献指南](CONTRIBUTING.md)和[架构地图](docs/architecture.md)开始。欢迎工具插件、文档、国际化、测试和 UI 改进。目前详细操作文档多数为中文。
 
-Independent implementation, informed by [Skills Manager](https://github.com/xingkongliang/skills-manager).
+独立实现，参考 [Skills Manager](https://github.com/xingkongliang/skills-manager) 的思路。
 
-License: [MIT](LICENSE).
+许可证：[MIT](LICENSE)。
 
-### Onboarding scans and local sources
+### 初始化扫描与本机来源
 
-`onboard scan` (also used by prepare and the UI) starts a device-local session that pauses automatic deployment for up to seven days without changing `deploy.auto`. Status and doctor expose `onboarding` and a readable `needs-review` blocker. A successful full manual `apply --plan <id>`, including a no-op apply, finishes the session; bootstrap and failed applies do not. `onboard cancel <session-id>` abandons it while retaining source edits and staged replacements. Cancellation or expiry restores the original automatic deployment policy for subsequent triggers. A new scan supersedes the previous session.
+`onboard scan`（含 prepare 和界面扫描）启动设备本地初始化会话，7 天内暂停自动部署，不修改 `deploy.auto`。`status` / `doctor` 的 `onboarding` 返回会话 ID、开始和失效时间，`autoDeploy` 显示 `needs-review` 及“初始化进行中：确认部署预览后再写入”。成功的完整手动 `apply --plan <id>`（包括无变更计划）结束会话；失败或仅部署管理技能不会结束。放弃用 `onboard cancel <会话ID>`，源配置与替换登记保留；取消或到期后恢复原设置，后续正常触发自动部署。重复扫描以最新会话为准，不接受旧 ID 取消。无需 Agent 手动关闭再打开自动部署。
 
-Receipted deployment locations are not independent development sources. Apply clears local origins for adopted or removed locations; current receipts and successful deployment snapshots let older installations ignore obsolete origins automatically. Links to independent development directories retain update detection.
+HarnessSync 收据管理的部署位置不是独立源目录；成功 apply 清理被接管或移除位置的本机来源及指纹。旧安装通过当前收据及已成功部署快照识别并忽略遗留记录，无需手工修 JSON。链接指向外部开发目录时保留真实来源，仍检测更新；不按目录名称猜测所有权。
 
-Scans classify product-installed skills as `origin=bundled`, with `originReason` and `bundledBy: {name,path}`. Application bundles, common installation directories, node_modules and linked software projects are recognized; project traversal stays within HOME and stops after eight ancestors. Pure skill collections remain user skills. `summary.bundledSkills` counts these advisory exclusions: do not import or upload by default, but honor an explicit user request to import them.
+`origin=bundled` 表示产品附带，附 `originReason` 与 `bundledBy: {name,path}`；`inventory.summary.bundledSkills` 单独计数，也计入 `excludedSkills`。识别应用包、常见安装目录、node_modules 和链接指向的软件项目；向上查找项目不越过 HOME，最多 8 层，纯技能集合保留用户分类。默认建议不导入、不上传，说明会随产品更新；用户坚持时照常 `skills import`，并不禁止导入。
 
-`inventory.skills[].credentials` and `skills show <id>.credentials` list suspected credential files by relative filename, without displaying values; `summary.credentialSkills` counts affected physical packages. All selected configuration, including secret files, follows the user's private-repository sync choice. Keep the repository private; exclude unwanted uploads with `hsync sync ignore <skill>/<file>` (provided by the sync-ignore feature). Never request tokens from the user or put values in instruction text or URLs.
+扫描的 `inventory.skills[].credentials` 和 `skills show <id>` 的 `credentials` 列出技能内疑似凭证文件的相对路径，仅按文件名识别，不展示值；`inventory.summary.credentialSkills` 按真实技能目录计数。用户选择全部配置（含密钥文件）同步到私有仓库，仓库必须保持私有。不想上传的文件可用 `hsync sync ignore add <技能名>/<文件>`（由同步忽略功能提供）。不得向用户索要 token、密码或私钥，不要把凭证写进指令正文或 URL。
 
-`onboard repository` returns `absent` for GitHub's explicit repository-resolution failure: the default name is absent, but a differently named repository may exist. Network and permission errors remain `unknown`.
+`onboard repository` 的 `absent` 表示默认名称仓库不存在，仍须确认是否用了其他名字；网络或权限错误保留 `unknown`。
 
-Upload-only exclusions are device-local: `hsync sync ignore add anysearch/.env genbox`, `sync ignore remove anysearch/.env`, and `sync ignore list --json`. Skill names exclude whole packages; paths support quoted `*`, `**`, and `?` globs; `rule:<ID or title>` excludes instructions. Local storage and deployment remain intact. Already uploaded versions remain on the remote; ignored local changes are not sent or overwritten by pulls. Removing a rule resumes normal merging. Uploads use separate history after enabling exclusions, but existing remote history is not erased. See [ignore semantics, API and explicit remote removal](docs/cli.md#本机上传忽略规则). `sync check` fails for public repositories with unignored credentials, warns when visibility is unknown, and reports the count for private repositories.
+本机上传忽略：`hsync sync ignore add anysearch/.env genbox`，取消用 `sync ignore remove anysearch/.env`，查看用 `sync ignore list --json`。支持整技能、文件路径、加引号的 `*`/`**`/`?` 通配符及 `rule:<ID或标题>`。规则只属于当前设备，不影响本机保存和部署；已上传版本保留远端，忽略后的本机变化不上传，拉取不覆盖本机忽略文件。取消后恢复正常合并。启用忽略后上传使用独立历史，既有远端历史不清除。[完整语义、API 与显式远端移除](docs/cli.md#本机上传忽略规则)。`sync check` 对含未忽略凭证的公开仓库报失败，可见性未知报警告，私有仓库显示文件数量。
